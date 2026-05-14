@@ -1,7 +1,7 @@
 // src/viz/algorithm/mod.rs
 
 use bevy::prelude::*;
-use crate::agent::brain::Brain;
+use crate::agent::brain::AgentBrain; // 1. Import AgentBrain instead of Brain
 use crate::agent::components::GridPos;
 use crate::viz::grid_offset::GridOffset;
 use crate::viz::menu::components::HideViz;
@@ -10,11 +10,13 @@ use crate::config;
 pub fn draw_agent_debug(
     mut gizmos: Gizmos,
     offset: Res<GridOffset>,
-    query: Query<(&GridPos, &Brain), Without<HideViz>>,
+    query: Query<(&GridPos, &AgentBrain), Without<HideViz>>, // 2. Query for AgentBrain
 ) {
     let half = config::TILE_SIZE * 0.45;
 
     for (pos, brain) in query.iter() {
+        // Note: If you didn't delegate this method on AgentBrain,
+        // you may need to call brain.0.debug_draw() instead.
         if let Some(drawer) = brain.debug_draw() {
 
             // Render Rectangles (Open/Closed sets, Obstacles)

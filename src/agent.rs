@@ -4,6 +4,7 @@ pub mod action;
 pub mod brain;
 pub mod combat;
 pub mod components;
+pub mod composition;
 pub mod debug;
 pub mod observation;
 pub mod planning;

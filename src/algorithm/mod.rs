@@ -1,4 +1,5 @@
 // src/algorithm/mod.rs
 
+pub mod behavior_planning;
 pub mod path_planning;
-// pub mod behavior_planning; // Uncomment if you have files here
+pub mod rl;

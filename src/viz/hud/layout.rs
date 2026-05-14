@@ -5,7 +5,7 @@ use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOO
 use crate::viz::core_ui::button::{spawn_icon_button, spawn_labeled_button};
 use crate::viz::core_ui::panel::spawn_button_group;
 use crate::viz::core_ui::text::{spawn_label, spawn_marked_label};
-use super::components::TickLabelMarker;
+use super::components::{TickLabelMarker, TimeLabelMarker, TeamScoreMarker};
 use crate::viz::menu::components::{
     HamburgerButton, ThemeToggleButton,
     SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton,
@@ -55,20 +55,45 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
             spawn_labeled_button(left, mode, theme_text, ThemeColor::ButtonIdle, ThemeColor::TextPrimary, ThemeToggleButton);
         });
 
-        // ── Center: Speed Controls ────────────────────────────────────────────
-        spawn_button_group(top_bar, mode, |center| {
-            spawn_icon_button(center, mode, "-", SpeedDecreaseButton);
-            spawn_speed_label(center, mode);
-            spawn_icon_button(center, mode, "+", SpeedIncreaseButton);
+        // ── Center: Scores & Time ─────────────────────────────────────────────
+        top_bar.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items:    AlignItems::Center,
+            column_gap:     Val::Px(32.0),
+            ..default()
+        }).with_children(|center| {
+            // Team 0 Score
+            spawn_marked_label(center, "Team 0: 0", ThemeColor::TextPrimary.resolve(mode), SIZE_LG, TeamScoreMarker(0));
+
+            // Time Remaining
+            center.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items:    AlignItems::Center,
+                column_gap:     Val::Px(6.0),
+                ..default()
+            }).with_children(|time_box| {
+                spawn_label(time_box, "TIME", ThemeColor::TextDim.resolve(mode), SIZE_SM);
+                spawn_marked_label(time_box, "0:00", ThemeColor::TextPrimary.resolve(mode), SIZE_LG, TimeLabelMarker);
+            });
+
+            // Team 1 Score
+            spawn_marked_label(center, "Team 1: 0", ThemeColor::TextPrimary.resolve(mode), SIZE_LG, TeamScoreMarker(1));
         });
 
-        // ── Right: Pause & Tick Counter ───────────────────────────────────────
+        // ── Right: Speed Controls, Pause & Tick Counter ───────────────────────
         top_bar.spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items:    AlignItems::Center,
             column_gap:     Val::Px(16.0),
             ..default()
         }).with_children(|right| {
+            // Speed Controls
+            spawn_button_group(right, mode, |grp| {
+                spawn_icon_button(grp, mode, "-", SpeedDecreaseButton);
+                spawn_speed_label(grp, mode);
+                spawn_icon_button(grp, mode, "+", SpeedIncreaseButton);
+            });
+
             spawn_labeled_button(right, mode, "Running", ThemeColor::Success, ThemeColor::SuccessText, PauseButtonMarker);
 
             right.spawn(Node {

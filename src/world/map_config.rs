@@ -4,6 +4,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use crate::item::spawner::ItemSpawnConfig;
 use crate::item::ItemKind;
+use crate::agent::planning::strategy::StrategyKind;
+use crate::agent::planning::planner::PlannerKind;
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind { Free, Obstacle, Base, BaseRed, BaseBlue }
@@ -15,16 +17,14 @@ pub struct FixedTile {
     pub tile: TileKind,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum AgentKind { Random, AStar, DStarLite }
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct AgentSpawn {
-    pub x:    i32,
-    pub y:    i32,
-    pub kind: AgentKind,
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub struct AgentConfig {
+    pub x:        i32,
+    pub y:        i32,
+    pub strategy: StrategyKind,
+    pub planner:  PlannerKind,
     #[serde(default)]
-    pub team: Option<u8>,
+    pub team:     Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -37,14 +37,11 @@ pub struct ObstacleCluster {
     pub size:  (usize, usize),
 }
 
-/// RON-serializable spawn config — mirrors ItemSpawnConfig but with
-/// a string kind so ron doesn't need to know about ItemKind directly.
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemSpawnerRon {
     pub kind:           String,
     pub interval_ticks: u32,
     pub max_on_map:     usize,
-    /// Initial count placed at match start.
     #[serde(default)]
     pub initial:        usize,
 }
@@ -55,11 +52,7 @@ impl ItemSpawnerRon {
             "Gold" => ItemKind::Gold,
             _      => return None,
         };
-        Some(ItemSpawnConfig {
-            kind,
-            interval_ticks: self.interval_ticks,
-            max_on_map:     self.max_on_map,
-        })
+        Some(ItemSpawnConfig { kind, interval_ticks: self.interval_ticks, max_on_map: self.max_on_map })
     }
 }
 
@@ -70,7 +63,7 @@ pub struct MapConfig {
 
     pub item_spawners:     Vec<ItemSpawnerRon>,
     pub fixed:             Vec<FixedTile>,
-    pub agents:            Vec<AgentSpawn>,
+    pub agents:            Vec<AgentConfig>,
     pub obstacle_clusters: Vec<ObstacleCluster>,
 }
 

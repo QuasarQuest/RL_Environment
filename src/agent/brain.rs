@@ -1,36 +1,30 @@
 // src/agent/brain.rs
 //
-// The Agent trait — the single boundary every algorithm must implement.
-// No Grid or rendering knowledge in here.
+// Two things only:
+//   AgentBehavior  — the trait every agent must implement
+//   AgentBrain     — the Bevy ECS Component (one Box<dyn AgentBehavior>)
+//
+// Composition logic (Brain<S,P>) lives in composition.rs.
+// Neither strategies nor planners are imported here.
 
 use bevy::prelude::Component;
-use super::action::Action;
-use super::observation::Observation;
-use super::debug::DebugDraw; // <-- Import the new trait
+use crate::agent::action::Action;
+use crate::agent::debug::DebugDraw;
+use crate::agent::observation::Observation;
 
-pub trait Agent: Send + Sync {
+pub trait AgentBehavior: Send + Sync {
     fn name(&self) -> &str;
-    fn act(&mut self, obs: &Observation<'_>) -> Action;
-
-    /// Expose internal algorithm state for debug overlays.
-    /// Default: no debug info.
-    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> { None } // <-- Clean boundary
-
+    fn act(&mut self, obs: &Observation) -> Action;
+    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> { None }
     fn reset(&mut self) {}
 }
 
 #[derive(Component)]
-pub struct Brain(pub Box<dyn Agent>);
+pub struct AgentBrain(pub Box<dyn AgentBehavior>);
 
-impl Brain {
-    pub fn new(agent: impl Agent + 'static) -> Self { Self(Box::new(agent)) }
-    pub fn new_boxed(agent: Box<dyn Agent>) -> Self { Self(agent) }
-
-    pub fn act(&mut self, obs: &Observation<'_>) -> Action { self.0.act(obs) }
-    pub fn name(&self) -> &str { self.0.name() }
-
-    // Pass the trait object through
+impl AgentBrain {
+    pub fn act(&mut self, obs: &Observation) -> Action     { self.0.act(obs) }
+    pub fn name(&self) -> &str                             { self.0.name() }
     pub fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> { self.0.debug_draw() }
-
-    pub fn reset(&mut self) { self.0.reset() }
+    pub fn reset(&mut self)                                { self.0.reset() }
 }

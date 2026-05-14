@@ -1,33 +1,32 @@
 // src/agent/registry.rs
-//
-// Maps AgentKind → Box<dyn Agent>.
-// Adding a new agent = add one arm here. Nothing else changes.
 
-use crate::world::map_config::AgentKind;
+use bevy::prelude::Color;
 use crate::team::Team;
-use super::brain::Agent;
-use super::planning::random_agent::RandomAgent;
-use super::planning::path_planning::astar_agent::AStarAgent;
-use super::planning::path_planning::dstar_agent::DStarAgent;
+use crate::world::map_config::AgentConfig;
+use super::composition::Brain;
+use super::brain::AgentBehavior;
+use super::planning::planner::{AStarPlanner, DStarPlanner, NoPlanner, PlannerKind};
+use super::planning::strategy::{BtStrategy, FsmStrategy, RandomStrategy, StrategyKind};
 
-pub fn agent_color(kind: AgentKind, team: Team) -> bevy::prelude::Color {
-    // Team colour takes priority when teams are active.
-    // Falls back to algorithm colour for solo/no-team scenarios.
-    team.color()
-}
-
-pub fn make_brain(kind: AgentKind) -> Box<dyn Agent> {
-    match kind {
-        AgentKind::Random    => Box::new(RandomAgent),
-        AgentKind::AStar     => Box::new(AStarAgent::new()),
-        AgentKind::DStarLite => Box::new(DStarAgent::new()),
+pub fn make_agent(cfg: &AgentConfig) -> Box<dyn AgentBehavior> {
+    match (cfg.strategy, cfg.planner) {
+        (StrategyKind::Fsm,          PlannerKind::AStar)     =>
+            Box::new(Brain::new(FsmStrategy::new(),  AStarPlanner::new())),
+        (StrategyKind::Fsm,          PlannerKind::DStarLite) =>
+            Box::new(Brain::new(FsmStrategy::new(),  DStarPlanner::new())),
+        (StrategyKind::BehaviorTree, PlannerKind::AStar)     =>
+            Box::new(Brain::new(BtStrategy::new(),   AStarPlanner::new())),
+        (StrategyKind::BehaviorTree, PlannerKind::DStarLite) =>
+            Box::new(Brain::new(BtStrategy::new(),   DStarPlanner::new())),
+        (StrategyKind::Random,       _)                      =>
+            Box::new(Brain::new(RandomStrategy,      NoPlanner)),
+        (_,                          PlannerKind::None)      =>
+            Box::new(Brain::new(FsmStrategy::new(),  NoPlanner)),
     }
 }
 
-pub fn agent_name_prefix(kind: AgentKind) -> &'static str {
-    match kind {
-        AgentKind::Random    => "Random",
-        AgentKind::AStar     => "A*",
-        AgentKind::DStarLite => "D* Lite",
-    }
+pub fn agent_color(_cfg: &AgentConfig, team: Team) -> Color { team.color() }
+
+pub fn agent_label(cfg: &AgentConfig, id: usize, team: Team) -> String {
+    format!("{} {:?}+{:?} #{id}", team.name(), cfg.strategy, cfg.planner)
 }
