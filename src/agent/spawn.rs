@@ -3,10 +3,10 @@
 use bevy::prelude::*;
 use crate::config;
 use crate::world::map_config::MapConfig;
+use crate::team::Team;
 use super::brain::Brain;
 use super::components::{AgentLabel, GoldCarried, GridPos, Health, Score};
 use super::systems::PendingAction;
-use super::team::Team;
 use super::registry::{agent_color, agent_name_prefix, make_brain};
 
 #[derive(Bundle)]

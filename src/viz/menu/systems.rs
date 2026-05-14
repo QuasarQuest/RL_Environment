@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use crate::sim::config::{SimConfig, AVAILABLE_SPEEDS};
 use crate::sim::timer::TickTimer;
-use crate::viz::core_ui::theme::{ThemeMode, ThemeColor, UiRoot};
+use crate::style::{ThemeMode, ThemeColor, UiRoot};  // ← was crate::viz::core_ui::theme
 use super::components::*;
 
 pub fn handle_hamburger_button(
@@ -127,9 +127,9 @@ pub fn update_button_styles(
         Option<&PauseButtonMarker>,
         Option<&HamburgerButton>,
     ), (Changed<Interaction>, With<Button>)>,
-    cfg:        Res<SimConfig>,
-    menu:       Res<MenuState>,
-    theme:      Res<ThemeMode>,
+    cfg:   Res<SimConfig>,
+    menu:  Res<MenuState>,
+    theme: Res<ThemeMode>,
 ) {
     let idle    = ThemeColor::ButtonIdle.resolve(*theme);
     let hover   = ThemeColor::ButtonHover.resolve(*theme);

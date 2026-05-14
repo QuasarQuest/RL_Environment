@@ -19,6 +19,9 @@ pub const MIN_TICKS_PER_SECOND:     f32 =  1.0;
 pub const MAX_TICKS_PER_SECOND:     f32 = 60.0;
 pub const SPEED_STEP:               f32 =  5.0;
 
+// ── Match ─────────────────────────────────────────────────────────────────────
+pub const MATCH_DURATION_SECS: f32 = 90.0;  // 1:30
+
 // ── Agent ────────────────────────────────────────────────────────────────────
 pub const AGENT_START_HEALTH: u32 = 100;
 pub const AGENT_MAX_GOLD:     u32 =   5;

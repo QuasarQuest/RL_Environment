@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
-use super::theme::{ThemeColor, ThemeMode, SIZE_MD, SIZE_XL};
+use crate::style::{ThemeColor, ThemeMode, SIZE_MD, SIZE_XL};
 
 pub fn spawn_labeled_button<M: Component>(
     parent: &mut ChildSpawnerCommands,

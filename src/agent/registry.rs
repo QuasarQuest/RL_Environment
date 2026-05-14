@@ -4,11 +4,11 @@
 // Adding a new agent = add one arm here. Nothing else changes.
 
 use crate::world::map_config::AgentKind;
+use crate::team::Team;
 use super::brain::Agent;
 use super::planning::random_agent::RandomAgent;
 use super::planning::path_planning::astar_agent::AStarAgent;
 use super::planning::path_planning::dstar_agent::DStarAgent;
-use super::team::Team;
 
 pub fn agent_color(kind: AgentKind, team: Team) -> bevy::prelude::Color {
     // Team colour takes priority when teams are active.

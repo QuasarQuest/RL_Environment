@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use crate::agent::components::{AgentLabel, GoldCarried, Score};
-use crate::viz::core_ui::*;
+use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD};
 
 #[derive(Component)] pub struct ScoreboardPanel;
 #[derive(Component)] pub struct ScoreboardContent;
@@ -30,14 +30,14 @@ pub fn build_scoreboard(commands: &mut Commands, mode: ThemeMode) {
         BorderColor::all(ThemeColor::Border.resolve(mode)),
     )).with_children(|panel| {
         panel.spawn(Node {
-            flex_direction:  FlexDirection::Row,
-            padding:         UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(8.0), Val::Px(6.0)),
-            column_gap:      Val::Px(8.0),
+            flex_direction: FlexDirection::Row,
+            padding:        UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(8.0), Val::Px(6.0)),
+            column_gap:     Val::Px(8.0),
             ..default()
         }).with_children(|h| {
-            cell(h, "AGENT", 120.0, ThemeColor::TextDim.resolve(mode), SIZE_SM);
+            cell(h, "AGENT", 120.0, ThemeColor::TextDim.resolve(mode),    SIZE_SM);
             cell(h, "Gold",   32.0, ThemeColor::AccentGold.resolve(mode), SIZE_SM);
-            cell(h, "SCORE",  60.0, ThemeColor::TextDim.resolve(mode), SIZE_SM);
+            cell(h, "SCORE",  60.0, ThemeColor::TextDim.resolve(mode),    SIZE_SM);
         });
 
         panel.spawn((
@@ -48,16 +48,18 @@ pub fn build_scoreboard(commands: &mut Commands, mode: ThemeMode) {
 }
 
 pub fn update_scoreboard(
-    agents:       Query<(&AgentLabel, &GoldCarried, &Score)>,
-    content_q:    Query<Entity, With<ScoreboardContent>>,
-    theme:        Res<ThemeMode>,
-    mut commands: Commands,
+    agents:        Query<(&AgentLabel, &GoldCarried, &Score)>,
+    changed_gold:  Query<(), Changed<GoldCarried>>,
+    changed_score: Query<(), Changed<Score>>,
+    content_q:     Query<Entity, With<ScoreboardContent>>,
+    theme:         Res<ThemeMode>,
+    mut commands:  Commands,
 ) {
+    let data_changed = !changed_gold.is_empty() || !changed_score.is_empty();
+    if !data_changed      { return; }
     if theme.is_changed() { return; }
 
-    // CRITICAL: .single() fixes the compile error
     let Ok(content) = content_q.single() else { return };
-
     commands.entity(content).despawn_related::<Children>();
 
     let mut rows: Vec<_> = agents.iter().collect();
@@ -65,7 +67,11 @@ pub fn update_scoreboard(
 
     commands.entity(content).with_children(|c| {
         for (i, (label, gold, score)) in rows.iter().enumerate() {
-            let bg = if i % 2 == 0 { Color::NONE } else { ThemeColor::SurfaceHighlight.resolve(*theme) };
+            let bg = if i % 2 == 0 {
+                Color::NONE
+            } else {
+                ThemeColor::SurfaceHighlight.resolve(*theme)
+            };
             c.spawn((
                 Node {
                     flex_direction: FlexDirection::Row,
@@ -77,8 +83,8 @@ pub fn update_scoreboard(
                 BackgroundColor(bg),
             )).with_children(|row| {
                 cell(row, &label.0,            120.0, ThemeColor::TextPrimary.resolve(*theme), SIZE_MD);
-                cell(row, &gold.0.to_string(),   32.0, ThemeColor::AccentGold.resolve(*theme),  SIZE_MD);
-                cell(row, &score.0.to_string(),  60.0, ThemeColor::SuccessText.resolve(*theme), SIZE_MD);
+                cell(row, &gold.0.to_string(),  32.0, ThemeColor::AccentGold.resolve(*theme),  SIZE_MD);
+                cell(row, &score.0.to_string(), 60.0, ThemeColor::SuccessText.resolve(*theme), SIZE_MD);
             });
         }
     });

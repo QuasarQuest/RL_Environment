@@ -1,10 +1,10 @@
 // src/viz/menu/layout.rs
 
 use bevy::prelude::*;
-use crate::viz::core_ui::*;
+use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_LG, TOOLBAR_H, DRAWER_W};
+use crate::viz::core_ui::button::spawn_icon_button;
+use crate::viz::core_ui::text::spawn_label;
 use super::components::*;
-
-// Removed local TOOLBAR_H and DRAWER_W definitions here
 
 pub fn build_drawer(commands: &mut Commands, mode: ThemeMode) {
     let bg     = ThemeColor::Background.resolve(mode);
@@ -18,7 +18,7 @@ pub fn build_drawer(commands: &mut Commands, mode: ThemeMode) {
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
-            top:           Val::Px(TOOLBAR_H), // Now using global const
+            top:           Val::Px(TOOLBAR_H),
             left:          Val::Px(0.0),
             width:         Val::Percent(100.0),
             height:        Val::Percent(100.0),
@@ -33,9 +33,9 @@ pub fn build_drawer(commands: &mut Commands, mode: ThemeMode) {
         DrawerPanel,
         Node {
             position_type:  PositionType::Absolute,
-            top:            Val::Px(TOOLBAR_H), // Now using global const
+            top:            Val::Px(TOOLBAR_H),
             left:           Val::Px(0.0),
-            width:          Val::Px(DRAWER_W),  // Now using global const
+            width:          Val::Px(DRAWER_W),
             height:         Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             padding:        UiRect::all(Val::Px(12.0)),

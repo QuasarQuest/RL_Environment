@@ -1,5 +1,6 @@
 // src/algorithm/path_planning/graph_utils.rs
 
+use crate::agent::action::Dir;
 use crate::agent::components::GridPos;
 
 // ── Cost constants ────────────────────────────────────────────────────────────
@@ -22,4 +23,14 @@ pub fn octile(from: GridPos, to: GridPos) -> i32 {
     let dx = (to.x - from.x).abs();
     let dy = (to.y - from.y).abs();
     CARDINAL * (dx + dy) + (DIAGONAL - 2 * CARDINAL) * dx.min(dy)
+}
+
+/// Returns the `Dir` that moves from `from` to `to` in one step, or `None`
+/// if the two positions are not exactly one step apart in any of the 8 directions.
+///
+/// Extracted here so `AStarAgent` and `DStarAgent` share one implementation.
+#[inline]
+pub fn dir_to(from: GridPos, to: GridPos) -> Option<Dir> {
+    let delta = (to.x - from.x, to.y - from.y);
+    Dir::all().iter().find(|d| d.delta() == delta).copied()
 }

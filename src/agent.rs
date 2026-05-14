@@ -10,13 +10,12 @@ pub mod planning;
 pub mod registry;
 pub mod spawn;
 pub mod systems;
-pub mod team;
 
 use bevy::prelude::*;
 use crate::sim::OnSimTick;
+use crate::team::TeamScore;
 use systems::{tick_agents, apply_actions};
 use spawn::spawn_agents;
-use team::TeamScore;
 use combat::{resolve_combat, despawn_dead};
 
 pub struct AgentPlugin;

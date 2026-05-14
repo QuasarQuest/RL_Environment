@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
-use super::theme::{ThemeColor, ThemeMode, UiRoot}; // Import the new tools!
+use crate::style::{ThemeColor, ThemeMode, UiRoot};
 
 /// Spawns a standardized floating panel at the specified absolute position.
 pub fn spawn_floating_panel(

@@ -1,9 +1,16 @@
 // src/viz/hud/layout.rs
 
 use bevy::prelude::*;
-use crate::viz::core_ui::*;
+use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
+use crate::viz::core_ui::button::{spawn_icon_button, spawn_labeled_button};
+use crate::viz::core_ui::panel::spawn_button_group;
+use crate::viz::core_ui::text::{spawn_label, spawn_marked_label};
 use super::components::TickLabelMarker;
-use crate::viz::menu::components::{HamburgerButton, ThemeToggleButton, SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton, CurrentSpeedLabel, PauseButtonMarker};
+use crate::viz::menu::components::{
+    HamburgerButton, ThemeToggleButton,
+    SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton,
+    CurrentSpeedLabel, PauseButtonMarker,
+};
 
 pub fn spawn_hud(mut commands: Commands, theme: Res<ThemeMode>) {
     build_hud(&mut commands, *theme);
@@ -17,7 +24,7 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
         UiRoot,
         Node {
             width:           Val::Percent(100.0),
-            height:          Val::Px(TOOLBAR_H), // <-- Extracted!
+            height:          Val::Px(TOOLBAR_H),
             position_type:   PositionType::Absolute,
             top:             Val::Px(0.0),
             left:            Val::Px(0.0),
@@ -33,7 +40,7 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
         ZIndex(100),
     )).with_children(|top_bar| {
 
-        // ── Left: Hamburger & Theme Toggle ──────────────────────────────────
+        // ── Left: Hamburger & Theme Toggle ────────────────────────────────────
         top_bar.spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items:    AlignItems::Center,
@@ -41,19 +48,21 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
             ..default()
         }).with_children(|left| {
             spawn_icon_button(left, mode, "=", HamburgerButton);
-
-            let theme_text = match mode { ThemeMode::Dark => "Light", ThemeMode::Light => "Dark" };
+            let theme_text = match mode {
+                ThemeMode::Dark  => "Light",
+                ThemeMode::Light => "Dark",
+            };
             spawn_labeled_button(left, mode, theme_text, ThemeColor::ButtonIdle, ThemeColor::TextPrimary, ThemeToggleButton);
         });
 
-        // ── Center: Speed Controls ──────────────────────────────────────────
+        // ── Center: Speed Controls ────────────────────────────────────────────
         spawn_button_group(top_bar, mode, |center| {
             spawn_icon_button(center, mode, "-", SpeedDecreaseButton);
             spawn_speed_label(center, mode);
             spawn_icon_button(center, mode, "+", SpeedIncreaseButton);
         });
 
-        // ── Right: Pause & Tick Counter ─────────────────────────────────────
+        // ── Right: Pause & Tick Counter ───────────────────────────────────────
         top_bar.spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items:    AlignItems::Center,

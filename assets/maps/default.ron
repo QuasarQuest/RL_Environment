@@ -3,18 +3,25 @@
     width:  50,
     height: 50,
 
-    random_gold: 20,
+    // ── Item spawners ─────────────────────────────────────────────────────────
+    item_spawners: [
+        ( kind: "Gold", interval_ticks: 30, max_on_map: 25, initial: 10 ),
+        // Future: ( kind: "Health", interval_ticks: 60, max_on_map: 3, initial: 0 ),
+    ],
 
+    // ── Fixed tiles ───────────────────────────────────────────────────────────
     fixed: [
-        ( x: 1,  y: 1,  tile: Base ),
-        ( x: 48, y: 48, tile: Base ),
+        ( x: 1,  y: 1,  tile: BaseRed  ),
+        ( x: 48, y: 48, tile: BaseBlue ),
     ],
 
+    // ── Agents ────────────────────────────────────────────────────────────────
     agents: [
-        ( x: 5,  y: 5,  kind: AStar, team: Some(0) ),  // Red  — bottom-left
-        ( x: 45, y: 45, kind: AStar, team: Some(1) ),  // Blue — top-right
+        ( x: 5,  y: 5,  kind: AStar, team: Some(0) ),
+        ( x: 45, y: 45, kind: AStar, team: Some(1) ),
     ],
 
+    // ── Obstacles ─────────────────────────────────────────────────────────────
     obstacle_clusters: [
         ( kind: Block,   count: 4,  size: (4, 4) ),
         ( kind: Block,   count: 6,  size: (2, 3) ),

@@ -2,9 +2,11 @@
 
 use bevy::prelude::*;
 use serde::Deserialize;
+use crate::item::spawner::ItemSpawnConfig;
+use crate::item::ItemKind;
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum TileKind { Free, Obstacle, Gold, Base }
+pub enum TileKind { Free, Obstacle, Base, BaseRed, BaseBlue }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FixedTile {
@@ -21,7 +23,6 @@ pub struct AgentSpawn {
     pub x:    i32,
     pub y:    i32,
     pub kind: AgentKind,
-    /// Optional team id — defaults to 0 (Red) if absent.
     #[serde(default)]
     pub team: Option<u8>,
 }
@@ -36,11 +37,38 @@ pub struct ObstacleCluster {
     pub size:  (usize, usize),
 }
 
+/// RON-serializable spawn config — mirrors ItemSpawnConfig but with
+/// a string kind so ron doesn't need to know about ItemKind directly.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ItemSpawnerRon {
+    pub kind:           String,
+    pub interval_ticks: u32,
+    pub max_on_map:     usize,
+    /// Initial count placed at match start.
+    #[serde(default)]
+    pub initial:        usize,
+}
+
+impl ItemSpawnerRon {
+    pub fn to_config(&self) -> Option<ItemSpawnConfig> {
+        let kind = match self.kind.as_str() {
+            "Gold" => ItemKind::Gold,
+            _      => return None,
+        };
+        Some(ItemSpawnConfig {
+            kind,
+            interval_ticks: self.interval_ticks,
+            max_on_map:     self.max_on_map,
+        })
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Resource)]
 pub struct MapConfig {
-    pub width:             usize,
-    pub height:            usize,
-    pub random_gold:       usize,
+    pub width:  usize,
+    pub height: usize,
+
+    pub item_spawners:     Vec<ItemSpawnerRon>,
     pub fixed:             Vec<FixedTile>,
     pub agents:            Vec<AgentSpawn>,
     pub obstacle_clusters: Vec<ObstacleCluster>,

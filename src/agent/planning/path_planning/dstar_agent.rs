@@ -5,9 +5,11 @@ use crate::agent::action::{Action, Dir};
 use crate::agent::brain::Agent;
 use crate::agent::components::GridPos;
 use crate::agent::observation::Observation;
-use crate::agent::debug::{DebugDraw, DebugLine, DebugRect}; // <-- Clean imports
+use crate::agent::debug::{DebugDraw, DebugLine, DebugRect};
+use crate::item::ItemKind;
 use crate::world::tile::Tile;
 use crate::algorithm::path_planning::d_star_lite::DStarLite;
+use crate::algorithm::path_planning::graph_utils::dir_to;
 
 pub struct DStarAgent {
     planner:  Option<DStarLite>,
@@ -18,32 +20,28 @@ impl DStarAgent {
     pub fn new() -> Self {
         Self { planner: None, last_pos: None }
     }
-
-    fn direction_to(&self, from: GridPos, to: GridPos) -> Option<Dir> {
-        let dx = to.x - from.x;
-        let dy = to.y - from.y;
-        Dir::all().iter().find(|d| d.delta() == (dx, dy)).copied()
-    }
 }
 
 impl Agent for DStarAgent {
     fn name(&self) -> &str { "D* Lite" }
 
     fn act(&mut self, obs: &Observation<'_>) -> Action {
-        if obs.is_tile(obs.pos, Tile::Gold) && !obs.gold_carried.is_full() {
-            self.reset();
-            return Action::Pickup;
-        }
-        if obs.is_tile(obs.pos, Tile::Base) && !obs.gold_carried.is_empty() {
+        // Drop on own base if carrying gold.
+        let on_own_base = matches!(
+            obs.grid_tile(obs.pos),
+            Some(Tile::Base(t)) if t == obs.team.0
+        );
+        if on_own_base && !obs.gold_carried.is_empty() {
             self.reset();
             return Action::Drop;
         }
 
+        // Replan when no active planner.
         if self.planner.is_none() {
             let target = if !obs.gold_carried.is_full() {
-                obs.nearest(Tile::Gold)
+                obs.nearest_item(ItemKind::Gold)
             } else {
-                obs.nearest(Tile::Base)
+                obs.nearest_own_base()
             };
             if let Some(goal) = target {
                 let mut planner = DStarLite::new(obs.pos, goal);
@@ -61,11 +59,19 @@ impl Agent for DStarAgent {
                 }
             }
 
+            // Invalidate on target consumed — replanner picks next gold.
+            if !obs.gold_carried.is_full() && obs.nearest_item(ItemKind::Gold).is_none() {
+                self.reset();
+                return Action::Wait;
+            }
+
             let mut changed = false;
             for dir in Dir::all() {
                 let (dx, dy) = dir.delta();
-                let check = GridPos::new(obs.pos.x + dx, obs.pos.y + dy);
-                if !obs.is_walkable(check) && !planner.known_obstacles.contains(&check) {
+                let check    = GridPos::new(obs.pos.x + dx, obs.pos.y + dy);
+                if !obs.grid_is_walkable_terrain(check)
+                    && !planner.known_obstacles.contains(&check)
+                {
                     planner.add_obstacle(check);
                     changed = true;
                 }
@@ -73,7 +79,7 @@ impl Agent for DStarAgent {
             if changed { planner.compute_shortest_path(); }
 
             if let Some(next) = planner.get_next_step() {
-                if let Some(dir) = self.direction_to(obs.pos, next) {
+                if let Some(dir) = dir_to(obs.pos, next) {
                     return Action::Move(dir);
                 }
             }
@@ -116,13 +122,12 @@ impl DebugDraw for DStarDebugState {
     }
 
     fn draw_lines(&self, agent_pos: GridPos) -> Vec<DebugLine> {
-        let mut lines = Vec::new();
-        if !self.path.is_empty() {
-            let mut current = agent_pos;
-            for &next in &self.path {
-                lines.push(DebugLine { start: current, end: next, color: Color::srgb(0.85, 0.30, 1.0) });
-                current = next;
-            }
+        if self.path.is_empty() { return Vec::new(); }
+        let mut lines   = Vec::with_capacity(self.path.len());
+        let mut current = agent_pos;
+        for &next in &self.path {
+            lines.push(DebugLine { start: current, end: next, color: Color::srgb(0.85, 0.30, 1.0) });
+            current = next;
         }
         lines
     }
