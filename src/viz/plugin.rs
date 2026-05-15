@@ -8,32 +8,27 @@ use super::tile_renderer::{spawn_tiles, sync_tile_colors};
 use super::agent_renderer::sync_agent_transforms;
 use super::algorithm::draw_agent_debug;
 use super::tooltip::{spawn_tooltip, update_tooltip};
+use super::help_overlay::{spawn_help_overlay, toggle_help_overlay};
 use crate::style::ThemeMode;
-
-use super::menu::components::{DebugVizConfig, MenuState};
-use super::menu::{
-    react_to_ui_changes,
-    handle_hamburger_button,
-    handle_drawer_overlay,
-    handle_theme_toggle_button,
-    handle_pause_button,
-    handle_speed_buttons,
-    update_button_styles,
-    update_speed_label,
-};
+use crate::sim::plugin::{SimSystems, fire_sim_tick};
 
 use super::hud::{
-    spawn_hud, spawn_scoreboard, update_scoreboard, update_tick_label,
+    spawn_hud,
+    spawn_tab_scoreboard, toggle_tab_scoreboard, update_tab_scoreboard,
+    update_tick_label, update_time_label, update_team_scores,
+    handle_speed_buttons, handle_pause_button,
 };
+use super::hud::scoreboard::handle_viz_toggle;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct HudUpdate;
 
 pub struct VizPlugin;
 
 impl Plugin for VizPlugin {
     fn build(&self, app: &mut App) {
         app
-            .init_resource::<DebugVizConfig>()
             .init_resource::<ThemeMode>()
-            .init_resource::<MenuState>()
             .add_systems(PreStartup, init_pan_state)
             .add_systems(Startup, (
                 spawn_camera,
@@ -43,28 +38,32 @@ impl Plugin for VizPlugin {
             ).chain())
             .add_systems(Startup, (
                 spawn_hud,
-                spawn_scoreboard,
+                spawn_tab_scoreboard,
                 spawn_tooltip,
+                spawn_help_overlay,
             ).chain())
+            .configure_sets(Update,
+                            HudUpdate
+                                .after(SimSystems)
+                                .after(fire_sim_tick)
+            )
             .add_systems(Update, (
                 camera_controls,
                 sync_tile_colors,
                 sync_agent_transforms,
                 draw_agent_debug,
-
-                react_to_ui_changes,
-
-                handle_hamburger_button,
-                handle_drawer_overlay,
-                handle_theme_toggle_button,
-                handle_pause_button,
-                handle_speed_buttons,
-                update_button_styles,
-                update_speed_label,
-
-                update_tick_label,
-                update_scoreboard,
                 update_tooltip,
-            ));
+                toggle_tab_scoreboard,
+                update_tab_scoreboard,
+                handle_viz_toggle,
+                handle_speed_buttons,
+                handle_pause_button,
+                toggle_help_overlay,
+            ))
+            .add_systems(Update, (
+                update_tick_label,
+                update_time_label,
+                update_team_scores,
+            ).in_set(HudUpdate));
     }
 }

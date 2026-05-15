@@ -1,10 +1,4 @@
 // src/agent/systems.rs
-//
-// Changes from original:
-//   1. Observation is now owned — built from WorldSnapshot (Arc internals).
-//      No borrowed references escape into Brain::act.
-//   2. apply_actions: count-map replaced with claimed HashSet.
-//   3. AgentBrain replaces Brain as the ECS component name.
 
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -13,32 +7,37 @@ use crate::world::{Grid, tile::Tile};
 use crate::world::coords::GridPos;
 use crate::sim::config::SimConfig;
 use crate::team::{Team, TeamScore};
-use crate::item::Item; // Removed ItemKind
+use crate::item::Item;
 use super::action::Action;
 use super::brain::AgentBrain;
-use super::components::{GoldCarried, Health, Score};
+use super::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score, SpeedBuff};
 use super::observation::{Observation, VisibleAgent, VisibleItem, WorldSnapshot};
 
 #[derive(Component, Default)]
 pub struct PendingAction(pub Option<Action>);
+
+// ── Tick agents ───────────────────────────────────────────────────────────────
 
 pub fn tick_agents(
     grid:      Res<Grid>,
     sim_cfg:   Res<SimConfig>,
     items:     Query<(&GridPos, &Item)>,
     mut query: Query<(
-        &GridPos, &GoldCarried, &Health, &Score, &Team,
+        &GridPos, &GoldCarried, &Hearts, &Ammo, &Score, &Team,
         &mut AgentBrain, &mut PendingAction,
-    )>,
+    ), Without<RespawnIn>>,  // dead agents don't act
 ) {
     let tick = sim_cfg.tick;
 
-    // Build shared snapshot once — O(n) work shared across all agents.
     let occupied: HashSet<GridPos> = query.iter().map(|(pos, ..)| *pos).collect();
 
     let all_agents: Vec<VisibleAgent> = query.iter()
-        .map(|(pos, gold, health, _, team, _, _)| VisibleAgent {
-            pos: *pos, team: *team, health: *health, gold_carried: *gold,
+        .map(|(pos, gold, hearts, ammo, _, team, _, _)| VisibleAgent {
+            pos:          *pos,
+            team:         *team,
+            hearts:       *hearts,
+            ammo:         *ammo,
+            gold_carried: *gold,
         })
         .collect();
 
@@ -47,43 +46,66 @@ pub fn tick_agents(
         .collect();
 
     let snapshot = WorldSnapshot::new(
-        Arc::new((*grid).clone()), // Dereference the Res wrapper, then clone the Grid
+        Arc::new((*grid).clone()),
         occupied,
         all_agents,
         all_items,
     );
 
-    for (pos, gold, health, score, team, mut brain, mut pending) in query.iter_mut() {
+    for (pos, gold, hearts, ammo, score, team, mut brain, mut pending) in query.iter_mut() {
         let obs = Observation::new(
-            *pos, *gold, *health, *score, *team,
+            *pos, *gold, *hearts, *ammo, *score, *team,
             tick, 0.0,
-            snapshot.clone(), // Arc clone — O(1)
+            snapshot.clone(),
         );
         pending.0 = Some(brain.act(&obs));
     }
 }
 
+// ── Tick speed buff ───────────────────────────────────────────────────────────
+
+pub fn tick_speed_buff(
+    mut commands: Commands,
+    mut query:    Query<(Entity, &mut SpeedBuff)>,
+) {
+    for (entity, mut buff) in query.iter_mut() {
+        if buff.0 > 0 {
+            buff.0 -= 1;
+        } else {
+            commands.entity(entity).remove::<SpeedBuff>();
+        }
+    }
+}
+
+// ── Apply actions ─────────────────────────────────────────────────────────────
+
 pub fn apply_actions(
-    grid:           Res<Grid>, // Changed from mut grid: ResMut<Grid>
+    grid:           Res<Grid>,
     mut team_score: ResMut<TeamScore>,
     mut query: Query<(
         Entity, &mut GridPos, &mut GoldCarried,
         &mut Score, &Team, &mut PendingAction,
-    )>,
+        Option<&SpeedBuff>,
+    ), Without<RespawnIn>>,
 ) {
-    // Claimed set: first agent to request a cell wins.
-    // Losers wait; stuck_ticks in strategy triggers replan after 3 ticks.
     let mut claimed: HashSet<GridPos> = HashSet::new();
 
-    for (_, mut pos, mut gold, mut score, team, mut pending) in query.iter_mut() {
+    for (_, mut pos, mut gold, mut score, team, mut pending, speed) in query.iter_mut() {
         let Some(action) = pending.0.take() else { continue };
+
+        // How many move attempts this tick — 2 if speed buffed, 1 otherwise.
+        let moves = if speed.is_some() { 2 } else { 1 };
 
         match action {
             Action::Move(dir) => {
                 let (dx, dy) = dir.delta();
-                let next     = pos.apply_delta(dx, dy);
-                if grid.is_walkable(next.x, next.y) && claimed.insert(next) {
-                    *pos = next;
+                for _ in 0..moves {
+                    let next = pos.apply_delta(dx, dy);
+                    if grid.is_walkable(next.x, next.y) && claimed.insert(next) {
+                        *pos = next;
+                    } else {
+                        break; // blocked — don't try second step
+                    }
                 }
             }
             Action::Drop => {
@@ -100,7 +122,8 @@ pub fn apply_actions(
                         team.name(), delivered, team_score.get(*team));
                 }
             }
-            Action::Pickup | Action::Attack(_) | Action::Wait => {}
+            // Combat resolved in combat::resolve_combat.
+            Action::Attack(_) | Action::RangedAttack(_) | Action::Wait => {}
         }
     }
 }

@@ -5,10 +5,8 @@ pub mod algorithm;
 pub mod camera;
 pub mod core_ui;
 pub mod grid_offset;
-
+pub mod help_overlay;
 pub mod hud;
-
-pub mod menu;
 pub mod plugin;
 pub mod tile_renderer;
 pub mod tooltip;

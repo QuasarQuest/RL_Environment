@@ -4,7 +4,14 @@
     height: 50,
 
     item_spawners: [
-        ( kind: "Gold", interval_ticks: 30, max_on_map: 25, initial: 10 ),
+        // Gold: main resource — PI controller keeps 5–10 on map
+        ( kind: "Gold",       interval_ticks: 50, max_on_map: 10, initial: 8  ),
+        // Health: scarce — only 2–4 on map at once, slow respawn
+        ( kind: "Health",     interval_ticks: 80, max_on_map: 4,  initial: 2  ),
+        // Ammo: moderate — 3–6 on map, decays faster than gold
+        ( kind: "Ammo",       interval_ticks: 60, max_on_map: 6,  initial: 3  ),
+        // SpeedBoost: rare — at most 2 on map at once
+        ( kind: "SpeedBoost", interval_ticks: 100, max_on_map: 2, initial: 1  ),
     ],
 
     fixed: [
@@ -12,11 +19,11 @@
         ( x: 48, y: 48, tile: BaseBlue ),
     ],
 
-    // strategy: Fsm | BehaviorTree | Random
+    // strategy: Fsm | BehaviorTree | Random | Goap
     // planner:  AStar | DStarLite | None
     agents: [
-        ( x: 5,  y: 5,  strategy: Fsm,         planner: AStar,     team: Some(0) ),
-        ( x: 45, y: 45, strategy: BehaviorTree, planner: DStarLite, team: Some(1) ),
+        ( x: 5,  y: 5,  strategy: Fsm,          planner: AStar,     team: Some(0) ),
+        ( x: 45, y: 45, strategy: BehaviorTree,  planner: DStarLite, team: Some(1) ),
     ],
 
     obstacle_clusters: [

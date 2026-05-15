@@ -49,10 +49,17 @@ pub struct ItemSpawnerRon {
 impl ItemSpawnerRon {
     pub fn to_config(&self) -> Option<ItemSpawnConfig> {
         let kind = match self.kind.as_str() {
-            "Gold" => ItemKind::Gold,
-            _      => return None,
+            "Gold"       => ItemKind::Gold,
+            "Health"     => ItemKind::Health,
+            "Ammo"       => ItemKind::Ammo,
+            "SpeedBoost" => ItemKind::SpeedBoost,
+            _            => return None,
         };
-        Some(ItemSpawnConfig { kind, interval_ticks: self.interval_ticks, max_on_map: self.max_on_map })
+        Some(ItemSpawnConfig {
+            kind,
+            interval_ticks: self.interval_ticks,
+            max_on_map:     self.max_on_map,
+        })
     }
 }
 

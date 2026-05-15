@@ -110,6 +110,7 @@ dependencies = [
  "bevy",
  "rand 0.10.1",
  "ron",
+ "rustc-hash 2.1.2",
  "serde",
 ]
 

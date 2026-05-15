@@ -3,25 +3,28 @@
 use bevy::prelude::*;
 use crate::config;
 use crate::team::Team;
-use crate::world::map_config::MapConfig; // 1. Removed AgentConfig from here
+use crate::world::map_config::MapConfig;
+use crate::viz::hud::components::HideViz;
 use super::brain::AgentBrain;
-use super::components::{AgentLabel, GoldCarried, GridPos, Health, Score};
+use super::components::{AgentLabel, Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
 use super::systems::PendingAction;
 use super::registry::{agent_color, agent_label, make_agent};
 
 #[derive(Bundle)]
 pub struct AgentBundle {
-    pub pos:        GridPos,
-    pub health:     Health,
-    pub gold:       GoldCarried,
-    pub score:      Score,
-    pub label:      AgentLabel,
-    pub brain:      AgentBrain,
-    pub team:       Team,
-    pub pending:    PendingAction,
-    pub sprite:     Sprite,
-    pub transform:  Transform,
-    pub visibility: Visibility,
+    pub pos:         GridPos,
+    pub spawn_point: SpawnPoint,
+    pub hearts:      Hearts,
+    pub ammo:        Ammo,
+    pub gold:        GoldCarried,
+    pub score:       Score,
+    pub label:       AgentLabel,
+    pub brain:       AgentBrain,
+    pub team:        Team,
+    pub pending:     PendingAction,
+    pub sprite:      Sprite,
+    pub transform:   Transform,
+    pub visibility:  Visibility,
 }
 
 impl AgentBundle {
@@ -32,9 +35,12 @@ impl AgentBundle {
         team:  Team,
         color: Color,
     ) -> Self {
+        let pos = GridPos::new(x, y);
         Self {
-            pos:        GridPos::new(x, y),
-            health:     Health::default(),
+            pos,
+            spawn_point: SpawnPoint(pos),
+            hearts:     Hearts::default(),
+            ammo:       Ammo::default(),
             gold:       GoldCarried::default(),
             score:      Score::default(),
             label,
@@ -55,11 +61,11 @@ impl AgentBundle {
 pub fn spawn_agents(mut commands: Commands, map: Res<MapConfig>) {
     for (i, cfg) in map.agents.iter().enumerate() {
         let id    = i + 1;
-        // 2. Added 'as u8' to ensure the integer type strictly matches the Team tuple struct
         let team  = Team(cfg.team.unwrap_or(0) as u8);
         let label = AgentLabel::new(agent_label(cfg, id, team));
         let brain = AgentBrain(make_agent(cfg));
         let color = agent_color(cfg, team);
-        commands.spawn(AgentBundle::new(cfg.x, cfg.y, label, brain, team, color));
+        commands.spawn(AgentBundle::new(cfg.x, cfg.y, label, brain, team, color))
+            .insert(HideViz); // debug overlay off by default
     }
 }

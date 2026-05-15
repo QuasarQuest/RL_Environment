@@ -23,5 +23,25 @@ pub const SPEED_STEP:               f32 =  5.0;
 pub const MATCH_DURATION_SECS: f32 = 90.0;  // 1:30
 
 // ── Agent ────────────────────────────────────────────────────────────────────
-pub const AGENT_START_HEALTH: u32 = 100;
-pub const AGENT_MAX_GOLD:     u32 =   5;
+pub const AGENT_MAX_GOLD:      u32 = 5;
+
+// ── Health (hearts) ───────────────────────────────────────────────────────────
+pub const AGENT_MAX_HEARTS:    u8  = 3;
+/// Sim-ticks before a dead agent respawns at base.
+pub const AGENT_RESPAWN_TICKS: u8  = 10;
+
+// ── Combat ───────────────────────────────────────────────────────────────────
+/// Melee: always available, 1-tile range, no ammo cost.
+pub const MELEE_RANGE:         i32 = 1;
+/// Ranged: costs 1 ammo, up to RANGED_RANGE tiles (Chebyshev).
+pub const RANGED_RANGE:        i32 = 5;
+
+// ── Ammo ─────────────────────────────────────────────────────────────────────
+pub const AGENT_START_AMMO:    u8  = 3;
+pub const AGENT_MAX_AMMO:      u8  = 10;
+/// Ammo added per pickup.
+pub const AMMO_PER_PICKUP:     u8  = 3;
+
+// ── Speed boost ───────────────────────────────────────────────────────────────
+/// Sim-ticks the speed buff lasts.
+pub const SPEED_BUFF_TICKS:    u8  = 15;

@@ -1,14 +1,17 @@
 // src/agent/planning/mod.rs
 //
-// planning/ is flat — no behaviour_planning/ or path_planning/ subfolders.
-// Each file is one concept; a subfolder with one file adds navigation cost
-// with no grouping benefit.
+// Flat layout — one concept per file:
 //
-// strategy.rs  — DecisionStrategy trait + FsmStrategy + BtStrategy + RandomStrategy
-// planner.rs   — PathPlanner trait + AStarPlanner + DStarPlanner + NoPlanner
+//   strategy.rs  — DecisionStrategy trait + all strategies
+//                  (FSM, BehaviorTree, Random, GOAP)
+//   planner.rs   — PathPlanner trait + all path planners
+//                  (A*, D* Lite, None)
 //
-// reinforcement_learning/ stays as a subfolder because it will grow into
-// multiple files (policy, replay buffer, environment wrapper, etc.)
+// Adding a strategy: add a struct + impl in strategy.rs, one arm in registry.rs.
+// Adding a planner:  add a struct + impl in planner.rs,  one arm in registry.rs.
+//
+// reinforcement_learning/ is a subfolder because it will grow into multiple
+// files (policy, replay buffer, environment wrapper, trainer).
 
 pub mod planner;
 pub mod strategy;

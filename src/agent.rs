@@ -15,9 +15,9 @@ pub mod systems;
 use bevy::prelude::*;
 use crate::sim::OnSimTick;
 use crate::team::TeamScore;
-use systems::{tick_agents, apply_actions};
+use systems::{tick_agents, apply_actions, tick_speed_buff};
 use spawn::spawn_agents;
-use combat::{resolve_combat, despawn_dead};
+use combat::{resolve_combat, tick_respawn};
 
 pub struct AgentPlugin;
 
@@ -27,10 +27,11 @@ impl Plugin for AgentPlugin {
             .init_resource::<TeamScore>()
             .add_systems(Startup, spawn_agents)
             .add_systems(OnSimTick, (
+                tick_speed_buff,
                 tick_agents,
                 apply_actions,
                 resolve_combat,
-                despawn_dead,
+                tick_respawn,
             ).chain());
     }
 }

@@ -23,8 +23,8 @@ impl Dir {
 
     pub fn opposite(self) -> Dir {
         match self {
-            Dir::N => Dir::S, Dir::S => Dir::N,
-            Dir::E => Dir::W, Dir::W => Dir::E,
+            Dir::N  => Dir::S,  Dir::S  => Dir::N,
+            Dir::E  => Dir::W,  Dir::W  => Dir::E,
             Dir::NE => Dir::SW, Dir::NW => Dir::SE,
             Dir::SE => Dir::NW, Dir::SW => Dir::NE,
         }
@@ -35,13 +35,12 @@ impl Dir {
 pub enum Action {
     /// Move one cell in the given direction.
     Move(Dir),
-    /// Pick up gold from the current cell.
-    Pickup,
-    /// Drop all carried gold on Base tile.
+    /// Drop all carried gold on own Base tile.
     Drop,
-    /// Attack an adjacent agent in the given direction.
-    /// Resolved in combat::resolve_combat, not apply_actions.
+    /// Melee attack — adjacent tile, no ammo cost, always available.
     Attack(Dir),
+    /// Ranged attack — up to RANGED_RANGE tiles along Dir, costs 1 ammo.
+    RangedAttack(Dir),
     /// Do nothing this tick.
     Wait,
 }

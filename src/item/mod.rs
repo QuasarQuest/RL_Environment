@@ -8,47 +8,45 @@ pub use plugin::ItemPlugin;
 
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
-use crate::style::color::GOLD_500;
-
-// ── ItemKind ──────────────────────────────────────────────────────────────────
-// Add variants here as the game grows. Nothing else needs to change.
+use crate::style::color::{GOLD_500, GREEN_400, RED_500, BLUE_500};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Gold,
-    // Health,
-    // SpeedBoost,
-    // Trap,
-    // Ammo,
+    Health,     // restores 1 heart
+    Ammo,       // adds AMMO_PER_PICKUP ammo
+    SpeedBoost, // grants SPEED_BUFF_TICKS ticks of double movement
 }
 
 impl ItemKind {
     pub fn color(self) -> Color {
         match self {
-            ItemKind::Gold => GOLD_500,
+            ItemKind::Gold       => GOLD_500,
+            ItemKind::Health     => RED_500,
+            ItemKind::Ammo       => BLUE_500,
+            ItemKind::SpeedBoost => GREEN_400,
         }
     }
 
-    /// Display label for HUD/tooltip.
     pub fn label(self) -> &'static str {
         match self {
-            ItemKind::Gold => "Gold",
+            ItemKind::Gold       => "Gold",
+            ItemKind::Health     => "Health",
+            ItemKind::Ammo       => "Ammo",
+            ItemKind::SpeedBoost => "Speed",
         }
     }
 
-    /// z-layer for rendering — above tiles (0.0), below agents (1.0).
     pub fn z_layer(self) -> f32 { 0.5 }
 }
 
 // ── Item ECS components ───────────────────────────────────────────────────────
 
-/// Marker component on item entities.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Item {
     pub kind: ItemKind,
 }
 
-/// Bundle spawned for each item entity.
 #[derive(Bundle)]
 pub struct ItemBundle {
     pub item:       Item,

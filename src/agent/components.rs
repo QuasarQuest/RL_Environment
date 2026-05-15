@@ -1,6 +1,4 @@
 // src/agent/components.rs
-// Pure ECS data components — no logic, no Bevy systems.
-// GridPos lives in world/coords.rs — re-exported here for convenience.
 
 use bevy::prelude::*;
 use crate::config;
@@ -22,24 +20,69 @@ impl GoldCarried {
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Score(pub u32);
 
-// ── Health ────────────────────────────────────────────────────────────────────
+// ── Hearts ────────────────────────────────────────────────────────────────────
+// Discrete — one hit removes one heart regardless of damage source.
+// Three hearts max. Zero hearts → dead.
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct Health(pub u32);
+pub struct Hearts(pub u8);
 
-impl Default for Health {
-    fn default() -> Self {
-        Self(config::AGENT_START_HEALTH)
+impl Default for Hearts {
+    fn default() -> Self { Self(config::AGENT_MAX_HEARTS) }
+}
+
+impl Hearts {
+    pub fn is_dead(self)  -> bool { self.0 == 0 }
+    pub fn is_full(self)  -> bool { self.0 >= config::AGENT_MAX_HEARTS }
+    pub fn lose_one(&mut self) { self.0 = self.0.saturating_sub(1); }
+    pub fn gain_one(&mut self) { self.0 = (self.0 + 1).min(config::AGENT_MAX_HEARTS); }
+}
+
+// ── Ammo ──────────────────────────────────────────────────────────────────────
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Ammo(pub u8);
+
+impl Default for Ammo {
+    fn default() -> Self { Self(config::AGENT_START_AMMO) }
+}
+
+impl Ammo {
+    pub fn is_empty(self) -> bool { self.0 == 0 }
+    pub fn is_full(self)  -> bool { self.0 >= config::AGENT_MAX_AMMO }
+    pub fn consume(&mut self) -> bool {
+        if self.0 > 0 { self.0 -= 1; true } else { false }
+    }
+    pub fn add(&mut self, n: u8) {
+        self.0 = (self.0 + n).min(config::AGENT_MAX_AMMO);
     }
 }
 
-// ── Label — human-readable agent name ────────────────────────────────────────
+// ── SpeedBuff ─────────────────────────────────────────────────────────────────
+// Ticks remaining. Absent = no buff. Decremented each sim-tick.
+// While active the agent moves twice per tick.
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SpeedBuff(pub u8);
+
+// ── RespawnIn ─────────────────────────────────────────────────────────────────
+// Added to an agent when it dies. Counts down each sim-tick.
+// When it reaches 0, the agent is teleported to its spawn and revived.
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RespawnIn(pub u8);
+
+// ── SpawnPoint ────────────────────────────────────────────────────────────────
+// Stored at spawn time so respawn knows where to return the agent.
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SpawnPoint(pub GridPos);
+
+// ── Label ─────────────────────────────────────────────────────────────────────
 
 #[derive(Component, Clone, Debug)]
 pub struct AgentLabel(pub String);
 
 impl AgentLabel {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
-    }
+    pub fn new(name: impl Into<String>) -> Self { Self(name.into()) }
 }

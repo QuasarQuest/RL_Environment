@@ -1,22 +1,4 @@
 // src/agent/observation.rs
-//
-// Observation is a fully owned, lifetime-free snapshot of world state
-// for one agent at one tick.
-//
-// Design
-// ──────
-// The previous design borrowed &Grid, &HashSet, &[VisibleAgent] directly,
-// which forced a 'a lifetime onto every method that touched Observation —
-// propagating into Agent::act, DecisionStrategy::decide, PathPlanner::update,
-// and causing "borrowed data escapes" errors throughout the call chain.
-//
-// Solution: pre-compute everything the agent needs into owned / Arc-wrapped
-// collections once per tick in tick_agents. Each agent gets its own
-// Observation clone (cheap — Arc internals, Copy scalars).
-//
-// PathPlanner::set_goal and update no longer receive &Observation.
-// They receive an `impl Fn(GridPos) -> bool` walkability closure instead,
-// fully decoupling the planner from the agent domain.
 
 use std::sync::Arc;
 use std::collections::HashSet;
@@ -25,15 +7,16 @@ use crate::world::coords::GridPos;
 use crate::world::tile::Tile;
 use crate::team::Team;
 use crate::item::ItemKind;
-use super::components::{GoldCarried, Health, Score};
+use super::components::{Ammo, GoldCarried, Hearts, Score};
 
-// ── Visible types (unchanged, still Copy) ────────────────────────────────────
+// ── Visible types ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug)]
 pub struct VisibleAgent {
     pub pos:          GridPos,
     pub team:         Team,
-    pub health:       Health,
+    pub hearts:       Hearts,
+    pub ammo:         Ammo,
     pub gold_carried: GoldCarried,
 }
 
@@ -48,19 +31,19 @@ pub struct VisibleItem {
     pub kind: ItemKind,
 }
 
-// ── WorldSnapshot — shared, cheap to clone ────────────────────────────────────
+// ── WorldSnapshot ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct WorldSnapshot {
-    pub grid:    Arc<Grid>,
-    pub occupied: Arc<HashSet<GridPos>>,   // all agent positions this tick
+    pub grid:     Arc<Grid>,
+    pub occupied: Arc<HashSet<GridPos>>,
     pub agents:   Arc<Vec<VisibleAgent>>,
     pub items:    Arc<Vec<VisibleItem>>,
 }
 
 impl WorldSnapshot {
     pub fn new(
-        grid:    Arc<Grid>,
+        grid:     Arc<Grid>,
         occupied: HashSet<GridPos>,
         agents:   Vec<VisibleAgent>,
         items:    Vec<VisibleItem>,
@@ -83,20 +66,20 @@ impl WorldSnapshot {
     }
 }
 
-// ── Observation — per-agent, per-tick, fully owned ───────────────────────────
+// ── Observation ───────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct Observation {
     // Agent state
     pub pos:          GridPos,
     pub gold_carried: GoldCarried,
-    pub health:       Health,
+    pub hearts:       Hearts,
+    pub ammo:         Ammo,
     pub score:        Score,
     pub team:         Team,
     pub tick:         u64,
     pub reward:       f32,
 
-    // World (shared Arc — clone is O(1))
     world: WorldSnapshot,
 }
 
@@ -104,17 +87,18 @@ impl Observation {
     pub fn new(
         pos:          GridPos,
         gold_carried: GoldCarried,
-        health:       Health,
+        hearts:       Hearts,
+        ammo:         Ammo,
         score:        Score,
         team:         Team,
         tick:         u64,
         reward:       f32,
         world:        WorldSnapshot,
     ) -> Self {
-        Self { pos, gold_carried, health, score, team, tick, reward, world }
+        Self { pos, gold_carried, hearts, ammo, score, team, tick, reward, world }
     }
 
-    // ── Terrain / occupancy ───────────────────────────────────────────────────
+    // ── Terrain ───────────────────────────────────────────────────────────────
 
     pub fn is_walkable(&self, pos: GridPos) -> bool {
         self.world.is_walkable(pos, self.pos)
@@ -124,8 +108,6 @@ impl Observation {
         self.world.is_terrain_walkable(pos)
     }
 
-    /// Returns a closure suitable for PathPlanner::set_goal / update.
-    /// Captures only the Arc<Grid> — no Observation lifetime involved.
     pub fn walkability_fn(&self) -> impl Fn(GridPos) -> bool + '_ {
         let grid = Arc::clone(&self.world.grid);
         move |pos| grid.is_walkable(pos.x, pos.y)
@@ -142,6 +124,10 @@ impl Observation {
             .filter(|i| i.kind == kind)
             .min_by_key(|i| i.pos.dist_sq(self.pos))
             .map(|i| i.pos)
+    }
+
+    pub fn items_of_kind(&self, kind: ItemKind) -> impl Iterator<Item = &VisibleItem> {
+        self.world.items.iter().filter(move |i| i.kind == kind)
     }
 
     // ── Base ──────────────────────────────────────────────────────────────────
@@ -169,4 +155,10 @@ impl Observation {
             .filter(|a| a.is_ally(self.team) && a.pos != self.pos)
             .min_by_key(|a| a.pos.dist_sq(self.pos))
     }
+
+    // ── Convenience predicates ────────────────────────────────────────────────
+
+    pub fn needs_health(&self) -> bool { !self.hearts.is_full() }
+    pub fn needs_ammo(&self)   -> bool { !self.ammo.is_full() }
+    pub fn has_ammo(&self)     -> bool { !self.ammo.is_empty() }
 }

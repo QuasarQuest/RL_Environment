@@ -1,93 +1,238 @@
 // src/viz/hud/scoreboard.rs
 
 use bevy::prelude::*;
-use crate::agent::components::{AgentLabel, GoldCarried, Score};
-use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD};
+use crate::agent::components::{AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
+use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
+use crate::style::color::team_color;
+use crate::team::Team;
+use super::components::{TabScoreboard, TabScoreboardContent, HideViz};
 
-#[derive(Component)] pub struct ScoreboardPanel;
-#[derive(Component)] pub struct ScoreboardContent;
+// ── Spawn ─────────────────────────────────────────────────────────────────────
 
-pub fn spawn_scoreboard(mut commands: Commands, theme: Res<ThemeMode>) {
-    build_scoreboard(&mut commands, *theme);
+pub fn spawn_tab_scoreboard(mut commands: Commands, theme: Res<ThemeMode>) {
+    build_tab_scoreboard(&mut commands, *theme);
 }
 
-pub fn build_scoreboard(commands: &mut Commands, mode: ThemeMode) {
+pub fn build_tab_scoreboard(commands: &mut Commands, mode: ThemeMode) {
+    let bg     = ThemeColor::Background.resolve(mode);
+    let border = ThemeColor::Border.resolve(mode);
+    let dim    = ThemeColor::TextDim.resolve(mode);
+
     commands.spawn((
         UiRoot,
-        ScoreboardPanel,
+        TabScoreboard,
         Node {
+            display:        Display::None,
             position_type:  PositionType::Absolute,
-            bottom:         Val::Px(12.0),
-            right:          Val::Px(12.0),
+            top:            Val::Px(TOOLBAR_H + 8.0),
+            left:           Val::Percent(50.0),
+            margin:         UiRect::left(Val::Px(-300.0)),
             flex_direction: FlexDirection::Column,
-            min_width:      Val::Px(240.0),
+            min_width:      Val::Px(600.0),
             border:         UiRect::all(Val::Px(1.0)),
-            border_radius:  BorderRadius::all(Val::Px(8.0)),
-            padding:        UiRect::all(Val::Px(1.0)),
+            border_radius:  BorderRadius::all(Val::Px(10.0)),
+            overflow:       Overflow::clip(),
             ..default()
         },
-        BackgroundColor(ThemeColor::Background.resolve(mode)),
-        BorderColor::all(ThemeColor::Border.resolve(mode)),
+        BackgroundColor(bg),
+        BorderColor::all(border),
+        ZIndex(200),
     )).with_children(|panel| {
+        // Header
         panel.spawn(Node {
             flex_direction: FlexDirection::Row,
-            padding:        UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(8.0), Val::Px(6.0)),
-            column_gap:     Val::Px(8.0),
+            padding:        UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(10.0), Val::Px(8.0)),
+            border:         UiRect::bottom(Val::Px(1.0)),
             ..default()
         }).with_children(|h| {
-            cell(h, "AGENT", 120.0, ThemeColor::TextDim.resolve(mode),    SIZE_SM);
-            cell(h, "Gold",   32.0, ThemeColor::AccentGold.resolve(mode), SIZE_SM);
-            cell(h, "SCORE",  60.0, ThemeColor::TextDim.resolve(mode),    SIZE_SM);
+            hdr(h, "TEAM",  50.0,  dim);
+            hdr(h, "AGENT", 200.0, dim);
+            hdr(h, "HP",    60.0,  dim);
+            hdr(h, "AMMO",  55.0,  dim);
+            hdr(h, "GOLD",  55.0,  ThemeColor::AccentGold.resolve(mode));
+            hdr(h, "SCORE", 70.0,  dim);
+            hdr(h, "VIZ",   60.0,  dim);
         });
 
         panel.spawn((
-            ScoreboardContent,
+            TabScoreboardContent,
             Node { flex_direction: FlexDirection::Column, ..default() },
         ));
+
+        // Footer
+        panel.spawn(Node {
+            flex_direction:  FlexDirection::Row,
+            justify_content: JustifyContent::Center,
+            padding:         UiRect::axes(Val::Px(0.0), Val::Px(6.0)),
+            border:          UiRect::top(Val::Px(1.0)),
+            ..default()
+        }).with_children(|f| {
+            f.spawn((
+                Text::new("Hold TAB  |  Click VIZ to toggle path overlay  |  H for shortcuts"),
+                TextFont  { font_size: SIZE_SM, ..default() },
+                TextColor(dim),
+            ));
+        });
     });
 }
 
-pub fn update_scoreboard(
-    agents:        Query<(&AgentLabel, &GoldCarried, &Score)>,
-    changed_gold:  Query<(), Changed<GoldCarried>>,
-    changed_score: Query<(), Changed<Score>>,
-    content_q:     Query<Entity, With<ScoreboardContent>>,
-    theme:         Res<ThemeMode>,
-    mut commands:  Commands,
+// ── Tab toggle ────────────────────────────────────────────────────────────────
+
+pub fn toggle_tab_scoreboard(
+    keys:  Res<ButtonInput<KeyCode>>,
+    mut q: Query<&mut Node, With<TabScoreboard>>,
 ) {
-    let data_changed = !changed_gold.is_empty() || !changed_score.is_empty();
-    if !data_changed      { return; }
-    if theme.is_changed() { return; }
+    let visible = keys.pressed(KeyCode::Tab);
+    for mut node in q.iter_mut() {
+        node.display = if visible { Display::Flex } else { Display::None };
+    }
+}
+
+// ── Viz toggle button marker ──────────────────────────────────────────────────
+
+/// Stores the agent entity so the button knows which agent to toggle.
+#[derive(Component)]
+pub struct VizToggleButton(pub Entity);
+
+pub fn handle_viz_toggle(
+    mut commands: Commands,
+    buttons:      Query<(&Interaction, &VizToggleButton), Changed<Interaction>>,
+    hidden:       Query<Has<HideViz>>,
+) {
+    for (interaction, btn) in buttons.iter() {
+        if *interaction != Interaction::Pressed { continue; }
+        let entity = btn.0;
+        let is_hidden = hidden.get(entity).unwrap_or(false);
+        if is_hidden { commands.entity(entity).remove::<HideViz>(); }
+        else         { commands.entity(entity).insert(HideViz); }
+    }
+}
+
+// ── Update content ────────────────────────────────────────────────────────────
+
+pub fn update_tab_scoreboard(
+    scoreboard_q: Query<&Node, With<TabScoreboard>>,
+    content_q:    Query<Entity, With<TabScoreboardContent>>,
+    agents:       Query<(
+        Entity, &AgentLabel, &Team, &Hearts, &Ammo,
+        &GoldCarried, &Score, Option<&RespawnIn>, Has<HideViz>,
+    )>,
+    theme:        Res<ThemeMode>,
+    mut commands: Commands,
+) {
+    let Ok(node) = scoreboard_q.single() else { return };
+    if node.display == Display::None { return; }
 
     let Ok(content) = content_q.single() else { return };
     commands.entity(content).despawn_related::<Children>();
 
     let mut rows: Vec<_> = agents.iter().collect();
-    rows.sort_by_key(|(label, _, _)| label.0.clone());
+    rows.sort_by(|a, b| a.2.0.cmp(&b.2.0).then(b.6.0.cmp(&a.6.0)));
+
+    let mode    = *theme;
+    let dim     = ThemeColor::TextDim.resolve(mode);
+    let primary = ThemeColor::TextPrimary.resolve(mode);
+    let gold_c  = ThemeColor::AccentGold.resolve(mode);
+    let score_c = ThemeColor::SuccessText.resolve(mode);
 
     commands.entity(content).with_children(|c| {
-        for (i, (label, gold, score)) in rows.iter().enumerate() {
-            let bg = if i % 2 == 0 {
-                Color::NONE
-            } else {
-                ThemeColor::SurfaceHighlight.resolve(*theme)
+        for (i, (agent_entity, label, team, hearts, ammo, gold, score, respawning, is_hidden))
+        in rows.iter().enumerate()
+        {
+            let bg = if i % 2 == 0 { Color::NONE }
+            else          { ThemeColor::SurfaceHighlight.resolve(mode) };
+            let tcolor     = team_color(team.0);
+            let name_color = if respawning.is_some() { dim } else { primary };
+
+            // HP as "X/3" — no unicode, always renders.
+            let hp_str    = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
+            let hp_color  = match hearts.0 {
+                0 => Color::srgb(0.6, 0.6, 0.6),
+                1 => Color::srgb(0.85, 0.25, 0.20),
+                2 => Color::srgb(0.95, 0.60, 0.10),
+                _ => Color::srgb(0.20, 0.75, 0.35),
             };
+
+            let viz_label = if *is_hidden { "OFF" } else { "ON" };
+            let viz_color = if *is_hidden { dim } else { score_c };
+
             c.spawn((
                 Node {
                     flex_direction: FlexDirection::Row,
-                    padding:        UiRect::axes(Val::Px(12.0), Val::Px(5.0)),
-                    column_gap:     Val::Px(8.0),
-                    border_radius:  BorderRadius::all(Val::Px(4.0)),
+                    padding:        UiRect::axes(Val::Px(16.0), Val::Px(7.0)),
+                    align_items:    AlignItems::Center,
                     ..default()
                 },
                 BackgroundColor(bg),
             )).with_children(|row| {
-                cell(row, &label.0,            120.0, ThemeColor::TextPrimary.resolve(*theme), SIZE_MD);
-                cell(row, &gold.0.to_string(),  32.0, ThemeColor::AccentGold.resolve(*theme),  SIZE_MD);
-                cell(row, &score.0.to_string(), 60.0, ThemeColor::SuccessText.resolve(*theme), SIZE_MD);
+                // Team dot
+                row.spawn((
+                    Node {
+                        width:         Val::Px(10.0),
+                        height:        Val::Px(10.0),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        margin:        UiRect::right(Val::Px(40.0)),
+                        ..default()
+                    },
+                    BackgroundColor(tcolor),
+                ));
+
+                // Agent name
+                cell(row, &label.0, 200.0, name_color, SIZE_MD);
+
+                // HP
+                let hp_display = if respawning.is_some() {
+                    format!("dead")
+                } else {
+                    hp_str
+                };
+                cell(row, &hp_display, 60.0, hp_color, SIZE_MD);
+
+                // Ammo
+                cell(row, &ammo.0.to_string(), 55.0, primary, SIZE_MD);
+
+                // Gold
+                cell(row, &gold.0.to_string(), 55.0, gold_c, SIZE_MD);
+
+                // Score
+                cell(row, &score.0.to_string(), 70.0, score_c, SIZE_LG);
+
+                // Viz toggle button
+                row.spawn((
+                    Button,
+                    VizToggleButton(*agent_entity),
+                    Node {
+                        width:           Val::Px(44.0),
+                        height:          Val::Px(22.0),
+                        justify_content: JustifyContent::Center,
+                        align_items:     AlignItems::Center,
+                        border:          UiRect::all(Val::Px(1.0)),
+                        border_radius:   BorderRadius::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(ThemeColor::ButtonIdle.resolve(mode)),
+                    BorderColor::all(ThemeColor::Border.resolve(mode)),
+                )).with_children(|btn| {
+                    btn.spawn((
+                        Text::new(viz_label),
+                        TextFont  { font_size: SIZE_SM, ..default() },
+                        TextColor(viz_color),
+                    ));
+                });
             });
         }
     });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn hdr(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color) {
+    parent.spawn((
+        Text::new(text),
+        TextFont  { font_size: SIZE_SM, ..default() },
+        TextColor(color),
+        Node { width: Val::Px(width), ..default() },
+    ));
 }
 
 fn cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color, size: f32) {

@@ -8,3 +8,4 @@ bevy = { version = "0.18.1", features = ["debug"] }
 rand = "0.10.1"
 ron   = "0.12.1"
 serde = { version = "1.0.228", features = ["derive"] }
+rustc-hash = "2.1.2"
