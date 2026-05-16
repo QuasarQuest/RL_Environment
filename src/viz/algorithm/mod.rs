@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 use crate::agent::brain::AgentBrain;
 use crate::agent::components::GridPos;
+use crate::viz::components::HideViz;
 use crate::viz::grid_offset::GridOffset;
-use crate::viz::hud::components::HideViz;
 use crate::config;
 
 pub fn draw_agent_debug(
