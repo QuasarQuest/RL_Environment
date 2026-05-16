@@ -91,17 +91,15 @@ pub fn handle_speed_buttons(
 // ── Pause button ──────────────────────────────────────────────────────────────
 
 pub fn handle_pause_button(
-    mut cfg:      ResMut<SimConfig>,
-    btn_q:        Query<&Interaction, (Changed<Interaction>, With<PauseButtonMarker>)>,
-    // Query the TEXT CHILD by its own marker — not the button entity.
-    mut text_q:   Query<(&mut Text, &mut TextColor), With<PauseButtonText>>,
-    mut bg_q:     Query<&mut BackgroundColor, With<PauseButtonMarker>>,
+    mut cfg:    ResMut<SimConfig>,
+    btn_q:      Query<&Interaction, (Changed<Interaction>, With<PauseButtonMarker>)>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<PauseButtonText>>,
+    mut bg_q:   Query<&mut BackgroundColor, With<PauseButtonMarker>>,
 ) {
     for interaction in btn_q.iter() {
         if *interaction != Interaction::Pressed { continue; }
         cfg.paused = !cfg.paused;
 
-        // Update text and colors to reflect new state.
         for (mut text, mut color) in text_q.iter_mut() {
             if cfg.paused {
                 *text  = Text::new("||");

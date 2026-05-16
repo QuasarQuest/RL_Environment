@@ -41,9 +41,8 @@ impl FreeTilePool {
 
 #[derive(Clone, Debug)]
 pub struct ItemSpawnConfig {
-    pub kind:           ItemKind,
-    pub interval_ticks: u32,
-    pub max_on_map:     usize,
+    pub kind:       ItemKind,
+    pub max_on_map: usize,
 }
 
 #[derive(Clone, Debug)]

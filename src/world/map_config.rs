@@ -39,11 +39,10 @@ pub struct ObstacleCluster {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemSpawnerRon {
-    pub kind:           String,
-    pub interval_ticks: u32,
-    pub max_on_map:     usize,
+    pub kind:       String,
+    pub max_on_map: usize,
     #[serde(default)]
-    pub initial:        usize,
+    pub initial:    usize,
 }
 
 impl ItemSpawnerRon {
@@ -57,8 +56,7 @@ impl ItemSpawnerRon {
         };
         Some(ItemSpawnConfig {
             kind,
-            interval_ticks: self.interval_ticks,
-            max_on_map:     self.max_on_map,
+            max_on_map: self.max_on_map,
         })
     }
 }
@@ -67,6 +65,9 @@ impl ItemSpawnerRon {
 pub struct MapConfig {
     pub width:  usize,
     pub height: usize,
+
+    /// Episode length in sim-ticks — loaded from the map asset.
+    pub match_duration_ticks: u64,
 
     pub item_spawners:     Vec<ItemSpawnerRon>,
     pub fixed:             Vec<FixedTile>,

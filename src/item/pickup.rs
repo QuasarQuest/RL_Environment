@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
+use crate::world::grid::Grid;
 use crate::agent::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score, SpeedBuff};
 use crate::team::{Team, TeamScore};
 use crate::config;
@@ -11,17 +12,15 @@ use super::{Item, ItemKind};
 pub struct Claimed;
 
 pub fn pickup_items(
-    mut commands:   Commands,
+    mut commands: Commands,
     // Dead agents (RespawnIn) can't pick up items.
-    mut agents:     Query<(
-        Entity, &GridPos, &mut GoldCarried, &mut Hearts,
-        &mut Ammo, &mut Score, &Team,
+    mut agents:   Query<(
+        Entity, &GridPos, &mut GoldCarried, &mut Hearts, &mut Ammo, &Team,
     ), Without<RespawnIn>>,
-    items:          Query<(Entity, &GridPos, &Item), Without<Claimed>>,
-    mut team_score: ResMut<TeamScore>,
+    items:        Query<(Entity, &GridPos, &Item), Without<Claimed>>,
 ) {
     for (item_entity, item_pos, item) in items.iter() {
-        for (agent_entity, agent_pos, mut gold, mut hearts, mut ammo, mut score, team)
+        for (agent_entity, agent_pos, mut gold, mut hearts, mut ammo, team)
         in agents.iter_mut()
         {
             if agent_pos != item_pos { continue; }
@@ -58,6 +57,26 @@ pub fn pickup_items(
             }
             break; // one agent per item per tick
         }
+    }
+}
+
+/// Agent standing on their own base tile with gold → deposit all carried gold.
+/// Each deposited gold unit scores 1 point for the agent and their team.
+pub fn deposit_gold(
+    grid:           Res<Grid>,
+    mut team_score: ResMut<TeamScore>,
+    mut agents:     Query<(&GridPos, &mut GoldCarried, &mut Score, &Team), Without<RespawnIn>>,
+) {
+    for (pos, mut gold, mut score, team) in agents.iter_mut() {
+        if gold.is_empty() { continue; }
+        if grid.get(pos.x, pos.y) != Some(crate::world::tile::Tile::Base(team.0)) { continue; }
+
+        let deposited = gold.0;
+        gold.0        = 0;
+        score.0      += deposited;
+        team_score.add(*team, deposited);
+        info!("Team {} deposited {} gold (agent score: {}, team score: {})",
+            team.name(), deposited, score.0, team_score.get(*team));
     }
 }
 

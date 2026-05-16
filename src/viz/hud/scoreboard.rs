@@ -2,21 +2,17 @@
 
 use bevy::prelude::*;
 use crate::agent::components::{AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
-use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
+use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
 use crate::style::color::team_color;
 use crate::team::Team;
 use super::components::{TabScoreboard, TabScoreboardContent, HideViz};
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 
-pub fn spawn_tab_scoreboard(mut commands: Commands, theme: Res<ThemeMode>) {
-    build_tab_scoreboard(&mut commands, *theme);
-}
-
-pub fn build_tab_scoreboard(commands: &mut Commands, mode: ThemeMode) {
-    let bg     = ThemeColor::Background.resolve(mode);
-    let border = ThemeColor::Border.resolve(mode);
-    let dim    = ThemeColor::TextDim.resolve(mode);
+pub fn spawn_tab_scoreboard(mut commands: Commands) {
+    let bg     = ThemeColor::Background.resolve();
+    let border = ThemeColor::Border.resolve();
+    let dim    = ThemeColor::TextDim.resolve();
 
     commands.spawn((
         UiRoot,
@@ -49,7 +45,7 @@ pub fn build_tab_scoreboard(commands: &mut Commands, mode: ThemeMode) {
             hdr(h, "AGENT", 200.0, dim);
             hdr(h, "HP",    60.0,  dim);
             hdr(h, "AMMO",  55.0,  dim);
-            hdr(h, "GOLD",  55.0,  ThemeColor::AccentGold.resolve(mode));
+            hdr(h, "GOLD",  55.0,  ThemeColor::AccentGold.resolve());
             hdr(h, "SCORE", 70.0,  dim);
             hdr(h, "VIZ",   60.0,  dim);
         });
@@ -88,9 +84,8 @@ pub fn toggle_tab_scoreboard(
     }
 }
 
-// ── Viz toggle button marker ──────────────────────────────────────────────────
+// ── Viz toggle ────────────────────────────────────────────────────────────────
 
-/// Stores the agent entity so the button knows which agent to toggle.
 #[derive(Component)]
 pub struct VizToggleButton(pub Entity);
 
@@ -101,7 +96,7 @@ pub fn handle_viz_toggle(
 ) {
     for (interaction, btn) in buttons.iter() {
         if *interaction != Interaction::Pressed { continue; }
-        let entity = btn.0;
+        let entity    = btn.0;
         let is_hidden = hidden.get(entity).unwrap_or(false);
         if is_hidden { commands.entity(entity).remove::<HideViz>(); }
         else         { commands.entity(entity).insert(HideViz); }
@@ -117,7 +112,6 @@ pub fn update_tab_scoreboard(
         Entity, &AgentLabel, &Team, &Hearts, &Ammo,
         &GoldCarried, &Score, Option<&RespawnIn>, Has<HideViz>,
     )>,
-    theme:        Res<ThemeMode>,
     mut commands: Commands,
 ) {
     let Ok(node) = scoreboard_q.single() else { return };
@@ -129,24 +123,22 @@ pub fn update_tab_scoreboard(
     let mut rows: Vec<_> = agents.iter().collect();
     rows.sort_by(|a, b| a.2.0.cmp(&b.2.0).then(b.6.0.cmp(&a.6.0)));
 
-    let mode    = *theme;
-    let dim     = ThemeColor::TextDim.resolve(mode);
-    let primary = ThemeColor::TextPrimary.resolve(mode);
-    let gold_c  = ThemeColor::AccentGold.resolve(mode);
-    let score_c = ThemeColor::SuccessText.resolve(mode);
+    let dim     = ThemeColor::TextDim.resolve();
+    let primary = ThemeColor::TextPrimary.resolve();
+    let gold_c  = ThemeColor::AccentGold.resolve();
+    let score_c = ThemeColor::SuccessText.resolve();
 
     commands.entity(content).with_children(|c| {
         for (i, (agent_entity, label, team, hearts, ammo, gold, score, respawning, is_hidden))
         in rows.iter().enumerate()
         {
-            let bg = if i % 2 == 0 { Color::NONE }
-            else          { ThemeColor::SurfaceHighlight.resolve(mode) };
+            let bg         = if i % 2 == 0 { Color::NONE }
+            else { ThemeColor::SurfaceHighlight.resolve() };
             let tcolor     = team_color(team.0);
             let name_color = if respawning.is_some() { dim } else { primary };
 
-            // HP as "X/3" — no unicode, always renders.
-            let hp_str    = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
-            let hp_color  = match hearts.0 {
+            let hp_str   = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
+            let hp_color = match hearts.0 {
                 0 => Color::srgb(0.6, 0.6, 0.6),
                 1 => Color::srgb(0.85, 0.25, 0.20),
                 2 => Color::srgb(0.95, 0.60, 0.10),
@@ -165,7 +157,6 @@ pub fn update_tab_scoreboard(
                 },
                 BackgroundColor(bg),
             )).with_children(|row| {
-                // Team dot
                 row.spawn((
                     Node {
                         width:         Val::Px(10.0),
@@ -177,27 +168,19 @@ pub fn update_tab_scoreboard(
                     BackgroundColor(tcolor),
                 ));
 
-                // Agent name
                 cell(row, &label.0, 200.0, name_color, SIZE_MD);
 
-                // HP
                 let hp_display = if respawning.is_some() {
-                    format!("dead")
+                    "dead".to_string()
                 } else {
                     hp_str
                 };
                 cell(row, &hp_display, 60.0, hp_color, SIZE_MD);
 
-                // Ammo
-                cell(row, &ammo.0.to_string(), 55.0, primary, SIZE_MD);
-
-                // Gold
-                cell(row, &gold.0.to_string(), 55.0, gold_c, SIZE_MD);
-
-                // Score
+                cell(row, &ammo.0.to_string(),  55.0, primary, SIZE_MD);
+                cell(row, &gold.0.to_string(),  55.0, gold_c,  SIZE_MD);
                 cell(row, &score.0.to_string(), 70.0, score_c, SIZE_LG);
 
-                // Viz toggle button
                 row.spawn((
                     Button,
                     VizToggleButton(*agent_entity),
@@ -210,8 +193,8 @@ pub fn update_tab_scoreboard(
                         border_radius:   BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    BackgroundColor(ThemeColor::ButtonIdle.resolve(mode)),
-                    BorderColor::all(ThemeColor::Border.resolve(mode)),
+                    BackgroundColor(ThemeColor::ButtonIdle.resolve()),
+                    BorderColor::all(ThemeColor::Border.resolve()),
                 )).with_children(|btn| {
                     btn.spawn((
                         Text::new(viz_label),

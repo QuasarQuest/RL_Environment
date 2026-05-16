@@ -3,15 +3,17 @@
     width:  50,
     height: 50,
 
+    match_duration_ticks: 10000,
+
     item_spawners: [
         // Gold: main resource — PI controller keeps 5–10 on map
-        ( kind: "Gold",       interval_ticks: 50, max_on_map: 10, initial: 8  ),
+        ( kind: "Gold",       max_on_map: 10, initial: 8  ),
         // Health: scarce — only 2–4 on map at once, slow respawn
-        ( kind: "Health",     interval_ticks: 80, max_on_map: 4,  initial: 2  ),
+        ( kind: "Health",     max_on_map: 4,  initial: 2  ),
         // Ammo: moderate — 3–6 on map, decays faster than gold
-        ( kind: "Ammo",       interval_ticks: 60, max_on_map: 6,  initial: 3  ),
+        ( kind: "Ammo",       max_on_map: 6,  initial: 3  ),
         // SpeedBoost: rare — at most 2 on map at once
-        ( kind: "SpeedBoost", interval_ticks: 100, max_on_map: 2, initial: 1  ),
+        ( kind: "SpeedBoost", max_on_map: 2,  initial: 1  ),
     ],
 
     fixed: [

@@ -28,15 +28,6 @@ impl ItemKind {
         }
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            ItemKind::Gold       => "Gold",
-            ItemKind::Health     => "Health",
-            ItemKind::Ammo       => "Ammo",
-            ItemKind::SpeedBoost => "Speed",
-        }
-    }
-
     pub fn z_layer(self) -> f32 { 0.5 }
 }
 

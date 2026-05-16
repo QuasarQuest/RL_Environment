@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 use crate::sim::schedule::OnSimTick;
 use crate::world::map_config::MapConfig;
-use super::spawner::{ItemSpawner, FreeTilePool, build_free_tile_pool, spawn_items_periodically, decay_items};
-use super::pickup::{pickup_items, despawn_claimed, sync_item_transforms};
+use super::spawner::{ItemSpawner, build_free_tile_pool, spawn_items_periodically, decay_items};
+use super::pickup::{pickup_items, deposit_gold, despawn_claimed, sync_item_transforms};
 
 fn init_item_spawner(mut commands: Commands, map: Res<MapConfig>) {
     commands.insert_resource(ItemSpawner::from_map_config(&map));
@@ -21,6 +21,7 @@ impl Plugin for ItemPlugin {
                 spawn_items_periodically,
                 decay_items,
                 pickup_items,
+                deposit_gold,
                 despawn_claimed,
             ).chain())
             .add_systems(Update, sync_item_transforms);

@@ -1,9 +1,9 @@
 // src/viz/hud/layout.rs
 
 use bevy::prelude::*;
-use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, SIZE_XL, TOOLBAR_H};
+use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, SIZE_XL, TOOLBAR_H};
 use crate::style::color::team_color;
-use crate::viz::core_ui::button::{spawn_icon_button, spawn_labeled_button};
+use crate::viz::core_ui::button::spawn_icon_button;
 use crate::viz::core_ui::panel::spawn_button_group;
 use crate::viz::core_ui::text::{spawn_label, spawn_marked_label};
 use super::components::{
@@ -12,14 +12,10 @@ use super::components::{
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
 };
 
-pub fn spawn_hud(mut commands: Commands, theme: Res<ThemeMode>) {
-    build_hud(&mut commands, *theme);
-}
-
-pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
-    let bg         = ThemeColor::Background.resolve(mode);
-    let border     = ThemeColor::Border.resolve(mode);
-    let dim        = ThemeColor::TextDim.resolve(mode);
+pub fn spawn_hud(mut commands: Commands) {
+    let bg         = ThemeColor::Background.resolve();
+    let border     = ThemeColor::Border.resolve();
+    let dim        = ThemeColor::TextDim.resolve();
     let red_color  = team_color(0);
     let blue_color = team_color(1);
 
@@ -51,10 +47,10 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
         }).with_children(|left| {
             // Team 0
             left.spawn(Node {
-                flex_direction:  FlexDirection::Row,
-                align_items:     AlignItems::Center,
-                column_gap:      Val::Px(8.0),
-                padding:         UiRect::horizontal(Val::Px(16.0)),
+                flex_direction: FlexDirection::Row,
+                align_items:    AlignItems::Center,
+                column_gap:     Val::Px(8.0),
+                padding:        UiRect::horizontal(Val::Px(16.0)),
                 ..default()
             }).with_children(|t0| {
                 t0.spawn((
@@ -82,13 +78,13 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
                 ..default()
             }).with_children(|time_col| {
                 time_col.spawn((
-                    Text::new("0:00"),
+                    Text::new("0 / 10000"),
                     TextFont  { font_size: SIZE_XL, ..default() },
-                    TextColor(ThemeColor::TextPrimary.resolve(mode)),
+                    TextColor(ThemeColor::TextPrimary.resolve()),
                     TimeLabelMarker,
                 ));
                 time_col.spawn((
-                    Text::new("TIME"),
+                    Text::new("TICK"),
                     TextFont  { font_size: SIZE_SM, ..default() },
                     TextColor(dim),
                 ));
@@ -125,14 +121,12 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
             column_gap:     Val::Px(16.0),
             ..default()
         }).with_children(|right| {
-            spawn_button_group(right, mode, |grp| {
-                spawn_icon_button(grp, mode, "-", SpeedDecreaseButton);
-                spawn_speed_label(grp, mode);
-                spawn_icon_button(grp, mode, "+", SpeedIncreaseButton);
+            spawn_button_group(right, |grp| {
+                spawn_icon_button(grp, "-", SpeedDecreaseButton);
+                spawn_speed_label(grp);
+                spawn_icon_button(grp, "+", SpeedIncreaseButton);
             });
 
-            // Pause button — text child gets PauseButtonText so the handler
-            // can find and update it without querying the button entity itself.
             right.spawn((
                 Button,
                 PauseButtonMarker,
@@ -143,14 +137,13 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
                     border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                BackgroundColor(ThemeColor::Success.resolve(mode)),
-                BorderColor::all(ThemeColor::Border.resolve(mode)),
+                BackgroundColor(ThemeColor::Success.resolve()),
+                BorderColor::all(ThemeColor::Border.resolve()),
             )).with_children(|btn| {
                 btn.spawn((
-                    // |> = running, || = paused — ASCII, renders with default font
                     Text::new("|>"),
                     TextFont  { font_size: SIZE_MD, ..default() },
-                    TextColor(ThemeColor::SuccessText.resolve(mode)),
+                    TextColor(ThemeColor::SuccessText.resolve()),
                     PauseButtonText,
                 ));
             });
@@ -163,7 +156,7 @@ pub fn build_hud(commands: &mut Commands, mode: ThemeMode) {
             }).with_children(|tick| {
                 spawn_label(tick, "TICK", dim, SIZE_SM);
                 spawn_marked_label(tick, "0",
-                                   ThemeColor::TextPrimary.resolve(mode), SIZE_LG, TickLabelMarker);
+                                   ThemeColor::TextPrimary.resolve(), SIZE_LG, TickLabelMarker);
             });
         });
     });
@@ -182,7 +175,7 @@ fn vdivider(parent: &mut ChildSpawnerCommands, color: Color) {
     ));
 }
 
-fn spawn_speed_label(parent: &mut ChildSpawnerCommands, mode: ThemeMode) {
+fn spawn_speed_label(parent: &mut ChildSpawnerCommands) {
     parent.spawn((
         Button,
         SpeedResetButton,
@@ -194,13 +187,13 @@ fn spawn_speed_label(parent: &mut ChildSpawnerCommands, mode: ThemeMode) {
             min_width:       Val::Px(48.0),
             ..default()
         },
-        BackgroundColor(ThemeColor::ButtonIdle.resolve(mode)),
-        BorderColor::all(ThemeColor::Border.resolve(mode)),
+        BackgroundColor(ThemeColor::ButtonIdle.resolve()),
+        BorderColor::all(ThemeColor::Border.resolve()),
     )).with_children(|btn| {
         btn.spawn((
             Text::new("10x"),
             TextFont  { font_size: SIZE_MD, ..default() },
-            TextColor(ThemeColor::TextPrimary.resolve(mode)),
+            TextColor(ThemeColor::TextPrimary.resolve()),
             CurrentSpeedLabel,
         ));
     });

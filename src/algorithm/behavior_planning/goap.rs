@@ -1,5 +1,7 @@
 // src/algorithm/behavior_planning/goap.rs
 
+#![allow(dead_code)]
+
 use std::time::{Duration, Instant};
 
 // ── Atomics ───────────────────────────────────────────────────────────────────
@@ -74,9 +76,7 @@ impl Default for PlanConfig {
 }
 
 pub struct PlanResult {
-    pub steps:          Vec<&'static str>,
-    pub total_cost:     f32,
-    pub nodes_expanded: usize,
+    pub steps: Vec<&'static str>,
 }
 
 #[derive(Debug)]
@@ -170,7 +170,7 @@ pub fn plan(
                 i = arena[i].parent_index;
             }
             steps.reverse();
-            return Ok(PlanResult { steps, total_cost: cost_g as f32, nodes_expanded: expanded });
+            return Ok(PlanResult { steps });
         }
 
         for (ai, action) in actions.iter().enumerate() {
@@ -191,27 +191,6 @@ pub fn plan(
 }
 
 // ── Domain: gold-collection ───────────────────────────────────────────────────
-//
-// Bit layout:
-//   0  HAS_GOLD        gold_carried > 0
-//   1  INVENTORY_FULL  gold_carried == MAX
-//   2  INVENTORY_HALF  gold_carried >= MAX/2
-//   3  ON_OWN_BASE     standing on own Base tile
-//   4  GOLD_NEARBY     nearest gold dist_sq < NEAR_SQ
-//   5  ENEMY_NEARBY    nearest enemy dist_sq < NEAR_SQ
-//   6  BASE_CLOSER     base dist_sq < nearest gold dist_sq
-//   7  LOW_HEALTH      health < 30
-//
-// Action chain (complete — no precondition gap):
-//
-//   [any state]
-//     → navigate_to_gold   (no pre, sets GOLD_NEARBY)
-//     → collect_gold       (needs GOLD_NEARBY & !FULL, sets HAS_GOLD)
-//     → navigate_to_base   (needs HAS_GOLD, sets ON_OWN_BASE)
-//     → drop_gold          (needs ON_OWN_BASE & HAS_GOLD, clears HAS_GOLD)
-//
-// navigate_* are "abstract" actions — GoapStrategy maps them to nav targets
-// for the path planner. collect/drop are "immediate" actions executed in place.
 
 pub const BIT_HAS_GOLD:       u64 = 1 << 0;
 pub const BIT_INVENTORY_FULL: u64 = 1 << 1;
@@ -233,16 +212,14 @@ pub const ACT_FLEE:             &str = "flee";
 pub const ACT_WAIT:             &str = "wait";
 
 pub static ACTIONS: &[Action] = &[
-    // Navigate to gold: always available when not full, makes gold "nearby"
     Action {
         name:         ACT_NAVIGATE_TO_GOLD,
         pre_mask:     BIT_INVENTORY_FULL,
-        pre_value:    0,  // not full
+        pre_value:    0,
         effect_mask:  BIT_GOLD_NEARBY,
         effect_value: BIT_GOLD_NEARBY,
         cost: 4,
     },
-    // Collect gold: requires being at gold (nearby) and not full
     Action {
         name:         ACT_COLLECT_GOLD,
         pre_mask:     BIT_INVENTORY_FULL | BIT_GOLD_NEARBY,
@@ -251,7 +228,6 @@ pub static ACTIONS: &[Action] = &[
         effect_value: BIT_HAS_GOLD | BIT_INVENTORY_HALF,
         cost: 1,
     },
-    // Navigate to base: requires carrying gold
     Action {
         name:         ACT_NAVIGATE_TO_BASE,
         pre_mask:     BIT_HAS_GOLD,
@@ -260,7 +236,6 @@ pub static ACTIONS: &[Action] = &[
         effect_value: BIT_ON_OWN_BASE,
         cost: 4,
     },
-    // Drop gold: requires being at base with gold
     Action {
         name:         ACT_DROP_GOLD,
         pre_mask:     BIT_ON_OWN_BASE | BIT_HAS_GOLD,
@@ -269,7 +244,6 @@ pub static ACTIONS: &[Action] = &[
         effect_value: 0,
         cost: 1,
     },
-    // Flee: low health + enemy nearby → move away
     Action {
         name:         ACT_FLEE,
         pre_mask:     BIT_ENEMY_NEARBY | BIT_LOW_HEALTH,
@@ -278,7 +252,6 @@ pub static ACTIONS: &[Action] = &[
         effect_value: 0,
         cost: 1,
     },
-    // Wait: last resort escape hatch
     Action {
         name:         ACT_WAIT,
         pre_mask:     0,

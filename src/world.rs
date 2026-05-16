@@ -6,6 +6,5 @@ pub mod map_config;
 pub mod plugin;
 pub mod tile;
 
-pub use coords::GridPos;
 pub use grid::Grid;
 pub use plugin::WorldPlugin;

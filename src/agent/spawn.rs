@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::config;
 use crate::team::Team;
 use crate::world::map_config::MapConfig;
-use crate::viz::hud::components::HideViz;
+use crate::viz::hud::HideViz;
 use super::brain::AgentBrain;
 use super::components::{AgentLabel, Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
 use super::systems::PendingAction;

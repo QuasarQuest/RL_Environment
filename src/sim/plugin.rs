@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use super::config::{SimConfig, AVAILABLE_SPEEDS};
 use super::schedule::OnSimTick;
 use super::timer::TickTimer;
+use crate::world::map_config::MapConfig;
 
 /// Public system-set label so other plugins can order after sim writes.
 /// NOTE: exclusive systems (fn(&mut World)) cannot belong to a SystemSet;
@@ -12,6 +13,13 @@ use super::timer::TickTimer;
 pub struct SimSystems;
 
 // ── Systems ───────────────────────────────────────────────────────────────────
+
+/// Reads match_duration_ticks from the map asset into SimConfig.
+/// Runs at Startup — MapConfig is inserted during PreStartup by WorldPlugin,
+/// so it is guaranteed to exist by the time Startup runs.
+fn init_sim_config(map: Res<MapConfig>, mut cfg: ResMut<SimConfig>) {
+    cfg.match_duration_ticks = map.match_duration_ticks;
+}
 
 fn handle_input(
     keys:      Res<ButtonInput<KeyCode>>,
@@ -48,26 +56,17 @@ fn handle_input(
 /// Exclusive system — fires as many ticks as the accumulated wall-clock delta
 /// covers at the current ticks_per_second.
 ///
-/// Example: at 100 tps, a 16 ms frame covers 1.6 tick-periods → 1 tick fires,
-/// 0.6 periods carry over.  At 100 tps with a 33 ms frame → 3 ticks fire.
-/// This makes the simulation run faster than real-time when tps > frame-rate.
-///
-/// Sim-time semantics:
-///   elapsed_secs advances by (1 / ticks_per_second) per tick, regardless of
-///   wall-clock frame time.  At 10 tps the clock is 1:1 with real time.
-///   At 100 tps it runs 10× faster, so a 90-second match finishes in ~9 real
-///   seconds — ideal for RL episode throughput.
+/// Episode length is match_duration_ticks — speed-independent.
+/// At 10 tps a 10 000-tick episode takes ~16 min real time.
+/// At 200 tps the same episode takes ~50 s — ideal for RL throughput.
 pub fn fire_sim_tick(world: &mut World) {
-    // Grab wall-clock delta and tick_duration before touching SimConfig.
-    let wall_delta_secs = world.resource::<Time>().delta_secs();
-
-    let (paused, game_over, tick_duration_secs) = {
+    let (paused, game_over) = {
         let cfg = world.resource::<SimConfig>();
-        (cfg.paused, cfg.game_over, 1.0_f32 / cfg.ticks_per_second)
+        (cfg.paused, cfg.game_over)
     };
 
     if paused || game_over {
-        // Still need to tick the timer so it doesn't accumulate while paused.
+        // Still tick the timer so it doesn't accumulate while paused.
         let delta = world.resource::<Time>().delta();
         world.resource_mut::<TickTimer>().0.tick(delta);
         return;
@@ -90,10 +89,8 @@ pub fn fire_sim_tick(world: &mut World) {
         let game_over = {
             let mut cfg = world.resource_mut::<SimConfig>();
             cfg.tick += 1;
-            cfg.elapsed_secs += tick_duration_secs;
-            if cfg.elapsed_secs >= cfg.match_duration_secs {
-                cfg.elapsed_secs = cfg.match_duration_secs;
-                cfg.game_over    = true;
+            if cfg.tick >= cfg.match_duration_ticks {
+                cfg.game_over = true;
                 info!("Match over! Total ticks: {}", cfg.tick);
             }
             cfg.game_over
@@ -115,6 +112,7 @@ impl Plugin for SimPlugin {
             .init_resource::<SimConfig>()
             .init_resource::<TickTimer>()
             .init_schedule(OnSimTick)
+            .add_systems(Startup, init_sim_config)
             .add_systems(Update, handle_input.in_set(SimSystems))
             .add_systems(Update, fire_sim_tick.after(SimSystems));
     }

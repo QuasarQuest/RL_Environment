@@ -10,7 +10,6 @@ use crate::algorithm::path_planning::d_star_lite::DStarLite;
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
 pub trait PathPlanner: Send + Sync {
-    fn name(&self) -> &'static str;
     fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: impl Fn(GridPos) -> bool);
     fn update(&mut self, current_pos: GridPos, is_walkable: impl Fn(GridPos) -> bool);
     fn next_step(&self) -> Option<GridPos>;
@@ -24,7 +23,6 @@ pub trait PathPlanner: Send + Sync {
 pub struct NoPlanner;
 
 impl PathPlanner for NoPlanner {
-    fn name(&self) -> &'static str { "None" }
     fn set_goal(&mut self, _s: GridPos, _g: GridPos, _w: impl Fn(GridPos) -> bool) {}
     fn update(&mut self, _pos: GridPos, _w: impl Fn(GridPos) -> bool) {}
     fn next_step(&self) -> Option<GridPos> { None }
@@ -50,8 +48,6 @@ impl AStarPlanner {
 }
 
 impl PathPlanner for AStarPlanner {
-    fn name(&self) -> &'static str { "A*" }
-
     fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: impl Fn(GridPos) -> bool) {
         let result        = compute_path(start, goal, is_walkable);
         self.debug_closed = result.closed_set.into_iter().collect();
@@ -95,8 +91,6 @@ impl DStarPlanner {
 }
 
 impl PathPlanner for DStarPlanner {
-    fn name(&self) -> &'static str { "D* Lite" }
-
     fn set_goal(&mut self, start: GridPos, goal: GridPos, _is_walkable: impl Fn(GridPos) -> bool) {
         let mut p = DStarLite::new(start, goal);
         p.compute_shortest_path();

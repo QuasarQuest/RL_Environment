@@ -4,8 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["debug"] }
-rand = "0.10.1"
-ron   = "0.12.1"
-serde = { version = "1.0.228", features = ["derive"] }
+bevy       = { version = "0.18.1", features = ["debug"] }
+rand       = "0.10.1"
+ron        = "0.12.1"
+serde      = { version = "1.0.228", features = ["derive"] }
 rustc-hash = "2.1.2"
+
+# ── Build profiles ────────────────────────────────────────────────────────────
+
+[profile.dev]
+opt-level = 1          # minimal optimization — faster compiles, usable perf
+
+[profile.dev.package."*"]
+opt-level = 3          # fully optimize dependencies (Bevy, rand, etc.)
+# compile time hit is once; runtime gain is large
+
+[profile.release]
+opt-level = 3          # default, explicit for clarity
+lto = "thin"           # link-time optimization — reduces binary size, ~5% faster
+codegen-units = 1      # single codegen unit — best optimization, slower link
+strip = true           # strip debug symbols from release binary

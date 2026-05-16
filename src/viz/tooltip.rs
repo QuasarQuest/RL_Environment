@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
 use crate::agent::components::{AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
-use crate::viz::hud::components::HideViz;
-use crate::style::{ThemeMode, ThemeColor, UiRoot, SIZE_SM};
+use crate::viz::hud::HideViz;
+use crate::style::{ThemeColor, UiRoot, SIZE_SM};
 use super::grid_offset::GridOffset;
 use super::camera::MainCamera;
 
@@ -18,16 +18,12 @@ use super::camera::MainCamera;
 #[derive(Component)] pub struct TooltipViz;
 #[derive(Component)] pub struct TooltipStatus;
 
-pub fn spawn_tooltip(mut commands: Commands, theme: Res<ThemeMode>) {
-    build_tooltip(&mut commands, *theme);
-}
-
-pub fn build_tooltip(commands: &mut Commands, mode: ThemeMode) {
-    let bg       = ThemeColor::TooltipBackground.resolve(mode);
-    let border   = ThemeColor::Border.resolve(mode);
-    let head     = ThemeColor::TextDim.resolve(mode);
-    let body     = ThemeColor::TextPrimary.resolve(mode);
-    let name_col = ThemeColor::SuccessText.resolve(mode);
+pub fn spawn_tooltip(mut commands: Commands) {
+    let bg       = ThemeColor::TooltipBackground.resolve();
+    let border   = ThemeColor::Border.resolve();
+    let head     = ThemeColor::TextDim.resolve();
+    let body     = ThemeColor::TextPrimary.resolve();
+    let name_col = ThemeColor::SuccessText.resolve();
 
     commands.spawn((
         UiRoot,
@@ -69,10 +65,12 @@ pub fn build_tooltip(commands: &mut Commands, mode: ThemeMode) {
 }
 
 fn tooltip_row(
-    parent: &mut ChildSpawnerCommands,
-    label: &str, value: &str,
-    head_color: Color, body_color: Color,
-    marker: impl Bundle,
+    parent:     &mut ChildSpawnerCommands,
+    label:      &str,
+    value:      &str,
+    head_color: Color,
+    body_color: Color,
+    marker:     impl Bundle,
 ) {
     parent.spawn(Node {
         flex_direction: FlexDirection::Row,
@@ -137,7 +135,6 @@ pub fn update_tooltip(
         node.left    = Val::Px((cursor_screen.x + 14.0).min(window.width() - 210.0));
         node.top     = Val::Px((cursor_screen.y - 10.0).max(0.0));
 
-        // "2/3" style — works with any font
         let hp_str = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
 
         if let Ok(mut t) = name_q.single_mut()   { *t = Text::new(&label.0); }

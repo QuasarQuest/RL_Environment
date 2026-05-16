@@ -24,8 +24,4 @@ impl Tile {
     pub fn is_walkable(self) -> bool {
         !matches!(self, Tile::Obstacle)
     }
-
-    pub fn is_base_for(self, team: u8) -> bool {
-        matches!(self, Tile::Base(t) if t == team)
-    }
 }

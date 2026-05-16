@@ -9,7 +9,6 @@ use super::agent_renderer::sync_agent_transforms;
 use super::algorithm::draw_agent_debug;
 use super::tooltip::{spawn_tooltip, update_tooltip};
 use super::help_overlay::{spawn_help_overlay, toggle_help_overlay};
-use crate::style::ThemeMode;
 use crate::sim::plugin::{SimSystems, fire_sim_tick};
 
 use super::hud::{
@@ -28,7 +27,6 @@ pub struct VizPlugin;
 impl Plugin for VizPlugin {
     fn build(&self, app: &mut App) {
         app
-            .init_resource::<ThemeMode>()
             .add_systems(PreStartup, init_pan_state)
             .add_systems(Startup, (
                 spawn_camera,

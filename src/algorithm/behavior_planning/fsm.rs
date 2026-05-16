@@ -3,6 +3,8 @@
 // Generic deterministic FSM primitive.
 // Zero knowledge of agents, planners, or game logic.
 
+#![allow(dead_code)]
+
 // ── Fsm ───────────────────────────────────────────────────────────────────────
 
 pub struct Fsm<S: FsmState> {
@@ -28,8 +30,6 @@ impl<S: FsmState> Fsm<S> {
         let from = self.state.name();
         let to   = next.name();
         if from != to {
-            // bevy::log re-exports tracing macros — available without an
-            // explicit tracing dependency in Cargo.toml.
             bevy::log::trace!("FSM: {} → {}", from, to);
         }
         self.state = next;
