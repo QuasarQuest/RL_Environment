@@ -3,7 +3,7 @@
     width:  50,
     height: 50,
 
-    match_duration_ticks: 10000,
+    match_duration_ticks: 2500,
 
     item_spawners: [
         // Gold: main resource — PI controller keeps 5–10 on map

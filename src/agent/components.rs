@@ -21,8 +21,6 @@ impl GoldCarried {
 pub struct Score(pub u32);
 
 // ── Hearts ────────────────────────────────────────────────────────────────────
-// Discrete — one hit removes one heart regardless of damage source.
-// Three hearts max. Zero hearts → dead.
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Hearts(pub u8);
@@ -59,21 +57,16 @@ impl Ammo {
 }
 
 // ── SpeedBuff ─────────────────────────────────────────────────────────────────
-// Ticks remaining. Absent = no buff. Decremented each sim-tick.
-// While active the agent moves twice per tick.
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SpeedBuff(pub u8);
 
 // ── RespawnIn ─────────────────────────────────────────────────────────────────
-// Added to an agent when it dies. Counts down each sim-tick.
-// When it reaches 0, the agent is teleported to its spawn and revived.
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct RespawnIn(pub u8);
 
 // ── SpawnPoint ────────────────────────────────────────────────────────────────
-// Stored at spawn time so respawn knows where to return the agent.
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SpawnPoint(pub GridPos);
@@ -85,4 +78,13 @@ pub struct AgentLabel(pub String);
 
 impl AgentLabel {
     pub fn new(name: impl Into<String>) -> Self { Self(name.into()) }
+}
+
+// ── Info ──────────────────────────────────────────────────────────────────────
+// Metadata shown in the scoreboard beneath the agent name.
+
+#[derive(Component, Clone, Debug)]
+pub struct AgentInfo {
+    pub strategy: &'static str,
+    pub planner:  &'static str,
 }

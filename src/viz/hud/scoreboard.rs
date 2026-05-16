@@ -1,7 +1,7 @@
 // src/viz/hud/scoreboard.rs
 
 use bevy::prelude::*;
-use crate::agent::components::{AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
+use crate::agent::components::{AgentInfo, AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
 use crate::style::color::team_color;
 use crate::team::Team;
@@ -24,7 +24,7 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             left:           Val::Percent(50.0),
             margin:         UiRect::left(Val::Px(-300.0)),
             flex_direction: FlexDirection::Column,
-            min_width:      Val::Px(600.0),
+            min_width:      Val::Px(620.0),
             border:         UiRect::all(Val::Px(1.0)),
             border_radius:  BorderRadius::all(Val::Px(10.0)),
             overflow:       Overflow::clip(),
@@ -34,7 +34,6 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
         BorderColor::all(border),
         ZIndex(200),
     )).with_children(|panel| {
-        // Header
         panel.spawn(Node {
             flex_direction: FlexDirection::Row,
             padding:        UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(10.0), Val::Px(8.0)),
@@ -42,7 +41,7 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             ..default()
         }).with_children(|h| {
             hdr(h, "TEAM",  50.0,  dim);
-            hdr(h, "AGENT", 200.0, dim);
+            hdr(h, "AGENT", 220.0, dim);
             hdr(h, "HP",    60.0,  dim);
             hdr(h, "AMMO",  55.0,  dim);
             hdr(h, "GOLD",  55.0,  ThemeColor::AccentGold.resolve());
@@ -55,7 +54,6 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             Node { flex_direction: FlexDirection::Column, ..default() },
         ));
 
-        // Footer
         panel.spawn(Node {
             flex_direction:  FlexDirection::Row,
             justify_content: JustifyContent::Center,
@@ -109,7 +107,7 @@ pub fn update_tab_scoreboard(
     scoreboard_q: Query<&Node, With<TabScoreboard>>,
     content_q:    Query<Entity, With<TabScoreboardContent>>,
     agents:       Query<(
-        Entity, &AgentLabel, &Team, &Hearts, &Ammo,
+        Entity, &AgentLabel, &AgentInfo, &Team, &Hearts, &Ammo,
         &GoldCarried, &Score, Option<&RespawnIn>, Has<HideViz>,
     )>,
     mut commands: Commands,
@@ -121,7 +119,7 @@ pub fn update_tab_scoreboard(
     commands.entity(content).despawn_related::<Children>();
 
     let mut rows: Vec<_> = agents.iter().collect();
-    rows.sort_by(|a, b| a.2.0.cmp(&b.2.0).then(b.6.0.cmp(&a.6.0)));
+    rows.sort_by(|a, b| a.3.0.cmp(&b.3.0).then(b.7.0.cmp(&a.7.0)));
 
     let dim     = ThemeColor::TextDim.resolve();
     let primary = ThemeColor::TextPrimary.resolve();
@@ -129,7 +127,7 @@ pub fn update_tab_scoreboard(
     let score_c = ThemeColor::SuccessText.resolve();
 
     commands.entity(content).with_children(|c| {
-        for (i, (agent_entity, label, team, hearts, ammo, gold, score, respawning, is_hidden))
+        for (i, (agent_entity, label, info, team, hearts, ammo, gold, score, respawning, is_hidden))
         in rows.iter().enumerate()
         {
             let bg         = if i % 2 == 0 { Color::NONE }
@@ -147,16 +145,18 @@ pub fn update_tab_scoreboard(
 
             let viz_label = if *is_hidden { "OFF" } else { "ON" };
             let viz_color = if *is_hidden { dim } else { score_c };
+            let info_text = format!("{} · {}", info.strategy, info.planner);
 
             c.spawn((
                 Node {
                     flex_direction: FlexDirection::Row,
-                    padding:        UiRect::axes(Val::Px(16.0), Val::Px(7.0)),
+                    padding:        UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
                     align_items:    AlignItems::Center,
                     ..default()
                 },
                 BackgroundColor(bg),
             )).with_children(|row| {
+                // Team dot
                 row.spawn((
                     Node {
                         width:         Val::Px(10.0),
@@ -168,19 +168,39 @@ pub fn update_tab_scoreboard(
                     BackgroundColor(tcolor),
                 ));
 
-                cell(row, &label.0, 200.0, name_color, SIZE_MD);
+                // Name + strategy/planner subtext stacked vertically
+                row.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    width:          Val::Px(220.0),
+                    row_gap:        Val::Px(2.0),
+                    ..default()
+                }).with_children(|name_col| {
+                    name_col.spawn((
+                        Text::new(&label.0),
+                        TextFont  { font_size: SIZE_MD, ..default() },
+                        TextColor(name_color),
+                    ));
+                    name_col.spawn((
+                        Text::new(&info_text),
+                        TextFont  { font_size: 9.0, ..default() },
+                        TextColor(dim),
+                    ));
+                });
 
-                let hp_display = if respawning.is_some() {
-                    "dead".to_string()
-                } else {
-                    hp_str
-                };
+                // HP
+                let hp_display = if respawning.is_some() { "dead".to_string() } else { hp_str };
                 cell(row, &hp_display, 60.0, hp_color, SIZE_MD);
 
-                cell(row, &ammo.0.to_string(),  55.0, primary, SIZE_MD);
-                cell(row, &gold.0.to_string(),  55.0, gold_c,  SIZE_MD);
+                // Ammo
+                cell(row, &ammo.0.to_string(), 55.0, primary, SIZE_MD);
+
+                // Gold
+                cell(row, &gold.0.to_string(), 55.0, gold_c, SIZE_MD);
+
+                // Score
                 cell(row, &score.0.to_string(), 70.0, score_c, SIZE_LG);
 
+                // Viz toggle
                 row.spawn((
                     Button,
                     VizToggleButton(*agent_entity),
