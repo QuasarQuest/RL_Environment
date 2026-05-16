@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use crate::item::spawner::ItemSpawnConfig;
 use crate::item::ItemKind;
-use crate::agent::planning::strategy::StrategyKind;
-use crate::agent::planning::planner::PlannerKind;
+use crate::agent::strategy::StrategyKind;
+use crate::agent::planner::PlannerKind;
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind { Free, Obstacle, Base, BaseRed, BaseBlue }
@@ -54,10 +54,7 @@ impl ItemSpawnerRon {
             "SpeedBoost" => ItemKind::SpeedBoost,
             _            => return None,
         };
-        Some(ItemSpawnConfig {
-            kind,
-            max_on_map: self.max_on_map,
-        })
+        Some(ItemSpawnConfig { kind, max_on_map: self.max_on_map })
     }
 }
 

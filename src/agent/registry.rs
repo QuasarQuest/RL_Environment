@@ -1,13 +1,13 @@
 // src/agent/registry.rs
+//
+// Pure simulation factory: constructs AgentBehavior implementations from config.
+// No display concerns — labels, colors, and info live in src/factory/.
 
-use bevy::prelude::Color;
-use crate::team::Team;
 use crate::world::map_config::AgentConfig;
-use super::components::AgentInfo;
 use super::composition::Brain;
 use super::brain::AgentBehavior;
-use super::planning::planner::{AStarPlanner, DStarPlanner, NoPlanner, PlannerKind};
-use super::planning::strategy::{BtStrategy, FsmStrategy, GoapStrategy, RandomStrategy, StrategyKind};
+use super::planner::{AStarPlanner, DStarPlanner, NoPlanner, PlannerKind};
+use super::strategy::{BtStrategy, FsmStrategy, GoapStrategy, RandomStrategy, StrategyKind};
 
 pub fn make_agent(cfg: &AgentConfig) -> Box<dyn AgentBehavior> {
     match (cfg.strategy, cfg.planner) {
@@ -24,26 +24,3 @@ pub fn make_agent(cfg: &AgentConfig) -> Box<dyn AgentBehavior> {
         (StrategyKind::Random, _) => Box::new(Brain::new(RandomStrategy, NoPlanner)),
     }
 }
-
-/// Per-team consecutive label: "Red #1", "Blue #1", etc.
-pub fn agent_label(team: Team, team_index: usize) -> String {
-    format!("{} #{}", team.name(), team_index)
-}
-
-/// Strategy and planner names for scoreboard subtext.
-pub fn agent_info(cfg: &AgentConfig) -> AgentInfo {
-    let strategy = match cfg.strategy {
-        StrategyKind::Fsm          => "FSM",
-        StrategyKind::BehaviorTree => "Behavior Tree",
-        StrategyKind::Goap         => "GOAP",
-        StrategyKind::Random       => "Random",
-    };
-    let planner = match cfg.planner {
-        PlannerKind::AStar     => "A*",
-        PlannerKind::DStarLite => "D* Lite",
-        PlannerKind::None      => "None",
-    };
-    AgentInfo { strategy, planner }
-}
-
-pub fn agent_color(_cfg: &AgentConfig, team: Team) -> Color { team.color() }

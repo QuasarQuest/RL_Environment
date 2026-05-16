@@ -9,6 +9,7 @@ use super::agent_renderer::sync_agent_transforms;
 use super::algorithm::draw_agent_debug;
 use super::tooltip::{spawn_tooltip, update_tooltip};
 use super::help_overlay::{spawn_help_overlay, toggle_help_overlay};
+use crate::factory::assign_display_components;
 use crate::sim::plugin::{SimSystems, fire_sim_tick};
 
 use super::hud::{
@@ -39,6 +40,9 @@ impl Plugin for VizPlugin {
                 spawn_tab_scoreboard,
                 spawn_tooltip,
                 spawn_help_overlay,
+                // Runs after AgentPlugin::spawn_agents (also Startup).
+                // Assigns AgentLabel, AgentInfo, HideViz to spawned agents.
+                assign_display_components,
             ).chain())
             .configure_sets(Update,
                             HudUpdate

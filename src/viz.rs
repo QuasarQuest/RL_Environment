@@ -3,6 +3,7 @@
 pub mod agent_renderer;
 pub mod algorithm;
 pub mod camera;
+pub mod components;
 pub mod core_ui;
 pub mod grid_offset;
 pub mod help_overlay;

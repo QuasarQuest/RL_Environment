@@ -1,4 +1,7 @@
 // src/agent/components.rs
+//
+// Pure simulation components. No display, no viz, no factory concerns.
+// AgentLabel, AgentInfo, HideViz live in src/viz/components.rs.
 
 use bevy::prelude::*;
 use crate::config;
@@ -70,21 +73,3 @@ pub struct RespawnIn(pub u8);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SpawnPoint(pub GridPos);
-
-// ── Label ─────────────────────────────────────────────────────────────────────
-
-#[derive(Component, Clone, Debug)]
-pub struct AgentLabel(pub String);
-
-impl AgentLabel {
-    pub fn new(name: impl Into<String>) -> Self { Self(name.into()) }
-}
-
-// ── Info ──────────────────────────────────────────────────────────────────────
-// Metadata shown in the scoreboard beneath the agent name.
-
-#[derive(Component, Clone, Debug)]
-pub struct AgentInfo {
-    pub strategy: &'static str,
-    pub planner:  &'static str,
-}

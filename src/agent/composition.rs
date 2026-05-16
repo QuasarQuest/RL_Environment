@@ -6,8 +6,8 @@ use crate::agent::brain::AgentBehavior;
 use crate::agent::components::GridPos;
 use crate::agent::debug::{DebugDraw, DebugLine, DebugRect};
 use crate::agent::observation::Observation;
-use crate::agent::planning::planner::PathPlanner;
-use crate::agent::planning::strategy::DecisionStrategy;
+use crate::agent::planner::PathPlanner;
+use crate::agent::strategy::DecisionStrategy;
 
 pub struct Brain<S: DecisionStrategy, P: PathPlanner> {
     pub strategy: S,

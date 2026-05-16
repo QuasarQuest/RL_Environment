@@ -5,7 +5,6 @@ pub mod layout;
 pub mod scoreboard;
 pub mod systems;
 
-pub use components::HideViz;
 pub use layout::spawn_hud;
 pub use scoreboard::{spawn_tab_scoreboard, toggle_tab_scoreboard, update_tab_scoreboard};
 pub use systems::{

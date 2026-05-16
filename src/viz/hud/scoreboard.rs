@@ -1,11 +1,12 @@
 // src/viz/hud/scoreboard.rs
 
 use bevy::prelude::*;
-use crate::agent::components::{AgentInfo, AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
+use crate::agent::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score};
+use crate::viz::components::{AgentInfo, AgentLabel, HideViz};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, TOOLBAR_H};
 use crate::style::color::team_color;
 use crate::team::Team;
-use super::components::{TabScoreboard, TabScoreboardContent, HideViz};
+use super::components::{TabScoreboard, TabScoreboardContent};
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,6 @@ pub fn update_tab_scoreboard(
                 },
                 BackgroundColor(bg),
             )).with_children(|row| {
-                // Team dot
                 row.spawn((
                     Node {
                         width:         Val::Px(10.0),
@@ -168,7 +168,6 @@ pub fn update_tab_scoreboard(
                     BackgroundColor(tcolor),
                 ));
 
-                // Name + strategy/planner subtext stacked vertically
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     width:          Val::Px(220.0),
@@ -187,20 +186,12 @@ pub fn update_tab_scoreboard(
                     ));
                 });
 
-                // HP
                 let hp_display = if respawning.is_some() { "dead".to_string() } else { hp_str };
                 cell(row, &hp_display, 60.0, hp_color, SIZE_MD);
-
-                // Ammo
-                cell(row, &ammo.0.to_string(), 55.0, primary, SIZE_MD);
-
-                // Gold
-                cell(row, &gold.0.to_string(), 55.0, gold_c, SIZE_MD);
-
-                // Score
+                cell(row, &ammo.0.to_string(),  55.0, primary, SIZE_MD);
+                cell(row, &gold.0.to_string(),  55.0, gold_c,  SIZE_MD);
                 cell(row, &score.0.to_string(), 70.0, score_c, SIZE_LG);
 
-                // Viz toggle
                 row.spawn((
                     Button,
                     VizToggleButton(*agent_entity),

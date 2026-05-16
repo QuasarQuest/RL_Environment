@@ -2,8 +2,8 @@
 
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
-use crate::agent::components::{AgentLabel, Ammo, GoldCarried, Hearts, RespawnIn, Score};
-use crate::viz::hud::HideViz;
+use crate::agent::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score};
+use crate::viz::components::{AgentLabel, HideViz};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM};
 use super::grid_offset::GridOffset;
 use super::camera::MainCamera;

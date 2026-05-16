@@ -1,15 +1,17 @@
 // src/agent/spawn.rs
+//
+// Spawns the simulation bundle for each agent defined in MapConfig.
+// No display components — AgentLabel, AgentInfo, HideViz are attached
+// by the factory layer (src/factory/mod.rs) after this system runs.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 use crate::config;
 use crate::team::Team;
 use crate::world::map_config::MapConfig;
-use crate::viz::hud::HideViz;
 use super::brain::AgentBrain;
-use super::components::{AgentInfo, AgentLabel, Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
+use super::components::{Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
 use super::systems::PendingAction;
-use super::registry::{agent_color, agent_info, agent_label, make_agent};
+use super::registry::make_agent;
 
 #[derive(Bundle)]
 pub struct AgentBundle {
@@ -19,8 +21,6 @@ pub struct AgentBundle {
     pub ammo:        Ammo,
     pub gold:        GoldCarried,
     pub score:       Score,
-    pub label:       AgentLabel,
-    pub info:        AgentInfo,
     pub brain:       AgentBrain,
     pub team:        Team,
     pub pending:     PendingAction,
@@ -31,23 +31,20 @@ pub struct AgentBundle {
 
 impl AgentBundle {
     pub fn new(
-        x: i32, y: i32,
-        label: AgentLabel,
-        info:  AgentInfo,
+        x:     i32,
+        y:     i32,
         brain: AgentBrain,
         team:  Team,
-        color: Color,
+        color: bevy::prelude::Color,
     ) -> Self {
         let pos = GridPos::new(x, y);
         Self {
             pos,
             spawn_point: SpawnPoint(pos),
-            hearts:  Hearts::default(),
-            ammo:    Ammo::default(),
-            gold:    GoldCarried::default(),
-            score:   Score::default(),
-            label,
-            info,
+            hearts:    Hearts::default(),
+            ammo:      Ammo::default(),
+            gold:      GoldCarried::default(),
+            score:     Score::default(),
             brain,
             team,
             pending:   PendingAction::default(),
@@ -63,25 +60,10 @@ impl AgentBundle {
 }
 
 pub fn spawn_agents(mut commands: Commands, map: Res<MapConfig>) {
-    // Count agents per team to assign consecutive per-team numbers.
-    let mut team_counters: HashMap<u8, usize> = HashMap::new();
-
     for cfg in map.agents.iter() {
-        let team_id  = cfg.team.unwrap_or(0) as u8;
-        let team     = Team(team_id);
-        let counter  = team_counters.entry(team_id).or_insert(0);
-        *counter    += 1;
-        let team_idx = *counter;
-
-        let label = AgentLabel::new(agent_label(team, team_idx));
-        let info  = agent_info(cfg);
+        let team  = Team(cfg.team.unwrap_or(0) as u8);
         let brain = AgentBrain(make_agent(cfg));
-        let color = agent_color(cfg, team);
-
-        info!("Spawning {} [{}] for team {}",
-            label.0, brain.0.name(), team.name());
-
-        commands.spawn(AgentBundle::new(cfg.x, cfg.y, label, info, brain, team, color))
-            .insert(HideViz);
+        let color = team.color();
+        commands.spawn(AgentBundle::new(cfg.x, cfg.y, brain, team, color));
     }
 }

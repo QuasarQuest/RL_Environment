@@ -3,6 +3,7 @@
 mod agent;
 mod algorithm;
 mod config;
+mod factory;
 mod item;
 mod sim;
 mod style;
@@ -30,7 +31,6 @@ fn main() {
             }),
             ..default()
         }))
-        // Order matters: World loads map config, Item reads it, then agents spawn.
-        .add_plugins((WorldPlugin, SimPlugin, ItemPlugin, VizPlugin, AgentPlugin))
+        .add_plugins((WorldPlugin, SimPlugin, ItemPlugin, AgentPlugin, VizPlugin))
         .run();
 }
