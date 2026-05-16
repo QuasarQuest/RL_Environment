@@ -9,18 +9,22 @@ use crate::agent::observation::Observation;
 use crate::agent::planning::planner::PathPlanner;
 use crate::agent::planning::strategy::DecisionStrategy;
 
-pub struct Brain<S: DecisionStrategy, P: PathPlanner> {
+pub struct Brain<S, P: PathPlanner> {
     pub strategy: S,
     pub planner:  P,
 }
 
-impl<S: DecisionStrategy, P: PathPlanner> Brain<S, P> {
+impl<S, P: PathPlanner> Brain<S, P> {
     pub fn new(strategy: S, planner: P) -> Self {
         Self { strategy, planner }
     }
 }
 
-impl<S: DecisionStrategy, P: PathPlanner> AgentBehavior for Brain<S, P> {
+impl<S, P> AgentBehavior for Brain<S, P>
+where
+    S: DecisionStrategy<P>,
+    P: PathPlanner + 'static,
+{
     fn name(&self) -> &str { self.strategy.name() }
 
     fn act(&mut self, obs: &Observation) -> Action {

@@ -18,7 +18,7 @@ fn spawn_world(
     map:          Res<MapConfig>,
     mut grid:     ResMut<Grid>,
 ) {
-    // 1. Fixed tiles
+    // 1. Fixed tiles (bases etc.)
     for fixed in &map.fixed {
         let tile = match fixed.tile {
             TileKind::Free     => Tile::Free,
@@ -85,9 +85,28 @@ fn spawn_world(
         }
     }
 
-    // 3. Initial items — spawned with a placeholder transform (Vec3::ZERO).
-    //    sync_item_transforms runs every Update frame and sets the correct position
-    //    once GridOffset is available, so no dependency on GridOffset here.
+    // 3. Clear spawn perimeters — guarantee a free zone around every agent
+    //    spawn point so agents never start inside or immediately adjacent to
+    //    an obstacle. Radius 2 gives a 5×5 clear zone; the centre tile and
+    //    all its 8 neighbours are always walkable.
+    //    Base tiles are preserved — only obstacles are cleared.
+    const SPAWN_CLEAR_RADIUS: i32 = 2;
+    for agent_cfg in &map.agents {
+        for dy in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
+            for dx in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
+                let cx = agent_cfg.x + dx;
+                let cy = agent_cfg.y + dy;
+                if grid.in_bounds(cx, cy) {
+                    if grid.get(cx, cy) == Some(Tile::Obstacle) {
+                        grid.set(cx, cy, Tile::Free);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Initial items — spawned with placeholder transform (Vec3::ZERO).
+    //    sync_item_transforms corrects positions once GridOffset is available.
     for spawner_cfg in &map.item_spawners {
         if spawner_cfg.initial == 0 { continue; }
         let Some(cfg) = spawner_cfg.to_config() else { continue };
