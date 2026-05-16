@@ -8,10 +8,13 @@ use crate::algorithm::path_planning::a_star::compute_path;
 use crate::algorithm::path_planning::d_star_lite::DStarLite;
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
+//
+// Uses &dyn Fn instead of impl Fn so the trait is dyn-compatible.
+// This lets BtStrategy own a Box<dyn PathPlanner>.
 
 pub trait PathPlanner: Send + Sync {
-    fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: impl Fn(GridPos) -> bool);
-    fn update(&mut self, current_pos: GridPos, is_walkable: impl Fn(GridPos) -> bool);
+    fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: &dyn Fn(GridPos) -> bool);
+    fn update(&mut self, current_pos: GridPos, is_walkable: &dyn Fn(GridPos) -> bool);
     fn next_step(&self) -> Option<GridPos>;
     fn path_for_debug(&self) -> Vec<GridPos> { Vec::new() }
     fn debug_rects(&self) -> Vec<(GridPos, bevy::prelude::Color)> { Vec::new() }
@@ -23,8 +26,8 @@ pub trait PathPlanner: Send + Sync {
 pub struct NoPlanner;
 
 impl PathPlanner for NoPlanner {
-    fn set_goal(&mut self, _s: GridPos, _g: GridPos, _w: impl Fn(GridPos) -> bool) {}
-    fn update(&mut self, _pos: GridPos, _w: impl Fn(GridPos) -> bool) {}
+    fn set_goal(&mut self, _s: GridPos, _g: GridPos, _w: &dyn Fn(GridPos) -> bool) {}
+    fn update(&mut self, _pos: GridPos, _w: &dyn Fn(GridPos) -> bool) {}
     fn next_step(&self) -> Option<GridPos> { None }
     fn reset(&mut self) {}
 }
@@ -48,14 +51,14 @@ impl AStarPlanner {
 }
 
 impl PathPlanner for AStarPlanner {
-    fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: impl Fn(GridPos) -> bool) {
+    fn set_goal(&mut self, start: GridPos, goal: GridPos, is_walkable: &dyn Fn(GridPos) -> bool) {
         let result        = compute_path(start, goal, is_walkable);
         self.debug_closed = result.closed_set.into_iter().collect();
         self.debug_open   = result.open_set;
         self.path         = result.path.into();
     }
 
-    fn update(&mut self, current_pos: GridPos, _is_walkable: impl Fn(GridPos) -> bool) {
+    fn update(&mut self, current_pos: GridPos, _is_walkable: &dyn Fn(GridPos) -> bool) {
         if self.path.front() == Some(&current_pos) {
             self.path.pop_front();
         }
@@ -91,14 +94,14 @@ impl DStarPlanner {
 }
 
 impl PathPlanner for DStarPlanner {
-    fn set_goal(&mut self, start: GridPos, goal: GridPos, _is_walkable: impl Fn(GridPos) -> bool) {
+    fn set_goal(&mut self, start: GridPos, goal: GridPos, _is_walkable: &dyn Fn(GridPos) -> bool) {
         let mut p = DStarLite::new(start, goal);
         p.compute_shortest_path();
         self.inner    = Some(p);
         self.last_pos = Some(start);
     }
 
-    fn update(&mut self, current_pos: GridPos, is_walkable: impl Fn(GridPos) -> bool) {
+    fn update(&mut self, current_pos: GridPos, is_walkable: &dyn Fn(GridPos) -> bool) {
         let Some(ref mut p) = self.inner else { return };
         if self.last_pos.map(|l| l != current_pos).unwrap_or(false) {
             p.update_start(current_pos);

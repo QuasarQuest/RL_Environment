@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::agent::action::{Action, Dir};
 use crate::agent::components::GridPos;
 use crate::agent::observation::Observation;
-use crate::agent::planning::planner::PathPlanner;
+use crate::agent::planning::planner::{AStarPlanner, DStarPlanner, PathPlanner};
 use crate::algorithm::behavior_planning::behavior_tree::{BtNode, Status, selector, sequence, cond, leaf};
 use crate::algorithm::behavior_planning::fsm::{Fsm, FsmState};
 use crate::algorithm::behavior_planning::goap::{
@@ -16,20 +16,17 @@ use crate::item::ItemKind;
 use crate::world::tile::Tile;
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
-//
-// Generic over P so BT strategies can name the concrete planner type,
-// while FSM / GOAP / Random implement it for any P with a blanket impl.
 
-pub trait DecisionStrategy<P: PathPlanner>: Send + Sync {
+pub trait DecisionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
-    fn decide(&mut self, obs: &Observation, planner: &mut P) -> Action;
+    fn decide(&mut self, obs: &Observation, planner: &mut impl PathPlanner) -> Action;
     fn reset(&mut self) {}
 }
 
 // ── Shared nav helper ─────────────────────────────────────────────────────────
 
 pub fn try_move(
-    planner:     &mut impl PathPlanner,
+    planner:     &mut dyn PathPlanner,
     obs:         &Observation,
     stuck_ticks: &mut u8,
 ) -> Result<Action, ()> {
@@ -45,7 +42,6 @@ pub fn try_move(
 
 // ── Combat helpers ────────────────────────────────────────────────────────────
 
-/// Dir toward the nearest adjacent (Chebyshev 1) enemy, if any.
 fn adjacent_enemy_dir(obs: &Observation) -> Option<Dir> {
     Dir::all().iter().copied().find(|&dir| {
         let (dx, dy) = dir.delta();
@@ -55,8 +51,6 @@ fn adjacent_enemy_dir(obs: &Observation) -> Option<Dir> {
     })
 }
 
-/// Dir toward the nearest enemy within RANGED_RANGE along a ray, blocked by
-/// obstacles. Returns None if no clear shot exists.
 fn ranged_enemy_dir(obs: &Observation) -> Option<Dir> {
     let mut best_dir:  Option<Dir> = None;
     let mut best_dist: i32         = i32::MAX;
@@ -74,12 +68,6 @@ fn ranged_enemy_dir(obs: &Observation) -> Option<Dir> {
     best_dir
 }
 
-/// True if we have strictly more hearts than the nearest visible enemy.
-fn hp_advantage(obs: &Observation) -> bool {
-    obs.nearest_enemy().map(|e| obs.hearts.0 > e.hearts.0).unwrap_or(false)
-}
-
-/// Pick a random walkable direction, or Wait if none available.
 fn roam(obs: &Observation) -> Action {
     let dirs: Vec<Dir> = Dir::all().iter().copied()
         .filter(|&d| {
@@ -91,14 +79,18 @@ fn roam(obs: &Observation) -> Action {
     else { Action::Move(dirs[rand::random_range(0..dirs.len())]) }
 }
 
-// ── BT context ────────────────────────────────────────────────────────────────
-//
-// Bundles the observation and mutable planner / nav state for leaf closures.
-// Raw pointers are used so the tree (which stores Fn closures, not FnMut)
-// can mutate state owned by the calling stack frame.
-//
-// SAFETY: BtCtx is created, ticked, and dropped within a single synchronous
-// call to decide(). The raw pointers never escape the tick call.
+// ── BT intent ─────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug)]
+enum NavTarget { Gold, Base, Health, FleeFrom(GridPos) }
+
+#[derive(Clone, Copy, Debug)]
+enum BtOutput {
+    Direct(Action),
+    Navigate(NavTarget),
+}
+
+// ── Nav state ─────────────────────────────────────────────────────────────────
 
 struct NavState {
     current_goal: Option<GridPos>,
@@ -106,270 +98,195 @@ struct NavState {
 }
 
 impl NavState {
-    fn new()   -> Self { Self { current_goal: None, stuck_ticks: 0 } }
-    fn reset(&mut self) { self.current_goal = None; self.stuck_ticks = 0; }
+    fn new()        -> Self { Self { current_goal: None, stuck_ticks: 0 } }
+    fn reset(&mut self)     { self.current_goal = None; self.stuck_ticks = 0; }
 }
 
-pub struct BtCtx<'a, P: PathPlanner> {
-    obs:     &'a Observation,
-    planner: *mut P,
-    nav:     *mut NavState,
-}
+fn resolve_nav(
+    target:  NavTarget,
+    obs:     &Observation,
+    planner: &mut dyn PathPlanner,
+    nav:     &mut NavState,
+) -> Action {
+    let walkable = obs.walkability_fn();
 
-unsafe impl<P: PathPlanner> Send for BtCtx<'_, P> {}
-unsafe impl<P: PathPlanner> Sync for BtCtx<'_, P> {}
+    let goal = match target {
+        NavTarget::Gold   => obs.nearest_item(ItemKind::Gold),
+        NavTarget::Base   => obs.nearest_own_base(),
+        NavTarget::Health => obs.nearest_item(ItemKind::Health),
+        NavTarget::FleeFrom(enemy_pos) => {
+            let dx   = (obs.pos.x - enemy_pos.x).signum();
+            let dy   = (obs.pos.y - enemy_pos.y).signum();
+            let flee = GridPos::new(obs.pos.x + dx, obs.pos.y + dy);
+            if obs.is_walkable(flee) { Some(flee) } else { None }
+        }
+    };
 
-fn nav_leaf<P: PathPlanner>(
-    goal: GridPos,
-    ctx:  &BtCtx<P>,
-    out:  &mut Option<Action>,
-) -> Status {
-    let planner = unsafe { &mut *ctx.planner };
-    let nav     = unsafe { &mut *ctx.nav };
+    let Some(goal) = goal else { nav.reset(); return Action::Wait; };
+
     if nav.current_goal != Some(goal) {
-        planner.set_goal(ctx.obs.pos, goal, ctx.obs.walkability_fn());
+        planner.set_goal(obs.pos, goal, &walkable);
         nav.current_goal = Some(goal);
     }
-    planner.update(ctx.obs.pos, ctx.obs.walkability_fn());
-    match try_move(planner, ctx.obs, &mut nav.stuck_ticks) {
-        Ok(action) => { *out = Some(action); Status::Running }
-        Err(())    => { nav.reset(); planner.reset(); Status::Failure }
+    planner.update(obs.pos, &walkable);
+
+    match try_move(planner, obs, &mut nav.stuck_ticks) {
+        Ok(action) => action,
+        Err(())    => { nav.reset(); planner.reset(); Action::Wait }
     }
 }
 
-// ── Cautious BT tree ──────────────────────────────────────────────────────────
+// ── BT tree ───────────────────────────────────────────────────────────────────
 //
-// Priority (high → low):
-//   Survive → Flee → Ranged(hp-advantage) → Melee(hp-advantage)
-//   → Drop → Deliver → Collect → Roam
+// Opportunistic: fight when it makes sense, collect gold, survive.
+//
+// Priority:
+//   1. Critical survival  — 1 heart left → seek health immediately
+//   2. Ranged attack      — has ammo + clear shot (always worth shooting)
+//   3. Melee attack       — adjacent enemy (always engage in melee)
+//   4. Drop gold on base
+//   5. Deliver            — full OR base closer than gold
+//   6. Collect gold
+//   7. Opportunistic heal — hurt + health nearby + no enemies around
+//   8. Flee               — hurt + enemy nearby + no health available
+//   9. Roam
 
-fn build_cautious_tree<P: PathPlanner + 'static>()
-    -> Box<dyn BtNode<BtCtx<'static, P>, Action>>
-{
+fn build_bt_tree() -> Box<dyn BtNode<Observation, BtOutput>> {
     selector(vec![
-        // 1. Survive — low health + health item on map
+
+        // 1. Critical survival — 1 heart, go heal regardless of anything
         sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.needs_health() && c.obs.nearest_item(ItemKind::Health).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(hp) = c.obs.nearest_item(ItemKind::Health) else { return Status::Failure };
-                nav_leaf(hp, c, out)
+            cond(|o: &Observation| o.hearts.0 <= 1 && o.nearest_item(ItemKind::Health).is_some()),
+            leaf(|_: &Observation, out: &mut Option<BtOutput>| {
+                *out = Some(BtOutput::Navigate(NavTarget::Health));
+                Status::Running
             }),
         ]),
-        // 2. Flee — low health + no health available + enemy nearby
+
+        // 2. Ranged — has ammo + clear shot exists
         sequence(vec![
-            cond(|c: &BtCtx<P>| {
-                c.obs.needs_health()
-                    && c.obs.nearest_item(ItemKind::Health).is_none()
-                    && c.obs.nearest_enemy().is_some()
-            }),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(e) = c.obs.nearest_enemy() else { return Status::Failure };
-                let dx   = (c.obs.pos.x - e.pos.x).signum();
-                let dy   = (c.obs.pos.y - e.pos.y).signum();
-                let flee = GridPos::new(c.obs.pos.x + dx, c.obs.pos.y + dy);
-                if c.obs.is_walkable(flee) {
-                    *out = dir_to(c.obs.pos, flee).map(Action::Move);
-                    if out.is_some() { Status::Running } else { Status::Failure }
-                } else {
-                    Status::Failure
-                }
-            }),
-        ]),
-        // 3. Ranged — ammo available + HP advantage + clear shot
-        sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.has_ammo() && hp_advantage(c.obs) && ranged_enemy_dir(c.obs).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                match ranged_enemy_dir(c.obs) {
-                    Some(d) => { *out = Some(Action::RangedAttack(d)); Status::Running }
+            cond(|o: &Observation| o.has_ammo() && ranged_enemy_dir(o).is_some()),
+            leaf(|o: &Observation, out: &mut Option<BtOutput>| {
+                match ranged_enemy_dir(o) {
+                    Some(d) => { *out = Some(BtOutput::Direct(Action::RangedAttack(d))); Status::Running }
                     None    => Status::Failure,
                 }
             }),
         ]),
-        // 4. Melee — adjacent enemy + HP advantage
+
+        // 3. Melee — adjacent enemy, always engage
         sequence(vec![
-            cond(|c: &BtCtx<P>| hp_advantage(c.obs) && adjacent_enemy_dir(c.obs).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                match adjacent_enemy_dir(c.obs) {
-                    Some(d) => { *out = Some(Action::Attack(d)); Status::Running }
+            cond(|o: &Observation| adjacent_enemy_dir(o).is_some()),
+            leaf(|o: &Observation, out: &mut Option<BtOutput>| {
+                match adjacent_enemy_dir(o) {
+                    Some(d) => { *out = Some(BtOutput::Direct(Action::Attack(d))); Status::Running }
                     None    => Status::Failure,
                 }
             }),
         ]),
-        // 5. Drop gold if standing on own base
+
+        // 4. Drop gold on own base
         sequence(vec![
-            cond(|c: &BtCtx<P>| {
-                !c.obs.gold_carried.is_empty()
-                    && matches!(c.obs.grid_tile(c.obs.pos), Some(Tile::Base(t)) if t == c.obs.team.0)
+            cond(|o: &Observation| {
+                !o.gold_carried.is_empty()
+                    && matches!(o.grid_tile(o.pos), Some(Tile::Base(t)) if t == o.team.0)
             }),
-            leaf(|_: &BtCtx<P>, out: &mut Option<Action>| {
-                *out = Some(Action::Drop); Status::Running
+            leaf(|_: &Observation, out: &mut Option<BtOutput>| {
+                *out = Some(BtOutput::Direct(Action::Drop));
+                Status::Running
             }),
         ]),
-        // 6. Deliver — full OR base closer than nearest gold
+
+        // 5. Deliver — full OR base closer than nearest gold
         sequence(vec![
-            cond(|c: &BtCtx<P>| {
-                if c.obs.gold_carried.is_empty() { return false; }
-                if c.obs.gold_carried.is_full()  { return true; }
-                let bd = c.obs.nearest_own_base().map(|b| c.obs.pos.dist_sq(b)).unwrap_or(i32::MAX);
-                let gd = c.obs.nearest_item(ItemKind::Gold).map(|g| c.obs.pos.dist_sq(g)).unwrap_or(i32::MAX);
+            cond(|o: &Observation| {
+                if o.gold_carried.is_empty() { return false; }
+                if o.gold_carried.is_full()  { return true; }
+                let bd = o.nearest_own_base().map(|b| o.pos.dist_sq(b)).unwrap_or(i32::MAX);
+                let gd = o.nearest_item(ItemKind::Gold).map(|g| o.pos.dist_sq(g)).unwrap_or(i32::MAX);
                 bd < gd
             }),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(base) = c.obs.nearest_own_base() else { return Status::Failure };
-                nav_leaf(base, c, out)
+            leaf(|_: &Observation, out: &mut Option<BtOutput>| {
+                *out = Some(BtOutput::Navigate(NavTarget::Base));
+                Status::Running
             }),
         ]),
-        // 7. Collect nearest gold
+
+        // 6. Collect gold
         sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.nearest_item(ItemKind::Gold).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(gold) = c.obs.nearest_item(ItemKind::Gold) else { return Status::Failure };
-                nav_leaf(gold, c, out)
+            cond(|o: &Observation| o.nearest_item(ItemKind::Gold).is_some()),
+            leaf(|_: &Observation, out: &mut Option<BtOutput>| {
+                *out = Some(BtOutput::Navigate(NavTarget::Gold));
+                Status::Running
             }),
         ]),
-        // 8. Roam
-        leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-            *out = Some(roam(c.obs)); Status::Running
+
+        // 7. Opportunistic heal — hurt, health nearby, no enemies
+        sequence(vec![
+            cond(|o: &Observation| {
+                o.needs_health()
+                    && o.nearest_item(ItemKind::Health).is_some()
+                    && o.nearest_enemy().is_none()
+            }),
+            leaf(|_: &Observation, out: &mut Option<BtOutput>| {
+                *out = Some(BtOutput::Navigate(NavTarget::Health));
+                Status::Running
+            }),
+        ]),
+
+        // 8. Flee — hurt + enemy nearby + no health available
+        sequence(vec![
+            cond(|o: &Observation| {
+                o.needs_health()
+                    && o.nearest_enemy().is_some()
+                    && o.nearest_item(ItemKind::Health).is_none()
+            }),
+            leaf(|o: &Observation, out: &mut Option<BtOutput>| {
+                let Some(e) = o.nearest_enemy() else { return Status::Failure };
+                *out = Some(BtOutput::Navigate(NavTarget::FleeFrom(e.pos)));
+                Status::Running
+            }),
+        ]),
+
+        // 9. Roam
+        leaf(|o: &Observation, out: &mut Option<BtOutput>| {
+            *out = Some(BtOutput::Direct(roam(o)));
+            Status::Running
         }),
     ])
 }
 
-// ── Aggressive BT tree ────────────────────────────────────────────────────────
-//
-// Priority (high → low):
-//   Melee(any) → Ranged(any) → Drop → Deliver(full) → Collect
-//   → Survive(last-resort) → Roam
+// ── BtStrategy ────────────────────────────────────────────────────────────────
 
-fn build_aggressive_tree<P: PathPlanner + 'static>()
-    -> Box<dyn BtNode<BtCtx<'static, P>, Action>>
-{
-    selector(vec![
-        // 1. Melee — strike any adjacent enemy unconditionally
-        sequence(vec![
-            cond(|c: &BtCtx<P>| adjacent_enemy_dir(c.obs).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                match adjacent_enemy_dir(c.obs) {
-                    Some(d) => { *out = Some(Action::Attack(d)); Status::Running }
-                    None    => Status::Failure,
-                }
-            }),
-        ]),
-        // 2. Ranged — shoot if ammo and clear shot, regardless of HP
-        sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.has_ammo() && ranged_enemy_dir(c.obs).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                match ranged_enemy_dir(c.obs) {
-                    Some(d) => { *out = Some(Action::RangedAttack(d)); Status::Running }
-                    None    => Status::Failure,
-                }
-            }),
-        ]),
-        // 3. Drop gold on own base
-        sequence(vec![
-            cond(|c: &BtCtx<P>| {
-                !c.obs.gold_carried.is_empty()
-                    && matches!(c.obs.grid_tile(c.obs.pos), Some(Tile::Base(t)) if t == c.obs.team.0)
-            }),
-            leaf(|_: &BtCtx<P>, out: &mut Option<Action>| {
-                *out = Some(Action::Drop); Status::Running
-            }),
-        ]),
-        // 4. Deliver when full
-        sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.gold_carried.is_full()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(base) = c.obs.nearest_own_base() else { return Status::Failure };
-                nav_leaf(base, c, out)
-            }),
-        ]),
-        // 5. Collect gold
-        sequence(vec![
-            cond(|c: &BtCtx<P>| c.obs.nearest_item(ItemKind::Gold).is_some()),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(gold) = c.obs.nearest_item(ItemKind::Gold) else { return Status::Failure };
-                nav_leaf(gold, c, out)
-            }),
-        ]),
-        // 6. Survive — only when no enemies present (last resort)
-        sequence(vec![
-            cond(|c: &BtCtx<P>| {
-                c.obs.needs_health()
-                    && c.obs.nearest_enemy().is_none()
-                    && c.obs.nearest_item(ItemKind::Health).is_some()
-            }),
-            leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-                let Some(hp) = c.obs.nearest_item(ItemKind::Health) else { return Status::Failure };
-                nav_leaf(hp, c, out)
-            }),
-        ]),
-        // 7. Roam
-        leaf(|c: &BtCtx<P>, out: &mut Option<Action>| {
-            *out = Some(roam(c.obs)); Status::Running
-        }),
-    ])
+pub struct BtStrategy {
+    tree:    Box<dyn BtNode<Observation, BtOutput>>,
+    planner: Box<dyn PathPlanner>,
+    nav:     NavState,
 }
 
-// ── BtCautiousStrategy ────────────────────────────────────────────────────────
+impl BtStrategy {
+    pub fn new_astar() -> Self { Self::with(Box::new(AStarPlanner::new())) }
+    pub fn new_dstar() -> Self { Self::with(Box::new(DStarPlanner::new())) }
 
-pub struct BtCautiousStrategy<P: PathPlanner + 'static> {
-    tree: Box<dyn BtNode<BtCtx<'static, P>, Action>>,
-    nav:  NavState,
-}
-
-impl<P: PathPlanner + 'static> BtCautiousStrategy<P> {
-    pub fn new() -> Self {
-        Self { tree: build_cautious_tree::<P>(), nav: NavState::new() }
+    fn with(planner: Box<dyn PathPlanner>) -> Self {
+        Self { tree: build_bt_tree(), planner, nav: NavState::new() }
     }
 }
 
-impl<P: PathPlanner + 'static> DecisionStrategy<P> for BtCautiousStrategy<P> {
-    fn name(&self) -> &'static str { "BT-Cautious" }
+impl DecisionStrategy for BtStrategy {
+    fn name(&self) -> &'static str { "BT" }
 
-    fn decide(&mut self, obs: &Observation, planner: &mut P) -> Action {
-        let mut ctx = BtCtx {
-            obs,
-            planner: planner as *mut P,
-            nav:     &mut self.nav as *mut NavState,
-        };
-        // SAFETY: tree tick is synchronous; ctx outlives the tick call.
-        let ctx_s: &mut BtCtx<'static, P> = unsafe { std::mem::transmute(&mut ctx) };
+    fn decide(&mut self, obs: &Observation, _planner: &mut impl PathPlanner) -> Action {
         let mut out = None;
-        self.tree.tick(ctx_s, &mut out);
-        out.unwrap_or(Action::Wait)
+        self.tree.tick(obs, &mut out);
+        match out.unwrap_or(BtOutput::Direct(Action::Wait)) {
+            BtOutput::Direct(action)   => action,
+            BtOutput::Navigate(target) =>
+                resolve_nav(target, obs, self.planner.as_mut(), &mut self.nav),
+        }
     }
 
-    fn reset(&mut self) { self.nav.reset(); }
-}
-
-// ── BtAggressiveStrategy ──────────────────────────────────────────────────────
-
-pub struct BtAggressiveStrategy<P: PathPlanner + 'static> {
-    tree: Box<dyn BtNode<BtCtx<'static, P>, Action>>,
-    nav:  NavState,
-}
-
-impl<P: PathPlanner + 'static> BtAggressiveStrategy<P> {
-    pub fn new() -> Self {
-        Self { tree: build_aggressive_tree::<P>(), nav: NavState::new() }
-    }
-}
-
-impl<P: PathPlanner + 'static> DecisionStrategy<P> for BtAggressiveStrategy<P> {
-    fn name(&self) -> &'static str { "BT-Aggressive" }
-
-    fn decide(&mut self, obs: &Observation, planner: &mut P) -> Action {
-        let mut ctx = BtCtx {
-            obs,
-            planner: planner as *mut P,
-            nav:     &mut self.nav as *mut NavState,
-        };
-        let ctx_s: &mut BtCtx<'static, P> = unsafe { std::mem::transmute(&mut ctx) };
-        let mut out = None;
-        self.tree.tick(ctx_s, &mut out);
-        out.unwrap_or(Action::Wait)
-    }
-
-    fn reset(&mut self) { self.nav.reset(); }
+    fn reset(&mut self) { self.nav.reset(); self.planner.reset(); }
 }
 
 // ── FSM ───────────────────────────────────────────────────────────────────────
@@ -410,11 +327,12 @@ impl FsmStrategy {
     }
 }
 
-impl<P: PathPlanner> DecisionStrategy<P> for FsmStrategy {
+impl DecisionStrategy for FsmStrategy {
     fn name(&self) -> &'static str { "FSM" }
 
-    fn decide(&mut self, obs: &Observation, planner: &mut P) -> Action {
-        planner.update(obs.pos, obs.walkability_fn());
+    fn decide(&mut self, obs: &Observation, planner: &mut impl PathPlanner) -> Action {
+        let walkable = obs.walkability_fn();
+        planner.update(obs.pos, &walkable);
 
         let on_base = matches!(obs.grid_tile(obs.pos), Some(Tile::Base(t)) if t == obs.team.0);
         if on_base && !obs.gold_carried.is_empty() {
@@ -429,7 +347,7 @@ impl<P: PathPlanner> DecisionStrategy<P> for FsmStrategy {
         if obs.gold_carried.is_full() {
             let base = match obs.nearest_own_base() { Some(b) => b, None => return Action::Wait };
             if self.current_target() != Some(base) || planner.next_step().is_none() {
-                planner.set_goal(obs.pos, base, obs.walkability_fn());
+                planner.set_goal(obs.pos, base, &walkable);
                 self.fsm.transition(FsmPhase::Active { phase: CollectPhase::Returning, target: base });
             }
             return match try_move(planner, obs, &mut self.stuck_ticks) {
@@ -440,7 +358,7 @@ impl<P: PathPlanner> DecisionStrategy<P> for FsmStrategy {
 
         if let Some(gold) = obs.nearest_item(ItemKind::Gold) {
             if self.current_target() != Some(gold) || planner.next_step().is_none() {
-                planner.set_goal(obs.pos, gold, obs.walkability_fn());
+                planner.set_goal(obs.pos, gold, &walkable);
                 self.fsm.transition(FsmPhase::Active { phase: CollectPhase::Collecting, target: gold });
             }
             return match try_move(planner, obs, &mut self.stuck_ticks) {
@@ -460,10 +378,10 @@ impl<P: PathPlanner> DecisionStrategy<P> for FsmStrategy {
 
 pub struct RandomStrategy;
 
-impl<P: PathPlanner> DecisionStrategy<P> for RandomStrategy {
+impl DecisionStrategy for RandomStrategy {
     fn name(&self) -> &'static str { "Random" }
 
-    fn decide(&mut self, obs: &Observation, _planner: &mut P) -> Action {
+    fn decide(&mut self, obs: &Observation, _planner: &mut impl PathPlanner) -> Action {
         let on_base = matches!(obs.grid_tile(obs.pos), Some(Tile::Base(t)) if t == obs.team.0);
         if on_base && !obs.gold_carried.is_empty() { return Action::Drop; }
         let dirs = Dir::all();
@@ -519,11 +437,12 @@ impl GoapStrategy {
     }
 }
 
-impl<P: PathPlanner> DecisionStrategy<P> for GoapStrategy {
+impl DecisionStrategy for GoapStrategy {
     fn name(&self) -> &'static str { "GOAP" }
 
-    fn decide(&mut self, obs: &Observation, planner: &mut P) -> Action {
-        planner.update(obs.pos, obs.walkability_fn());
+    fn decide(&mut self, obs: &Observation, planner: &mut impl PathPlanner) -> Action {
+        let walkable = obs.walkability_fn();
+        planner.update(obs.pos, &walkable);
 
         let on_base = matches!(obs.grid_tile(obs.pos), Some(Tile::Base(t)) if t == obs.team.0);
         if on_base && !obs.gold_carried.is_empty() {
@@ -543,7 +462,7 @@ impl<P: PathPlanner> DecisionStrategy<P> for GoapStrategy {
         let Some(goal_pos) = Self::nav_target(step, obs) else { return Action::Wait; };
 
         if self.current_goal != Some(goal_pos) {
-            planner.set_goal(obs.pos, goal_pos, obs.walkability_fn());
+            planner.set_goal(obs.pos, goal_pos, &walkable);
             self.current_goal = Some(goal_pos);
         }
 
@@ -572,7 +491,6 @@ impl<P: PathPlanner> DecisionStrategy<P> for GoapStrategy {
 pub enum StrategyKind {
     Fsm,
     BehaviorTree,
-    BehaviorTreeAggressive,
     Random,
     Goap,
 }

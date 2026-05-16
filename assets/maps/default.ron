@@ -24,8 +24,8 @@
     // strategy: Fsm | BehaviorTree | Random | Goap
     // planner:  AStar | DStarLite | None
     agents: [
-        ( x: 5,  y: 5,  strategy: BehaviorTreeAggressive,          planner: AStar,     team: Some(0) ),
-        ( x: 45, y: 45, strategy: BehaviorTreeAggressive,  planner: AStar, team: Some(1) ),
+        ( x: 5,  y: 5,  strategy: BehaviorTree,  planner: AStar, team: Some(0) ),
+        ( x: 45, y: 45, strategy: BehaviorTree,  planner: AStar, team: Some(1) ),
     ],
 
     obstacle_clusters: [

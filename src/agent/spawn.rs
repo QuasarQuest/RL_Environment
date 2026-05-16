@@ -64,8 +64,13 @@ pub fn spawn_agents(mut commands: Commands, map: Res<MapConfig>) {
         let team  = Team(cfg.team.unwrap_or(0) as u8);
         let label = AgentLabel::new(agent_label(cfg, id, team));
         let brain = AgentBrain(make_agent(cfg));
+
+        // Log the brain name at spawn — this is also what makes
+        // AgentBehavior::name() reachable at the ECS level.
+        info!("Spawning agent #{id} [{}] for team {}", brain.0.name(), team.name());
+
         let color = agent_color(cfg, team);
         commands.spawn(AgentBundle::new(cfg.x, cfg.y, label, brain, team, color))
-            .insert(HideViz); // debug overlay off by default
+            .insert(HideViz);
     }
 }

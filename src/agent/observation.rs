@@ -1,4 +1,10 @@
 // src/agent/observation.rs
+//
+// MDP / POMDP observation API.
+// Many methods are unused by current rule-based strategies — they are the
+// feature vector interface for the RL agent. Do not remove them.
+
+#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::collections::HashSet;
@@ -70,7 +76,6 @@ impl WorldSnapshot {
 
 #[derive(Clone)]
 pub struct Observation {
-    // Agent state
     pub pos:          GridPos,
     pub gold_carried: GoldCarried,
     pub hearts:       Hearts,
