@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::config;
 use crate::sim::config::SimConfig;
 use crate::world::coords::GridPos;
-use crate::world::map_config::MapConfig;
+use crate::world::config::MapConfig;
 use crate::world::tile::Tile;
 use crate::world::Grid;
 use crate::viz::grid_offset::GridOffset;

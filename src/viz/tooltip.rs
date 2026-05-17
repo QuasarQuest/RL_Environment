@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
 use crate::agent::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score};
-use crate::viz::components::{AgentLabel, HideViz};
+use crate::viz::components::{AgentLabel, HidePathViz, HideRangeViz};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM};
 use super::grid_offset::GridOffset;
 use super::camera::MainCamera;
@@ -60,6 +60,7 @@ pub fn spawn_tooltip(mut commands: Commands) {
         tooltip_row(p, "Gold:",     "0",      head, body, TooltipCarry);
         tooltip_row(p, "Score:",    "0",      head, body, TooltipScore);
         tooltip_row(p, "Position:", "(0, 0)", head, body, TooltipPos);
+        // "Debug" row shows combined range+path state: ON = both visible
         tooltip_row(p, "Debug:",    "ON",     head, body, TooltipViz);
     });
 }
@@ -89,7 +90,7 @@ pub fn update_tooltip(
     agents:       Query<(
         Entity, &AgentLabel, &Hearts, &Ammo,
         &GoldCarried, &Score, &GridPos, &Transform,
-        Has<HideViz>, Option<&RespawnIn>,
+        Has<HideRangeViz>, Has<HidePathViz>, Option<&RespawnIn>,
     )>,
     offset:       Res<GridOffset>,
     cam_q:        Query<(&Transform, &Projection), With<MainCamera>>,
@@ -125,17 +126,20 @@ pub fn update_tooltip(
     };
 
     let hover_r = offset.step * 0.6;
-    let hovered = agents.iter().find(|(_, _, _, _, _, _, _, t, _, _)| {
+    let hovered = agents.iter().find(|(_, _, _, _, _, _, _, t, _, _, _)| {
         cursor_world.distance(t.translation.truncate()) < hover_r
     });
 
-    if let Some((entity, label, hearts, ammo, gold, score, pos, _, is_hidden, respawn)) = hovered {
+    if let Some((entity, label, hearts, ammo, gold, score, pos, _, range_hidden, path_hidden, respawn)) = hovered {
         node.display = Display::Flex;
         *vis         = Visibility::Visible;
         node.left    = Val::Px((cursor_screen.x + 14.0).min(window.width() - 210.0));
         node.top     = Val::Px((cursor_screen.y - 10.0).max(0.0));
 
-        let hp_str = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
+        let hp_str   = format!("{}/{}", hearts.0, crate::config::AGENT_MAX_HEARTS);
+        // Debug row: ON only if both overlays are visible
+        let both_hidden = range_hidden && path_hidden;
+        let viz_str  = if both_hidden { "OFF (click)" } else { "ON (click)" };
 
         if let Ok(mut t) = name_q.single_mut()   { *t = Text::new(&label.0); }
         if let Ok(mut t) = status_q.single_mut() {
@@ -148,13 +152,19 @@ pub fn update_tooltip(
         if let Ok(mut t) = pos_q.single_mut()    {
             *t = Text::new(format!("({}, {})", pos.x, pos.y));
         }
-        if let Ok(mut t) = viz_q.single_mut()    {
-            *t = Text::new(if is_hidden { "OFF (click)" } else { "ON (click)" });
-        }
+        if let Ok(mut t) = viz_q.single_mut()    { *t = Text::new(viz_str); }
 
+        // Left-click toggles both range and path together
         if mouse.just_pressed(MouseButton::Left) {
-            if is_hidden { commands.entity(entity).remove::<HideViz>(); }
-            else         { commands.entity(entity).insert(HideViz); }
+            if both_hidden {
+                commands.entity(entity)
+                    .remove::<HideRangeViz>()
+                    .remove::<HidePathViz>();
+            } else {
+                commands.entity(entity)
+                    .insert(HideRangeViz)
+                    .insert(HidePathViz);
+            }
         }
     } else {
         hide(&mut node, &mut vis);

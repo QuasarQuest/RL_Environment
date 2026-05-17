@@ -1,4 +1,4 @@
-// src/world/map_config.rs
+// src/world/config
 
 use bevy::prelude::*;
 use serde::Deserialize;

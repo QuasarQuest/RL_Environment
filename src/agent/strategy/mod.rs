@@ -13,6 +13,7 @@ pub use random::RandomStrategy;
 use serde::Deserialize;
 use crate::agent::action::{Action, Dir};
 use crate::agent::components::GridPos;
+use crate::agent::debug::DebugDraw;
 use crate::agent::observation::Observation;
 use crate::agent::planner::PathPlanner;
 use crate::algorithm::path_planning::graph_utils::dir_to;
@@ -23,6 +24,10 @@ use crate::world::tile::Tile;
 pub trait DecisionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
     fn decide(&mut self, obs: &Observation, planner: &mut impl PathPlanner) -> Action;
+    /// Strategies that own their own planner (BtStrategy) override this
+    /// to expose it. All others return None — Brain falls back to its
+    /// outer planner's debug_draw().
+    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> { None }
     fn reset(&mut self) {}
 }
 
@@ -43,7 +48,7 @@ pub fn try_move(
     Ok(dir_to(obs.pos, next).map(Action::Move).unwrap_or(Action::Wait))
 }
 
-// ── Combat helpers (shared by bt.rs) ─────────────────────────────────────────
+// ── Combat helpers ────────────────────────────────────────────────────────────
 
 pub fn adjacent_enemy_dir(obs: &Observation) -> Option<Dir> {
     Dir::all().iter().copied().find(|&dir| {

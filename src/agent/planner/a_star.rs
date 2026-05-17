@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 use bevy::prelude::Color;
 use crate::agent::components::GridPos;
+use crate::agent::debug::{DebugDraw, DebugLine};
 use crate::algorithm::path_planning::a_star::compute_path;
 use super::PathPlanner;
 
@@ -38,18 +39,33 @@ impl PathPlanner for AStarPlanner {
 
     fn next_step(&self) -> Option<GridPos> { self.path.front().copied() }
 
-    fn path_for_debug(&self) -> Vec<GridPos> { self.path.iter().copied().collect() }
-
-    fn debug_rects(&self) -> Vec<(GridPos, Color)> {
-        let mut out = Vec::new();
-        for &p in &self.debug_closed { out.push((p, Color::srgba(0.85, 0.20, 0.20, 0.18))); }
-        for &p in &self.debug_open   { out.push((p, Color::srgba(0.20, 0.85, 0.20, 0.28))); }
-        out
+    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> {
+        if self.path.is_empty() { return None; }
+        Some(Box::new(AStarDebugDraw {
+            path: self.path.iter().copied().collect(),
+        }))
     }
 
     fn reset(&mut self) {
         self.path.clear();
         self.debug_open.clear();
         self.debug_closed.clear();
+    }
+}
+
+struct AStarDebugDraw {
+    path: Vec<GridPos>,
+}
+
+impl DebugDraw for AStarDebugDraw {
+    fn draw_lines(&self, agent_pos: GridPos) -> Vec<DebugLine> {
+        if self.path.is_empty() { return Vec::new(); }
+        let mut lines = Vec::with_capacity(self.path.len());
+        let mut cur   = agent_pos;
+        for &next in &self.path {
+            lines.push(DebugLine { start: cur, end: next, color: Color::srgb(1.0, 0.90, 0.10) });
+            cur = next;
+        }
+        lines
     }
 }

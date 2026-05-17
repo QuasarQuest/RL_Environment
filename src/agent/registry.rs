@@ -3,7 +3,7 @@
 // Pure simulation factory: constructs AgentBehavior implementations from config.
 // No display concerns — labels, colors, and info live in src/factory/.
 
-use crate::world::map_config::AgentConfig;
+use crate::world::config::AgentConfig;
 use super::composition::Brain;
 use super::brain::AgentBehavior;
 use super::planner::{AStarPlanner, DStarPlanner, NoPlanner, PlannerKind};

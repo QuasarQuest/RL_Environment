@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use super::config::{SimConfig, AVAILABLE_SPEEDS};
 use super::schedule::OnSimTick;
 use super::timer::TickTimer;
-use crate::world::map_config::MapConfig;
+use crate::world::config::MapConfig;
 
 /// Public system-set label so other plugins can order after sim writes.
 /// NOTE: exclusive systems (fn(&mut World)) cannot belong to a SystemSet;

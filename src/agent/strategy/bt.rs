@@ -2,10 +2,6 @@
 //
 // Opportunistic behaviour tree agent.
 //
-// The tree is BtNode<Observation, BtOutput> — both 'static compatible,
-// no planner inside, no unsafe. The planner lives in BtStrategy and is
-// called after the tree tick via resolve_nav().
-//
 // Priority:
 //   1. Critical survival  — 1 heart → heal immediately
 //   2. Ranged attack      — has ammo + clear shot
@@ -19,6 +15,7 @@
 
 use crate::agent::action::Action;
 use crate::agent::components::GridPos;
+use crate::agent::debug::DebugDraw;
 use crate::agent::observation::Observation;
 use crate::agent::planner::{AStarPlanner, DStarPlanner, PathPlanner};
 use crate::algorithm::behavior_planning::behavior_tree::{BtNode, Status, selector, sequence, cond, leaf};
@@ -207,6 +204,11 @@ impl DecisionStrategy for BtStrategy {
             BtOutput::Navigate(target) =>
                 resolve_nav(target, obs, self.planner.as_mut(), &mut self.nav),
         }
+    }
+
+    /// Forward to the inner planner — all draw logic lives there.
+    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> {
+        self.planner.debug_draw()
     }
 
     fn reset(&mut self) { self.nav.reset(); self.planner.reset(); }

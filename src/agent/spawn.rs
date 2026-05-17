@@ -2,12 +2,16 @@
 //
 // Spawns the simulation bundle for each agent defined in MapConfig.
 // No display components — AgentLabel, AgentInfo, HideViz are attached
-// by the factory layer (src/factory/mod.rs) after this system runs.
+// by the factory layer (src/factory/display.rs) after this system runs.
+//
+// AgentConfigIndex is inserted here so the factory layer can look up
+// the correct MapConfig entry without relying on entity-ID ordering.
 
 use bevy::prelude::*;
 use crate::config;
+use crate::factory::AgentConfigIndex;
 use crate::team::Team;
-use crate::world::map_config::MapConfig;
+use crate::world::config::MapConfig;
 use super::brain::AgentBrain;
 use super::components::{Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
 use super::systems::PendingAction;
@@ -60,10 +64,13 @@ impl AgentBundle {
 }
 
 pub fn spawn_agents(mut commands: Commands, map: Res<MapConfig>) {
-    for cfg in map.agents.iter() {
+    for (idx, cfg) in map.agents.iter().enumerate() {
         let team  = Team(cfg.team.unwrap_or(0) as u8);
         let brain = AgentBrain(make_agent(cfg));
         let color = team.color();
-        commands.spawn(AgentBundle::new(cfg.x, cfg.y, brain, team, color));
+        commands.spawn((
+            AgentBundle::new(cfg.x, cfg.y, brain, team, color),
+            AgentConfigIndex(idx),
+        ));
     }
 }

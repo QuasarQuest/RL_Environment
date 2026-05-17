@@ -89,32 +89,41 @@ pub fn handle_speed_buttons(
 }
 
 // ── Pause button ──────────────────────────────────────────────────────────────
+//
+// Toggles cfg.paused on click. Visual sync (text + bg) is handled separately
+// by sync_pause_visuals so Space key toggles also update the button correctly.
 
 pub fn handle_pause_button(
-    mut cfg:    ResMut<SimConfig>,
-    btn_q:      Query<&Interaction, (Changed<Interaction>, With<PauseButtonMarker>)>,
+    mut cfg: ResMut<SimConfig>,
+    btn_q:   Query<&Interaction, (Changed<Interaction>, With<PauseButtonMarker>)>,
+) {
+    for interaction in btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            cfg.paused = !cfg.paused;
+        }
+    }
+}
+
+/// Syncs pause button visuals to SimConfig::paused every frame it changes.
+/// Reacts to both the button click and the Space key (handled in sim/plugin.rs).
+pub fn sync_pause_visuals(
+    cfg:        Res<SimConfig>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<PauseButtonText>>,
     mut bg_q:   Query<&mut BackgroundColor, With<PauseButtonMarker>>,
 ) {
-    for interaction in btn_q.iter() {
-        if *interaction != Interaction::Pressed { continue; }
-        cfg.paused = !cfg.paused;
+    if !cfg.is_changed() { return; }
 
-        for (mut text, mut color) in text_q.iter_mut() {
-            if cfg.paused {
-                *text  = Text::new("||");
-                *color = TextColor(Color::srgb(0.95, 0.78, 0.20)); // gold when paused
-            } else {
-                *text  = Text::new("|>");
-                *color = TextColor(Color::srgb(0.40, 0.90, 0.55)); // green when running
-            }
-        }
-        for mut bg in bg_q.iter_mut() {
-            if cfg.paused {
-                bg.0 = Color::srgb(0.50, 0.35, 0.05); // dark gold bg
-            } else {
-                bg.0 = Color::srgb(0.12, 0.42, 0.24); // green bg
-            }
-        }
+    let (label, text_color, bg_color) = if cfg.paused {
+        ("|>", Color::srgb(0.95, 0.78, 0.20), Color::srgb(0.50, 0.35, 0.05))
+    } else {
+        ("||", Color::srgb(0.40, 0.90, 0.55), Color::srgb(0.12, 0.42, 0.24))
+    };
+
+    for (mut text, mut color) in text_q.iter_mut() {
+        *text  = Text::new(label);
+        *color = TextColor(text_color);
+    }
+    for mut bg in bg_q.iter_mut() {
+        bg.0 = bg_color;
     }
 }

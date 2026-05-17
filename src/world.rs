@@ -2,7 +2,7 @@
 
 pub mod coords;
 pub mod grid;
-pub mod map_config;
+pub mod config;
 pub mod plugin;
 pub mod tile;
 

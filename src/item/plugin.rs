@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use crate::sim::schedule::OnSimTick;
-use crate::world::map_config::MapConfig;
+use crate::world::config::MapConfig;
 use super::spawner::{ItemSpawner, build_free_tile_pool, spawn_items_periodically, decay_items};
 use super::pickup::{pickup_items, deposit_gold, despawn_claimed, sync_item_transforms};
 

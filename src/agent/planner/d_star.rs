@@ -3,6 +3,7 @@
 use bevy::prelude::Color;
 use crate::agent::action::Dir;
 use crate::agent::components::GridPos;
+use crate::agent::debug::{DebugDraw, DebugLine};
 use crate::algorithm::path_planning::d_star_lite::DStarLite;
 use super::PathPlanner;
 
@@ -43,17 +44,29 @@ impl PathPlanner for DStarPlanner {
 
     fn next_step(&self) -> Option<GridPos> { self.inner.as_ref()?.get_next_step() }
 
-    fn path_for_debug(&self) -> Vec<GridPos> {
-        self.inner.as_ref().map(|p| p.generate_path()).unwrap_or_default()
-    }
-
-    fn debug_rects(&self) -> Vec<(GridPos, Color)> {
-        let Some(ref p) = self.inner else { return Vec::new() };
-        let mut out = Vec::new();
-        for &pos in &p.known_obstacles { out.push((pos, Color::srgba(1.0, 0.10, 0.10, 0.6))); }
-        for pos in p.open_set()        { out.push((pos, Color::srgba(0.70, 0.20, 0.95, 0.15))); }
-        out
+    fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> {
+        let p    = self.inner.as_ref()?;
+        let path = p.generate_path();
+        if path.is_empty() { return None; }
+        Some(Box::new(DStarDebugDraw { path }))
     }
 
     fn reset(&mut self) { self.inner = None; self.last_pos = None; }
+}
+
+struct DStarDebugDraw {
+    path: Vec<GridPos>,
+}
+
+impl DebugDraw for DStarDebugDraw {
+    fn draw_lines(&self, agent_pos: GridPos) -> Vec<DebugLine> {
+        if self.path.is_empty() { return Vec::new(); }
+        let mut lines = Vec::with_capacity(self.path.len());
+        let mut cur   = agent_pos;
+        for &next in &self.path {
+            lines.push(DebugLine { start: cur, end: next, color: Color::srgb(1.0, 0.90, 0.10) });
+            cur = next;
+        }
+        lines
+    }
 }

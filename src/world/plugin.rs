@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use super::grid::Grid;
-use super::map_config::{MapConfig, ObstacleKind, TileKind};
+use super::config::{MapConfig, ObstacleKind, TileKind};
 use super::tile::Tile;
 use crate::item::Item;
 use crate::config;

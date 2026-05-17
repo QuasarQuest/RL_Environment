@@ -34,15 +34,6 @@ fn main() {
         .add_plugins((WorldPlugin, SimPlugin, ItemPlugin, AgentPlugin, VizPlugin))
         .run();
 }
-
-// TODO: Refactor factory/mod.rs — validate agent entity ordering matches MapConfig spawn order
-
-// TODO: Visualize algorithm state
-//       - Path planning: debug overlay restored (was broken by Phase 2 HideViz move)
-//       - Behavior planner: show active BT branch / FSM state / GOAP plan step above agent sprite
-
-// TODO: Visualize combat — animate attacks and show ammo + hearts next to each agent sprite
-
 // TODO: Fix scoreboard — add visual divider between Red and Blue team sections
 
 // TODO: Track kills and deaths per agent

@@ -120,7 +120,6 @@ impl DStarLite {
                 }
             } else {
                 self.g.insert(u, INF);
-                // predecessors ∪ {u}
                 let preds: Vec<GridPos> = self.neighbors(u).into_iter()
                     .chain(std::iter::once(u))
                     .collect();
@@ -252,9 +251,5 @@ impl DStarLite {
             return DIAGONAL;
         }
         CARDINAL
-    }
-
-    pub fn open_set(&self) -> Vec<GridPos> {
-        self.in_queue.keys().copied().collect()
     }
 }
