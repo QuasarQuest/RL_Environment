@@ -1,8 +1,8 @@
 // src/viz/hud/layout.rs
 
 use bevy::prelude::*;
-use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, SIZE_XL, TOOLBAR_H};
-use crate::style::color::team_color;
+use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, SIZE_XL, TOOLBAR_H, FONT_ICON};
+use crate::style::color::{team_color, GOLD_500, GOLD_800};
 use crate::viz::core_ui::button::spawn_icon_button;
 use crate::viz::core_ui::panel::spawn_button_group;
 use crate::viz::core_ui::text::{spawn_label, spawn_marked_label};
@@ -12,12 +12,13 @@ use super::components::{
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
 };
 
-pub fn spawn_hud(mut commands: Commands) {
+pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
     let bg         = ThemeColor::Background.resolve();
     let border     = ThemeColor::Border.resolve();
     let dim        = ThemeColor::TextDim.resolve();
     let red_color  = team_color(0);
     let blue_color = team_color(1);
+    let icon_font  = asset_server.load(FONT_ICON);
 
     commands.spawn((
         UiRoot,
@@ -127,23 +128,30 @@ pub fn spawn_hud(mut commands: Commands) {
                 spawn_icon_button(grp, "+", SpeedIncreaseButton);
             });
 
+            // Pause button — fixed width so ▶ and ⏸ don't resize it
             right.spawn((
                 Button,
                 PauseButtonMarker,
                 Node {
-                    padding:       UiRect::axes(Val::Px(18.0), Val::Px(8.0)),
-                    border:        UiRect::all(Val::Px(1.0)),
-                    align_items:   AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    width:           Val::Px(48.0),
+                    height:          Val::Px(32.0),
+                    justify_content: JustifyContent::Center,
+                    align_items:     AlignItems::Center,
+                    border:          UiRect::all(Val::Px(1.0)),
+                    border_radius:   BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                BackgroundColor(ThemeColor::Success.resolve()),
+                BackgroundColor(GOLD_800),
                 BorderColor::all(ThemeColor::Border.resolve()),
             )).with_children(|btn| {
                 btn.spawn((
-                    Text::new("|>"),
-                    TextFont  { font_size: SIZE_MD, ..default() },
-                    TextColor(ThemeColor::SuccessText.resolve()),
+                    Text::new("⏸"),
+                    TextFont {
+                        font:      icon_font.clone(),
+                        font_size: SIZE_XL,
+                        ..default()
+                    },
+                    TextColor(GOLD_500),
                     PauseButtonText,
                 ));
             });

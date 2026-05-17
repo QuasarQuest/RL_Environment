@@ -10,7 +10,9 @@ pub use scoreboard::{
     spawn_tab_scoreboard,
     toggle_tab_scoreboard,
     build_scoreboard_rows,
-    refresh_scoreboard_rows,
+    refresh_scoreboard_stats,
+    refresh_scoreboard_viz,
+    refresh_scoreboard_avg,
 };
 pub use systems::{
     update_tick_label, update_time_label, update_team_scores,

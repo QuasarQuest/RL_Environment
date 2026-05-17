@@ -11,15 +11,26 @@ use bevy::prelude::*;
 #[derive(Component)] pub struct TabScoreboard;
 #[derive(Component)] pub struct TabScoreboardContent;
 
-/// Marks a scoreboard row, carrying the agent Entity it represents.
-#[allow(dead_code)]
-#[derive(Component)] pub struct ScoreboardRow(pub Entity);
+/// Marks a scoreboard agent row.
+#[derive(Component)] pub struct ScoreboardRow;
 
-/// Per-cell markers for in-place text updates.
+/// Marks the live team score in the team header. u8 = team_id.
+#[derive(Component)] pub struct ScoreboardTeamScore(pub u8);
+
+/// Marks avg stat cells embedded in the team header. u8 = team_id.
+#[derive(Component)] pub struct ScoreboardAvgScore(pub u8);
+#[derive(Component)] pub struct ScoreboardAvgKills(pub u8);
+#[derive(Component)] pub struct ScoreboardAvgDeaths(pub u8);
+#[derive(Component)] pub struct ScoreboardAvgKd(pub u8);
+
+/// Per-cell markers for agent row in-place text updates.
 #[derive(Component)] pub struct ScoreboardRowHp(pub Entity);
 #[derive(Component)] pub struct ScoreboardRowAmmo(pub Entity);
 #[derive(Component)] pub struct ScoreboardRowGold(pub Entity);
 #[derive(Component)] pub struct ScoreboardRowScore(pub Entity);
+#[derive(Component)] pub struct ScoreboardRowKills(pub Entity);
+#[derive(Component)] pub struct ScoreboardRowDeaths(pub Entity);
+#[derive(Component)] pub struct ScoreboardRowKd(pub Entity);
 
 /// Text child of the RANGE viz button.
 #[derive(Component)] pub struct ScoreboardRowRangeLabel(pub Entity);

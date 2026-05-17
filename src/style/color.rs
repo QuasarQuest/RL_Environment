@@ -1,4 +1,4 @@
-// src/style/color.rs
+// src/style/color
 
 use bevy::prelude::Color;
 
@@ -13,7 +13,13 @@ pub const GREEN_500: Color = Color::srgb(0.12, 0.42, 0.24);
 pub const GREEN_400: Color = Color::srgb(0.40, 0.90, 0.55);
 pub const RED_500:   Color = Color::srgb(0.85, 0.25, 0.20);
 pub const GOLD_500:  Color = Color::srgb(0.95, 0.78, 0.20);
+pub const GOLD_800:  Color = Color::srgb(0.50, 0.35, 0.05);
 pub const BLUE_500:  Color = Color::srgb(0.20, 0.50, 0.90);
+
+// ── UI surface colors ─────────────────────────────────────────────────────────
+pub const SURFACE_TOOLTIP:   Color = Color::srgba(0.06, 0.06, 0.08, 0.96);
+pub const SURFACE_HIGHLIGHT: Color = Color::srgba(1.0,  1.0,  1.0,  0.03);
+pub const BORDER:            Color = Color::srgba(1.0,  1.0,  1.0,  0.07);
 
 // ── Team colors ───────────────────────────────────────────────────────────────
 // Single source of truth for team → color mapping.

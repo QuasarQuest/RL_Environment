@@ -2,11 +2,11 @@
 
 use bevy::prelude::*;
 use crate::sim::schedule::OnSimTick;
-use crate::world::config::MapConfig;
+use crate::world::config::WorldConfig;
 use super::spawner::{ItemSpawner, build_free_tile_pool, spawn_items_periodically, decay_items};
 use super::pickup::{pickup_items, deposit_gold, despawn_claimed, sync_item_transforms};
 
-fn init_item_spawner(mut commands: Commands, map: Res<MapConfig>) {
+fn init_item_spawner(mut commands: Commands, map: Res<WorldConfig>) {
     commands.insert_resource(ItemSpawner::from_map_config(&map));
 }
 

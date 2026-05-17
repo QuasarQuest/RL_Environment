@@ -1,4 +1,4 @@
-// src/world/config
+// src/world/config.rs
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -6,6 +6,7 @@ use crate::item::spawner::ItemSpawnConfig;
 use crate::item::ItemKind;
 use crate::agent::strategy::StrategyKind;
 use crate::agent::planner::PlannerKind;
+use crate::config;
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind { Free, Obstacle, Base, BaseRed, BaseBlue }
@@ -58,13 +59,33 @@ impl ItemSpawnerRon {
     }
 }
 
+// ── Default helpers for serde ─────────────────────────────────────────────────
+
+fn default_melee_range()  -> i32 { config::MELEE_RANGE }
+fn default_ranged_range() -> i32 { config::RANGED_RANGE }
+fn default_kill_reward()  -> u32 { config::KILL_REWARD }
+
+// ── WorldConfig ─────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Deserialize, Clone, Resource)]
-pub struct MapConfig {
+pub struct WorldConfig {
     pub width:  usize,
     pub height: usize,
 
     /// Episode length in sim-ticks — loaded from the map asset.
     pub match_duration_ticks: u64,
+
+    /// Melee attack range in tiles. Defaults to config::MELEE_RANGE.
+    #[serde(default = "default_melee_range")]
+    pub melee_range:  i32,
+
+    /// Ranged attack range in tiles. Defaults to config::RANGED_RANGE.
+    #[serde(default = "default_ranged_range")]
+    pub ranged_range: i32,
+
+    /// Score points awarded to the attacker (and their team) on a kill.
+    #[serde(default = "default_kill_reward")]
+    pub kill_reward: u32,
 
     pub item_spawners:     Vec<ItemSpawnerRon>,
     pub fixed:             Vec<FixedTile>,
@@ -72,7 +93,7 @@ pub struct MapConfig {
     pub obstacle_clusters: Vec<ObstacleCluster>,
 }
 
-impl MapConfig {
+impl WorldConfig {
     pub fn load(path: &str) -> Self {
         let text = std::fs::read_to_string(path)
             .unwrap_or_else(|_| panic!("Cannot read map config: {path}"));

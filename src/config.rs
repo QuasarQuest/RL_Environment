@@ -21,10 +21,12 @@ pub const AGENT_MAX_HEARTS:    u8  = 3;
 pub const AGENT_RESPAWN_TICKS: u8  = 10;
 
 // ── Combat ───────────────────────────────────────────────────────────────────
-/// Melee: always available, 1-tile range, no ammo cost.
+/// Default melee range — overridable per-map via MapConfig::melee_range.
 pub const MELEE_RANGE:         i32 = 1;
-/// Ranged: costs 1 ammo, up to RANGED_RANGE tiles (Chebyshev).
+/// Default ranged range — overridable per-map via MapConfig::ranged_range.
 pub const RANGED_RANGE:        i32 = 5;
+/// Default score reward for a kill — overridable per-map via MapConfig::kill_reward.
+pub const KILL_REWARD:         u32 = 3;
 
 // ── Ammo ─────────────────────────────────────────────────────────────────────
 pub const AGENT_START_AMMO:    u8  = 3;

@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use crate::sim::config::{SimConfig, AVAILABLE_SPEEDS};
 use crate::sim::timer::TickTimer;
 use crate::team::{Team, TeamScore};
+use crate::style::color::{GOLD_500, GOLD_800, GREEN_400, GREEN_500};
 use super::components::{
     TickLabelMarker, TimeLabelMarker, TeamScoreMarker,
     SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton,
@@ -114,9 +115,9 @@ pub fn sync_pause_visuals(
     if !cfg.is_changed() { return; }
 
     let (label, text_color, bg_color) = if cfg.paused {
-        ("|>", Color::srgb(0.95, 0.78, 0.20), Color::srgb(0.50, 0.35, 0.05))
+        ("▶", GREEN_400, GREEN_500)  // paused → show play  (green = go)
     } else {
-        ("||", Color::srgb(0.40, 0.90, 0.55), Color::srgb(0.12, 0.42, 0.24))
+        ("⏸", GOLD_500,  GOLD_800)   // running → show pause (gold = caution)
     };
 
     for (mut text, mut color) in text_q.iter_mut() {

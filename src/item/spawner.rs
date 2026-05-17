@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::config;
 use crate::sim::config::SimConfig;
 use crate::world::coords::GridPos;
-use crate::world::config::MapConfig;
+use crate::world::config::WorldConfig;
 use crate::world::tile::Tile;
 use crate::world::Grid;
 use crate::viz::grid_offset::GridOffset;
@@ -97,7 +97,7 @@ pub struct ItemSpawner {
 }
 
 impl ItemSpawner {
-    pub fn from_map_config(map: &MapConfig) -> Self {
+    pub fn from_map_config(map: &WorldConfig) -> Self {
         let bands = map.item_spawners.iter()
             .filter_map(|ron| ron.to_config())
             .map(|cfg| BandConfig::new(

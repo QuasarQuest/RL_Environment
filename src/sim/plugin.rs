@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use super::config::{SimConfig, AVAILABLE_SPEEDS};
 use super::schedule::OnSimTick;
 use super::timer::TickTimer;
-use crate::world::config::MapConfig;
+use crate::world::config::WorldConfig;
 
 /// Public system-set label so other plugins can order after sim writes.
 /// NOTE: exclusive systems (fn(&mut World)) cannot belong to a SystemSet;
@@ -17,7 +17,7 @@ pub struct SimSystems;
 /// Reads match_duration_ticks from the map asset into SimConfig.
 /// Runs at Startup — MapConfig is inserted during PreStartup by WorldPlugin,
 /// so it is guaranteed to exist by the time Startup runs.
-fn init_sim_config(map: Res<MapConfig>, mut cfg: ResMut<SimConfig>) {
+fn init_sim_config(map: Res<WorldConfig>, mut cfg: ResMut<SimConfig>) {
     cfg.match_duration_ticks = map.match_duration_ticks;
 }
 

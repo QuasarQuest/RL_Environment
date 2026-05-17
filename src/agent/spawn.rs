@@ -1,19 +1,14 @@
 // src/agent/spawn.rs
-//
-// Spawns the simulation bundle for each agent defined in MapConfig.
-// No display components — AgentLabel, AgentInfo, HideViz are attached
-// by the factory layer (src/factory/display.rs) after this system runs.
-//
-// AgentConfigIndex is inserted here so the factory layer can look up
-// the correct MapConfig entry without relying on entity-ID ordering.
 
 use bevy::prelude::*;
 use crate::config;
 use crate::factory::AgentConfigIndex;
 use crate::team::Team;
-use crate::world::config::MapConfig;
+use crate::world::config::WorldConfig;
 use super::brain::AgentBrain;
-use super::components::{Ammo, GoldCarried, GridPos, Hearts, Score, SpawnPoint};
+use super::components::{
+    Ammo, DeathCount, GoldCarried, GridPos, Hearts, KillCount, Score, SpawnPoint,
+};
 use super::systems::PendingAction;
 use super::registry::make_agent;
 
@@ -25,6 +20,8 @@ pub struct AgentBundle {
     pub ammo:        Ammo,
     pub gold:        GoldCarried,
     pub score:       Score,
+    pub kills:       KillCount,
+    pub deaths:      DeathCount,
     pub brain:       AgentBrain,
     pub team:        Team,
     pub pending:     PendingAction,
@@ -45,14 +42,16 @@ impl AgentBundle {
         Self {
             pos,
             spawn_point: SpawnPoint(pos),
-            hearts:    Hearts::default(),
-            ammo:      Ammo::default(),
-            gold:      GoldCarried::default(),
-            score:     Score::default(),
+            hearts:  Hearts::default(),
+            ammo:    Ammo::default(),
+            gold:    GoldCarried::default(),
+            score:   Score::default(),
+            kills:   KillCount::default(),
+            deaths:  DeathCount::default(),
             brain,
             team,
-            pending:   PendingAction::default(),
-            sprite:    Sprite {
+            pending:    PendingAction::default(),
+            sprite: Sprite {
                 color,
                 custom_size: Some(Vec2::splat(config::TILE_SIZE * 0.8)),
                 ..default()
@@ -63,7 +62,7 @@ impl AgentBundle {
     }
 }
 
-pub fn spawn_agents(mut commands: Commands, map: Res<MapConfig>) {
+pub fn spawn_agents(mut commands: Commands, map: Res<WorldConfig>) {
     for (idx, cfg) in map.agents.iter().enumerate() {
         let team  = Team(cfg.team.unwrap_or(0) as u8);
         let brain = AgentBrain(make_agent(cfg));

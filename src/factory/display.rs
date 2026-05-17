@@ -18,7 +18,7 @@ use crate::agent::brain::AgentBrain;
 use crate::agent::strategy::StrategyKind;
 use crate::agent::planner::PlannerKind;
 use crate::team::Team;
-use crate::world::config::{AgentConfig, MapConfig};
+use crate::world::config::{AgentConfig, WorldConfig};
 use crate::viz::components::{AgentInfo, AgentLabel, HidePathViz, HideRangeViz, HideViz};
 use super::AgentConfigIndex;
 
@@ -26,7 +26,7 @@ use super::AgentConfigIndex;
 
 pub fn assign_display_components(
     mut commands: Commands,
-    map:          Res<MapConfig>,
+    map:          Res<WorldConfig>,
     agents:       Query<(Entity, &AgentConfigIndex, &AgentBrain), Without<AgentLabel>>,
 ) {
     // Pre-compute per-team rank for every config index.

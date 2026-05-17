@@ -1,9 +1,17 @@
-// assets/maps/default.ron
+// assets/maps/config.ron
 (
     width:  50,
     height: 50,
 
     match_duration_ticks: 2500,
+
+    // ── Combat ───────────────────────────────────────────────────────────────
+    // melee_range:  tiles an agent can reach with a melee attack (no ammo cost)
+    // ranged_range: tiles an agent can reach with a ranged attack (costs 1 ammo)
+    // kill_reward:  score points awarded to the attacker's team on a kill
+    melee_range:  2,
+    ranged_range: 6,
+    kill_reward:  15,
 
     item_spawners: [
         // Gold: main resource — PI controller keeps 5–10 on map

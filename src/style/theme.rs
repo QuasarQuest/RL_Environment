@@ -8,11 +8,9 @@ pub enum ThemeColor {
     Background,
     TooltipBackground,
     Border,
-    SurfaceHighlight,
     TextPrimary,
     TextDim,
     ButtonIdle,
-    Success,
     SuccessText,
     AccentGold,
 }
@@ -21,13 +19,11 @@ impl ThemeColor {
     pub fn resolve(self) -> Color {
         match self {
             Self::Background        => GRAY_900,
-            Self::TooltipBackground => Color::srgba(0.06, 0.06, 0.08, 0.96),
-            Self::SurfaceHighlight  => Color::srgba(1.0, 1.0, 1.0, 0.03),
-            Self::Border            => Color::srgba(1.0, 1.0, 1.0, 0.07),
+            Self::TooltipBackground => SURFACE_TOOLTIP,
+            Self::Border            => BORDER,
             Self::TextPrimary       => GRAY_100,
             Self::TextDim           => GRAY_400,
             Self::ButtonIdle        => GRAY_800,
-            Self::Success           => GREEN_500,
             Self::SuccessText       => GREEN_400,
             Self::AccentGold        => GOLD_500,
         }
@@ -45,3 +41,6 @@ pub const SIZE_XL: f32 = 16.0;
 
 // Standard UI dimensions
 pub const TOOLBAR_H: f32 = 48.0;
+
+// Font paths
+pub const FONT_ICON: &str = "fonts/NotoSansSymbols2-Regular.ttf";

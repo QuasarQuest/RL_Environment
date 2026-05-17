@@ -2,23 +2,37 @@
 
 use bevy::prelude::*;
 use super::grid::Grid;
-use super::config::{MapConfig, ObstacleKind, TileKind};
+use super::config::{WorldConfig, ObstacleKind, TileKind};
 use super::tile::Tile;
 use crate::item::Item;
 use crate::config;
 
 fn load_map(mut commands: Commands) {
-    let cfg = MapConfig::load("assets/maps/default.ron");
+    let cfg = WorldConfig::load("assets/world/config.ron");
     commands.insert_resource(Grid::new(cfg.width, cfg.height));
     commands.insert_resource(cfg);
 }
 
 fn spawn_world(
     mut commands: Commands,
-    map:          Res<MapConfig>,
+    map:          Res<WorldConfig>,
     mut grid:     ResMut<Grid>,
 ) {
-    // 1. Fixed tiles (bases etc.)
+    apply_fixed_tiles(&map, &mut grid);
+    regenerate_obstacles(&map, &mut grid);
+    spawn_initial_items(&mut commands, &map, &grid);
+}
+
+// ── Public helpers used by restart ────────────────────────────────────────────
+
+/// Applies base/fixed tiles from config. Call before regenerate_obstacles.
+pub fn apply_fixed_tiles(map: &WorldConfig, grid: &mut Grid) {
+    // Reset to all-free first so a restart doesn't accumulate old obstacles.
+    for y in 0..grid.height as i32 {
+        for x in 0..grid.width as i32 {
+            grid.set(x, y, Tile::Free);
+        }
+    }
     for fixed in &map.fixed {
         let tile = match fixed.tile {
             TileKind::Free     => Tile::Free,
@@ -29,8 +43,11 @@ fn spawn_world(
         };
         grid.set(fixed.x as i32, fixed.y as i32, tile);
     }
+}
 
-    // 2. Obstacle clusters
+/// Randomly places obstacle clusters and clears spawn perimeters.
+/// Call after apply_fixed_tiles. Used at startup and on restart.
+pub fn regenerate_obstacles(map: &WorldConfig, grid: &mut Grid) {
     for cluster in &map.obstacle_clusters {
         let (w, h)       = cluster.size;
         let mut placed   = 0;
@@ -43,7 +60,7 @@ fn spawn_world(
                     let max_y = (map.height as i32 - h as i32 - 1).max(1);
                     let ox = rand::random_range(1..max_x);
                     let oy = rand::random_range(1..max_y);
-                    if footprint_is_free(&grid, ox, oy, w as i32, h as i32) {
+                    if footprint_is_free(grid, ox, oy, w as i32, h as i32) {
                         for dy in 0..h as i32 {
                             for dx in 0..w as i32 {
                                 grid.set(ox + dx, oy + dy, Tile::Obstacle);
@@ -85,28 +102,24 @@ fn spawn_world(
         }
     }
 
-    // 3. Clear spawn perimeters — guarantee a free zone around every agent
-    //    spawn point so agents never start inside or immediately adjacent to
-    //    an obstacle. Radius 2 gives a 5×5 clear zone; the centre tile and
-    //    all its 8 neighbours are always walkable.
-    //    Base tiles are preserved — only obstacles are cleared.
+    // Clear spawn perimeters
     const SPAWN_CLEAR_RADIUS: i32 = 2;
     for agent_cfg in &map.agents {
         for dy in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
             for dx in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
                 let cx = agent_cfg.x + dx;
                 let cy = agent_cfg.y + dy;
-                if grid.in_bounds(cx, cy) {
-                    if grid.get(cx, cy) == Some(Tile::Obstacle) {
-                        grid.set(cx, cy, Tile::Free);
-                    }
+                if grid.in_bounds(cx, cy) && grid.get(cx, cy) == Some(Tile::Obstacle) {
+                    grid.set(cx, cy, Tile::Free);
                 }
             }
         }
     }
+}
 
-    // 4. Initial items — spawned with placeholder transform (Vec3::ZERO).
-    //    sync_item_transforms corrects positions once GridOffset is available.
+/// Spawns initial items into the world. Used at startup only —
+/// restart skips this because the ItemSpawner will repopulate naturally.
+pub fn spawn_initial_items(commands: &mut Commands, map: &WorldConfig, grid: &Grid) {
     for spawner_cfg in &map.item_spawners {
         if spawner_cfg.initial == 0 { continue; }
         let Some(cfg) = spawner_cfg.to_config() else { continue };

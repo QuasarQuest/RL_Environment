@@ -59,6 +59,14 @@ impl Ammo {
     }
 }
 
+// ── Kill / Death counters ─────────────────────────────────────────────────────
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct KillCount(pub u32);
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct DeathCount(pub u32);
+
 // ── SpeedBuff ─────────────────────────────────────────────────────────────────
 
 #[derive(Component, Clone, Copy, Debug)]
