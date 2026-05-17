@@ -23,16 +23,17 @@ fn spawn_world(
     spawn_initial_items(&mut commands, &map, &grid);
 }
 
-// ── Public helpers used by restart ────────────────────────────────────────────
+// ── Public — also called by restart ───────────────────────────────────────────
 
-/// Applies base/fixed tiles from config. Call before regenerate_obstacles.
 pub fn apply_fixed_tiles(map: &WorldConfig, grid: &mut Grid) {
-    // Reset to all-free first so a restart doesn't accumulate old obstacles.
+    // Reset everything to Free
     for y in 0..grid.height as i32 {
         for x in 0..grid.width as i32 {
             grid.set(x, y, Tile::Free);
         }
     }
+
+    // Fixed tiles (bases)
     for fixed in &map.fixed {
         let tile = match fixed.tile {
             TileKind::Free     => Tile::Free,
@@ -43,10 +44,31 @@ pub fn apply_fixed_tiles(map: &WorldConfig, grid: &mut Grid) {
         };
         grid.set(fixed.x as i32, fixed.y as i32, tile);
     }
+
+    // Stamp SafeZone(team_id) in a (2*radius+1)² area around each base.
+    // radius=3 → 7×7 zone. The base centre tile stays as Tile::Base.
+    let radius = map.base_safe_radius as i32;
+    for fixed in &map.fixed {
+        let team_id = match fixed.tile {
+            TileKind::BaseRed | TileKind::Base => 0u8,
+            TileKind::BaseBlue                 => 1u8,
+            _                                  => continue,
+        };
+        let bx = fixed.x as i32;
+        let by = fixed.y as i32;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx == 0 && dy == 0 { continue; } // keep Base tile
+                let cx = bx + dx;
+                let cy = by + dy;
+                if grid.in_bounds(cx, cy) {
+                    grid.set(cx, cy, Tile::SafeZone(team_id));
+                }
+            }
+        }
+    }
 }
 
-/// Randomly places obstacle clusters and clears spawn perimeters.
-/// Call after apply_fixed_tiles. Used at startup and on restart.
 pub fn regenerate_obstacles(map: &WorldConfig, grid: &mut Grid) {
     for cluster in &map.obstacle_clusters {
         let (w, h)       = cluster.size;
@@ -77,15 +99,15 @@ pub fn regenerate_obstacles(map: &WorldConfig, grid: &mut Grid) {
                     let (ex, ey)   = if horizontal { (ox + length, oy) } else { (ox, oy + length) };
                     if !grid.in_bounds(ex, ey) { continue; }
                     let clear = if horizontal {
-                        (ox..=ox + length).all(|x| grid.get(x, oy) == Some(Tile::Free))
+                        (ox..=ox+length).all(|x| grid.get(x, oy) == Some(Tile::Free))
                     } else {
-                        (oy..=oy + length).all(|y| grid.get(ox, y) == Some(Tile::Free))
+                        (oy..=oy+length).all(|y| grid.get(ox, y) == Some(Tile::Free))
                     };
                     if clear {
                         if horizontal {
-                            for x in ox..=ox + length { grid.set(x, oy, Tile::Obstacle); }
+                            for x in ox..=ox+length { grid.set(x, oy, Tile::Obstacle); }
                         } else {
-                            for y in oy..=oy + length { grid.set(ox, y, Tile::Obstacle); }
+                            for y in oy..=oy+length { grid.set(ox, y, Tile::Obstacle); }
                         }
                         placed += 1;
                     }
@@ -117,8 +139,6 @@ pub fn regenerate_obstacles(map: &WorldConfig, grid: &mut Grid) {
     }
 }
 
-/// Spawns initial items into the world. Used at startup only —
-/// restart skips this because the ItemSpawner will repopulate naturally.
 pub fn spawn_initial_items(commands: &mut Commands, map: &WorldConfig, grid: &Grid) {
     for spawner_cfg in &map.item_spawners {
         if spawner_cfg.initial == 0 { continue; }
@@ -129,6 +149,7 @@ pub fn spawn_initial_items(commands: &mut Commands, map: &WorldConfig, grid: &Gr
             attempts += 1;
             let x = rand::random_range(0..map.width  as i32);
             let y = rand::random_range(0..map.height as i32);
+            // Only Free tiles — not SafeZone or Base
             if grid.get(x, y) == Some(Tile::Free) {
                 let pos = crate::world::coords::GridPos::new(x, y);
                 commands.spawn((
@@ -148,6 +169,7 @@ pub fn spawn_initial_items(commands: &mut Commands, map: &WorldConfig, grid: &Gr
     }
 }
 
+/// A footprint can only be placed on Tile::Free — never SafeZone or Base.
 fn footprint_is_free(grid: &Grid, ox: i32, oy: i32, w: i32, h: i32) -> bool {
     for dy in 0..h {
         for dx in 0..w {
@@ -161,7 +183,8 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, load_map)
+        app
+            .add_systems(PreStartup, load_map)
             .add_systems(Startup, spawn_world);
     }
 }

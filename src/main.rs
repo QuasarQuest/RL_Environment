@@ -49,4 +49,8 @@ fn main() {
     app.run();
 }
 
-//TODO: Define RL API Boundaries
+//TODO: Define RL API Boundaries.
+//TODO: Respawn not in base after dead.
+//TODO: Async Timer sim problem with RL.
+//TODO: Blue team always wins.
+//TODO: Save Stats after ML run

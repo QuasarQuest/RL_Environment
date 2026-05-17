@@ -1,4 +1,4 @@
-// src/viz/algorithm/stats.rs
+// src/viz/world/stats.rs
 //
 // Always-visible agent stat overlays: heart pips left, ammo bar right.
 // Not gated by any HideViz variant.

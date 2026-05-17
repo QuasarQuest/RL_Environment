@@ -1,6 +1,6 @@
 // src/viz.rs
 
-pub mod algorithm;
+pub mod world;
 pub mod agent_renderer;
 pub mod camera;
 pub mod components;

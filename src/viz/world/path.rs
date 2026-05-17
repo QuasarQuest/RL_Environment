@@ -1,4 +1,4 @@
-// src/viz/algorithm/path.rs
+// src/viz/world/path.rs
 //
 // HidePathViz-gated: path polyline + destination rect from AgentBrain::debug_draw().
 // Toggled per-agent via the PATH button in the scoreboard.

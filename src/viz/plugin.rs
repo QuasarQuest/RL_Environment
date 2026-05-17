@@ -6,8 +6,8 @@ use super::camera::{spawn_camera, fit_camera_to_grid, init_pan_state, camera_con
 use super::grid_offset::compute_grid_offset;
 use super::tile_renderer::{spawn_tiles, sync_tile_colors};
 use super::agent_renderer::sync_agent_transforms;
-use super::algorithm::{draw_agent_stats, draw_agent_range, draw_agent_path};
-use crate::viz::panels::tooltip::{spawn_tooltip, update_tooltip};
+use super::world::{draw_agent_stats, draw_agent_range, draw_agent_path, draw_safe_zone_borders};
+use super::panels::tooltip::{spawn_tooltip, update_tooltip};
 use super::panels::help_overlay::{spawn_help_overlay, toggle_help_overlay};
 use super::panels::end_screen::{
     spawn_end_screen, show_end_screen, populate_end_screen_cards,
@@ -66,6 +66,7 @@ impl Plugin for VizPlugin {
                 draw_agent_stats,
                 draw_agent_range,
                 draw_agent_path,
+                draw_safe_zone_borders,
             ))
             // HUD interaction + scoreboard
             .add_systems(Update, (

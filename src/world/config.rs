@@ -59,15 +59,23 @@ impl ItemSpawnerRon {
     }
 }
 
-// ── Default helpers for serde ─────────────────────────────────────────────────
+// ── Serde defaults ────────────────────────────────────────────────────────────
 
-fn default_melee_range()  -> i32 { config::MELEE_RANGE }
-fn default_ranged_range() -> i32 { config::RANGED_RANGE }
-fn default_kill_reward()  -> u32 { config::KILL_REWARD }
-fn default_sim_speed()    -> f32       { config::DEFAULT_TICKS_PER_SECOND }
-fn default_sim_speeds()   -> Vec<f32>  {
-    vec![1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0]
+fn default_sim_speed()             -> f32 { config::DEFAULT_TICKS_PER_SECOND }
+fn default_sim_speeds()            -> Vec<f32> {
+    vec![1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0,
+         500.0, 1000.0, 2500.0, 5000.0, 10000.0]
 }
+fn default_melee_range()           -> i32 { config::MELEE_RANGE }
+fn default_ranged_range()          -> i32 { config::RANGED_RANGE }
+fn default_kill_reward()           -> u8  { config::KILL_REWARD }
+fn default_melee_damage()          -> u8  { config::MELEE_DAMAGE }
+fn default_ranged_damage()         -> u8  { config::RANGED_DAMAGE }
+fn default_melee_cooldown_ticks()  -> u8  { config::MELEE_COOLDOWN_TICKS }
+fn default_ranged_cooldown_ticks() -> u8  { config::RANGED_COOLDOWN_TICKS }
+fn default_respawn_ticks()         -> u8  { config::AGENT_RESPAWN_TICKS }
+fn default_gold_carry_speed()      -> f32 { config::GOLD_CARRY_SPEED }
+fn default_base_safe_radius()      -> u8  { config::BASE_SAFE_RADIUS }
 
 // ── WorldConfig ───────────────────────────────────────────────────────────────
 
@@ -78,22 +86,34 @@ pub struct WorldConfig {
 
     pub match_duration_ticks: u64,
 
-    /// Starting sim speed in ticks/second.
     #[serde(default = "default_sim_speed")]
-    pub sim_speed: f32,
-
-    /// Available speed steps for the HUD +/- buttons and F/S keys.
+    pub sim_speed:  f32,
     #[serde(default = "default_sim_speeds")]
     pub sim_speeds: Vec<f32>,
 
+    #[serde(default = "default_respawn_ticks")]
+    pub respawn_ticks:    u8,
+    #[serde(default = "default_gold_carry_speed")]
+    pub gold_carry_speed: f32,
+    #[serde(default = "default_base_safe_radius")]
+    pub base_safe_radius: u8,  // used as i32 cast in apply_fixed_tiles
+
     #[serde(default = "default_melee_range")]
     pub melee_range:  i32,
-
     #[serde(default = "default_ranged_range")]
     pub ranged_range: i32,
-
     #[serde(default = "default_kill_reward")]
-    pub kill_reward: u32,
+    pub kill_reward:  u8,
+
+    #[serde(default = "default_melee_damage")]
+    pub melee_damage:  u8,
+    #[serde(default = "default_ranged_damage")]
+    pub ranged_damage: u8,
+
+    #[serde(default = "default_melee_cooldown_ticks")]
+    pub melee_cooldown_ticks:  u8,
+    #[serde(default = "default_ranged_cooldown_ticks")]
+    pub ranged_cooldown_ticks: u8,
 
     pub item_spawners:     Vec<ItemSpawnerRon>,
     pub fixed:             Vec<FixedTile>,

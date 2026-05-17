@@ -1,4 +1,4 @@
-// src/viz/algorithm/range.rs
+// src/viz/world/range.rs
 //
 // HideRangeViz-gated: melee ring + ranged ring.
 // Ranges read from MapConfig so they match combat behaviour exactly.

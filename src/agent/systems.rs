@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use crate::world::{Grid, tile::Tile};
 use crate::world::coords::GridPos;
+use crate::world::config::WorldConfig;
 use crate::sim::config::SimConfig;
 use crate::team::{Team, TeamScore};
 use crate::item::Item;
@@ -85,6 +86,7 @@ pub fn tick_speed_buff(
 
 pub fn apply_actions(
     grid:           Res<Grid>,
+    map:            Res<WorldConfig>,
     mut team_score: ResMut<TeamScore>,
     mut query: Query<(
         Entity, &mut GridPos, &mut GoldCarried,
@@ -95,13 +97,12 @@ pub fn apply_actions(
     let mut claimed: HashSet<GridPos> = HashSet::new();
 
     for (_, mut pos, mut gold, mut score, team, mut pending, speed) in query.iter_mut() {
-        // Peek at the action — only consume it if it's not a combat action.
         let is_combat = matches!(pending.0, Some(Action::Attack(_)) | Some(Action::RangedAttack(_)));
         if is_combat { continue; }
 
         let Some(action) = pending.0.take() else { continue };
 
-        let moves = if speed.is_some() { 2 } else { 1 };
+        let moves = movement_tiles(&gold, speed.is_some(), map.gold_carry_speed);
 
         match action {
             Action::Move(dir) => {
@@ -121,7 +122,7 @@ pub fn apply_actions(
                     Some(Tile::Base(t)) if t == team.0
                 );
                 if on_own_base && !gold.is_empty() {
-                    let delivered = gold.0;
+                    let delivered = gold.0 as u32; // u8 → u32 for Score addition
                     score.0      += delivered;
                     team_score.add(*team, delivered);
                     gold.0        = 0;
@@ -129,9 +130,27 @@ pub fn apply_actions(
                         team.name(), delivered, team_score.get(*team));
                 }
             }
-            Action::Wait => {} // consumed, nothing to do
-            // Combat actions are handled above — this arm is unreachable.
+            Action::Wait => {}
             Action::Attack(_) | Action::RangedAttack(_) => unreachable!(),
         }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// How many tiles the agent moves this tick.
+fn movement_tiles(gold: &GoldCarried, has_speed_buff: bool, gold_carry_speed: f32) -> u32 {
+    if gold.0 == 0 {
+        return if has_speed_buff { 2 } else { 1 };
+    }
+
+    let effective = gold_carry_speed.powi(gold.0 as i32).clamp(0.0, 1.0);
+
+    if effective >= 1.0 {
+        if has_speed_buff { 2 } else { 1 }
+    } else if effective <= 0.0 {
+        0
+    } else {
+        if rand::random::<f32>() < effective { 1 } else { 0 }
     }
 }

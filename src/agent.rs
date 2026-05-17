@@ -9,7 +9,6 @@ pub mod debug;
 pub mod observation;
 pub mod planner;
 pub mod strategy;
-pub mod rl;
 pub mod plugin;
 pub mod registry;
 pub mod spawn;

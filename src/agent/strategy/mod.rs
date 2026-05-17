@@ -4,6 +4,7 @@ pub mod bt;
 pub mod fsm;
 pub mod goap;
 pub mod random;
+mod rl;
 
 pub use bt::BtStrategy;
 pub use fsm::FsmStrategy;

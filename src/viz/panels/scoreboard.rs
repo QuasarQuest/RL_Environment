@@ -1,6 +1,7 @@
 // src/viz/panels/scoreboard.rs
 
 use bevy::prelude::*;
+use bevy::color::Alpha;
 use crate::agent::components::{
     Ammo, DeathCount, GoldCarried, Hearts, KillCount, RespawnIn, Score,
 };

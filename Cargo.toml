@@ -1,7 +1,11 @@
 [package]
-name = "algoorithm_test_bed"
+name = "algorithm_test_bed"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+name = "atb"
+crate-type = ["cdylib"]
 
 [dependencies]
 bevy       = { version = "0.18.1", features = ["debug"] }
@@ -9,6 +13,7 @@ rand       = "0.10.1"
 ron        = "0.12.1"
 serde      = { version = "1.0.228", features = ["derive"] }
 rustc-hash = "2.1.2"
+pyo3       = { version = "0.28.3", features = ["extension-module"] }
 
 [features]
 headless = []

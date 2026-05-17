@@ -11,7 +11,7 @@ pub use crate::world::coords::GridPos;
 // ── Gold ──────────────────────────────────────────────────────────────────────
 
 #[derive(Component, Clone, Copy, Debug, Default)]
-pub struct GoldCarried(pub u32);
+pub struct GoldCarried(pub u8);
 
 impl GoldCarried {
     pub fn is_full(self)  -> bool { self.0 >= config::AGENT_MAX_GOLD }
@@ -33,8 +33,8 @@ impl Default for Hearts {
 }
 
 impl Hearts {
-    pub fn is_dead(self)  -> bool { self.0 == 0 }
-    pub fn is_full(self)  -> bool { self.0 >= config::AGENT_MAX_HEARTS }
+    pub fn is_dead(self)       -> bool { self.0 == 0 }
+    pub fn is_full(self)       -> bool { self.0 >= config::AGENT_MAX_HEARTS }
     pub fn lose_one(&mut self) { self.0 = self.0.saturating_sub(1); }
     pub fn gain_one(&mut self) { self.0 = (self.0 + 1).min(config::AGENT_MAX_HEARTS); }
 }
@@ -81,3 +81,10 @@ pub struct RespawnIn(pub u8);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SpawnPoint(pub GridPos);
+
+// ── AttackCooldown ────────────────────────────────────────────────────────────
+/// Ticks remaining before this agent can attack again.
+/// Inserted on attack, decremented each tick, removed at zero.
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AttackCooldown(pub u8);

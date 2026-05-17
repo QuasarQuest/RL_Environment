@@ -71,7 +71,7 @@ pub fn deposit_gold(
         if gold.is_empty() { continue; }
         if grid.get(pos.x, pos.y) != Some(crate::world::tile::Tile::Base(team.0)) { continue; }
 
-        let deposited = gold.0;
+        let deposited = gold.0 as u32;
         gold.0        = 0;
         score.0      += deposited;
         team_score.add(*team, deposited);

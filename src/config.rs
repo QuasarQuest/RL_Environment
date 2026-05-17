@@ -13,27 +13,25 @@ pub const TILE_GAP:  f32 =  1.0;
 pub const DEFAULT_TICKS_PER_SECOND: f32 = 10.0;
 
 // ── Agent ────────────────────────────────────────────────────────────────────
-pub const AGENT_MAX_GOLD:      u32 = 5;
-
-// ── Health (hearts) ───────────────────────────────────────────────────────────
+pub const AGENT_MAX_GOLD:      u8  = 5;
 pub const AGENT_MAX_HEARTS:    u8  = 3;
-/// Sim-ticks before a dead agent respawns at base.
-pub const AGENT_RESPAWN_TICKS: u8  = 10;
-
-// ── Combat ───────────────────────────────────────────────────────────────────
-/// Default melee range — overridable per-map via MapConfig::melee_range.
-pub const MELEE_RANGE:         i32 = 1;
-/// Default ranged range — overridable per-map via MapConfig::ranged_range.
-pub const RANGED_RANGE:        i32 = 5;
-/// Default score reward for a kill — overridable per-map via MapConfig::kill_reward.
-pub const KILL_REWARD:         u32 = 3;
+pub const AGENT_RESPAWN_TICKS: u8  = 150;
+pub const GOLD_CARRY_SPEED:    f32 = 0.9;
+pub const BASE_SAFE_RADIUS:    u8  = 3;
 
 // ── Ammo ─────────────────────────────────────────────────────────────────────
-pub const AGENT_START_AMMO:    u8  = 3;
-pub const AGENT_MAX_AMMO:      u8  = 10;
-/// Ammo added per pickup.
-pub const AMMO_PER_PICKUP:     u8  = 3;
+pub const AGENT_START_AMMO: u8 = 3;
+pub const AGENT_MAX_AMMO:   u8 = 10;
+pub const AMMO_PER_PICKUP:  u8 = 3;
 
 // ── Speed boost ───────────────────────────────────────────────────────────────
-/// Sim-ticks the speed buff lasts.
-pub const SPEED_BUFF_TICKS:    u8  = 15;
+pub const SPEED_BUFF_TICKS: u8 = 15;
+
+// ── Combat — defaults, all overridable via WorldConfig ───────────────────────
+pub const MELEE_RANGE:           i32 = 2;   // used in i32 grid arithmetic — keep i32
+pub const RANGED_RANGE:          i32 = 6;   // used in i32 grid arithmetic — keep i32
+pub const KILL_REWARD:           u8  = 15;
+pub const MELEE_DAMAGE:          u8  = 1;
+pub const RANGED_DAMAGE:         u8  = 1;
+pub const MELEE_COOLDOWN_TICKS:  u8  = 4;
+pub const RANGED_COOLDOWN_TICKS: u8  = 6;
