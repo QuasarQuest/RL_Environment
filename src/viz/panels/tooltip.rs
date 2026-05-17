@@ -5,8 +5,8 @@ use crate::world::coords::GridPos;
 use crate::agent::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score};
 use crate::viz::components::{AgentLabel, HidePathViz, HideRangeViz};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM};
-use super::grid_offset::GridOffset;
-use super::camera::MainCamera;
+use crate::viz::grid_offset::GridOffset;
+use crate::viz::camera::MainCamera;
 
 #[derive(Component)] pub struct TooltipPanel;
 #[derive(Component)] pub struct TooltipName;

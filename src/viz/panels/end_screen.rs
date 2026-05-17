@@ -11,11 +11,11 @@ use crate::viz::restart::RestartMessage;
 // ── Markers ───────────────────────────────────────────────────────────────────
 
 #[derive(Component)] pub struct EndScreen;
-#[derive(Component)] pub(crate) struct WinnerLabel;
-#[derive(Component)] pub(crate) struct TeamStatsContainer;
-#[derive(Component)] pub(crate) struct CardsPopulated; // guard: cards spawned once only
-#[derive(Component)] pub(crate) struct QuitButton;
-#[derive(Component)] pub(crate) struct RestartButton;
+#[derive(Component)] pub struct WinnerLabel;
+#[derive(Component)] pub struct TeamStatsContainer;
+#[derive(Component)] pub struct CardsPopulated; // guard: cards spawned once only
+#[derive(Component)] pub struct QuitButton;
+#[derive(Component)] pub struct RestartButton;
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 

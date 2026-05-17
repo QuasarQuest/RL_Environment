@@ -49,6 +49,4 @@ fn main() {
     app.run();
 }
 
-
-//TODO: SImulation doesn't go aboove 500.0
 //TODO: Define RL API Boundaries

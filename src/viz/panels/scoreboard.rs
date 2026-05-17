@@ -1,4 +1,4 @@
-// src/viz/hud/scoreboard.rs
+// src/viz/panels/scoreboard.rs
 
 use bevy::prelude::*;
 use crate::agent::components::{

@@ -27,8 +27,8 @@ use crate::team::{Team, TeamScore};
 use crate::world::config::WorldConfig;
 use crate::world::Grid;
 use crate::world::plugin::{apply_fixed_tiles, regenerate_obstacles};
-use crate::viz::end_screen::EndScreen;
-use crate::viz::hud::components::ScoreboardRow;
+use crate::viz::panels::end_screen::EndScreen;
+use crate::viz::panels::components::ScoreboardRow;
 use crate::config;
 
 // ── Message ───────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 // src/sim/plugin.rs
 
 use bevy::prelude::*;
-use super::config::{SimConfig, AVAILABLE_SPEEDS};
+use super::config::SimConfig;
 use super::schedule::OnSimTick;
 use super::timer::TickTimer;
 use crate::world::config::WorldConfig;
@@ -9,18 +9,14 @@ use crate::world::config::WorldConfig;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SimSystems;
 
-// ── Systems ───────────────────────────────────────────────────────────────────
-
-/// Reads match_duration_ticks and sim_speed from WorldConfig into SimConfig.
-/// Also primes TickTimer to the correct interval so the first frame fires
-/// at the right rate without needing a manual speed-change key press.
 fn init_sim_config(
-    map:      Res<WorldConfig>,
-    mut cfg:  ResMut<SimConfig>,
+    map:       Res<WorldConfig>,
+    mut cfg:   ResMut<SimConfig>,
     mut timer: ResMut<TickTimer>,
 ) {
     cfg.match_duration_ticks = map.match_duration_ticks;
     cfg.ticks_per_second     = map.sim_speed;
+    cfg.available_speeds     = map.sim_speeds.clone();
     timer.0 = Timer::from_seconds(1.0 / map.sim_speed, TimerMode::Repeating);
 }
 
@@ -36,17 +32,13 @@ fn handle_input(
     let mut speed_changed = false;
 
     if keys.just_pressed(KeyCode::KeyF) {
-        let idx = AVAILABLE_SPEEDS.iter()
-            .position(|&s| (s - cfg.ticks_per_second).abs() < f32::EPSILON)
-            .unwrap_or(0);
-        cfg.ticks_per_second = AVAILABLE_SPEEDS[(idx + 1).min(AVAILABLE_SPEEDS.len() - 1)];
+        let idx = cfg.speed_index();
+        cfg.ticks_per_second = cfg.available_speeds[(idx + 1).min(cfg.available_speeds.len() - 1)];
         speed_changed = true;
     }
     if keys.just_pressed(KeyCode::KeyS) {
-        let idx = AVAILABLE_SPEEDS.iter()
-            .position(|&s| (s - cfg.ticks_per_second).abs() < f32::EPSILON)
-            .unwrap_or(0);
-        cfg.ticks_per_second = AVAILABLE_SPEEDS[idx.saturating_sub(1)];
+        let idx = cfg.speed_index();
+        cfg.ticks_per_second = cfg.available_speeds[idx.saturating_sub(1)];
         speed_changed = true;
     }
 
@@ -75,10 +67,10 @@ pub fn fire_sim_tick(world: &mut World) {
     };
 
     #[cfg(feature = "headless")]
-    let ticks_to_fire = ticks_due;           // uncapped — saturate CPU for RL
+    let ticks_to_fire = ticks_due;
 
     #[cfg(not(feature = "headless"))]
-    let ticks_to_fire = ticks_due.min(200);  // capped — keep GUI responsive
+    let ticks_to_fire = ticks_due.min(200);
 
     for _ in 0..ticks_to_fire {
         let game_over = {
@@ -96,8 +88,6 @@ pub fn fire_sim_tick(world: &mut World) {
         if game_over { break; }
     }
 }
-
-// ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct SimPlugin;
 

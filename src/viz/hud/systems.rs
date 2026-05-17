@@ -1,7 +1,7 @@
 // src/viz/hud/systems.rs
 
 use bevy::prelude::*;
-use crate::sim::config::{SimConfig, AVAILABLE_SPEEDS};
+use crate::sim::config::SimConfig;
 use crate::sim::timer::TickTimer;
 use crate::team::{Team, TeamScore};
 use crate::style::color::{GOLD_500, GOLD_800, GREEN_400, GREEN_500};
@@ -43,8 +43,14 @@ pub fn update_team_scores(
     }
 }
 
-// ── Speed controls ────────────────────────────────────────────────────────────
-
+/// Format speed for the HUD label — no decimal for whole numbers.
+fn format_speed(tps: f32) -> String {
+    if tps >= 1000.0 {
+        format!("{}k", (tps as u32) / 1000)
+    } else {
+        format!("{}x", tps as u32)
+    }
+}
 pub fn handle_speed_buttons(
     mut cfg:         ResMut<SimConfig>,
     mut timer:       ResMut<TickTimer>,
@@ -57,19 +63,15 @@ pub fn handle_speed_buttons(
 
     for interaction in decrease_q.iter() {
         if *interaction == Interaction::Pressed {
-            let idx = AVAILABLE_SPEEDS.iter()
-                .position(|&s| (s - cfg.ticks_per_second).abs() < f32::EPSILON)
-                .unwrap_or(0);
-            cfg.ticks_per_second = AVAILABLE_SPEEDS[idx.saturating_sub(1)];
+            let idx = cfg.speed_index();
+            cfg.ticks_per_second = cfg.available_speeds[idx.saturating_sub(1)];
             changed = true;
         }
     }
     for interaction in increase_q.iter() {
         if *interaction == Interaction::Pressed {
-            let idx = AVAILABLE_SPEEDS.iter()
-                .position(|&s| (s - cfg.ticks_per_second).abs() < f32::EPSILON)
-                .unwrap_or(0);
-            cfg.ticks_per_second = AVAILABLE_SPEEDS[(idx + 1).min(AVAILABLE_SPEEDS.len() - 1)];
+            let idx = cfg.speed_index();
+            cfg.ticks_per_second = cfg.available_speeds[(idx + 1).min(cfg.available_speeds.len() - 1)];
             changed = true;
         }
     }
@@ -82,7 +84,7 @@ pub fn handle_speed_buttons(
 
     if changed {
         timer.0 = Timer::from_seconds(1.0 / cfg.ticks_per_second, TimerMode::Repeating);
-        let label = format!("{}x", cfg.ticks_per_second as u32);
+        let label = format_speed(cfg.ticks_per_second);
         for mut text in speed_label.iter_mut() {
             *text = Text::new(&label);
         }
