@@ -88,6 +88,8 @@ impl Plugin for VizPlugin {
             .add_systems(Update, (
                 show_end_screen,
                 populate_end_screen_cards,
+            ).in_set(HudUpdate))
+            .add_systems(Update, (
                 handle_quit_button,
                 handle_restart_button,
             ).in_set(HudUpdate))
@@ -96,10 +98,9 @@ impl Plugin for VizPlugin {
                 update_time_label,
                 update_team_scores,
             ).in_set(HudUpdate))
-            // Re-run factory when new agents are spawned (e.g. after restart)
+            // Factory labels for agents spawned after restart
             .add_systems(Update, assign_display_components)
-            // Exclusive restart — runs after HudUpdate so button press is
-            // processed before the world is mutated.
+            // Exclusive restart — after HudUpdate so button is processed first
             .add_systems(Update, restart_episode.after(HudUpdate));
     }
 }

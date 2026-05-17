@@ -13,6 +13,7 @@ use crate::viz::restart::RestartMessage;
 #[derive(Component)] pub struct EndScreen;
 #[derive(Component)] pub(crate) struct WinnerLabel;
 #[derive(Component)] pub(crate) struct TeamStatsContainer;
+#[derive(Component)] pub(crate) struct CardsPopulated; // guard: cards spawned once only
 #[derive(Component)] pub(crate) struct QuitButton;
 #[derive(Component)] pub(crate) struct RestartButton;
 
@@ -72,21 +73,14 @@ pub fn spawn_end_screen(mut commands: Commands) {
             },
         ));
         divider(panel, border);
-        panel.spawn((
-            Text::new("Rerun the binary to play again"),
-            TextFont  { font_size: SIZE_SM, ..default() },
-            TextColor(dim),
-        ));
-        // Button row: RESTART + QUIT
+        // Button row: RESTART (green) + QUIT
         panel.spawn(Node {
             flex_direction: FlexDirection::Row,
             column_gap:     Val::Px(16.0),
             ..default()
         }).with_children(|row| {
-            // RESTART
             row.spawn((
-                Button,
-                RestartButton,
+                Button, RestartButton,
                 Node {
                     padding:         UiRect::axes(Val::Px(36.0), Val::Px(12.0)),
                     justify_content: JustifyContent::Center,
@@ -104,10 +98,8 @@ pub fn spawn_end_screen(mut commands: Commands) {
                     TextColor(ThemeColor::SuccessText.resolve()),
                 ));
             });
-            // QUIT
             row.spawn((
-                Button,
-                QuitButton,
+                Button, QuitButton,
                 Node {
                     padding:         UiRect::axes(Val::Px(36.0), Val::Px(12.0)),
                     justify_content: JustifyContent::Center,
@@ -178,10 +170,15 @@ pub fn populate_end_screen_cards(
     sim:          Res<SimConfig>,
     team_score:   Res<TeamScore>,
     agents:       Query<(&Team, &Score, &KillCount, &DeathCount)>,
-    container_q:  Query<Entity, With<TeamStatsContainer>>,
+    container_q:  Query<Entity, (With<TeamStatsContainer>, Without<CardsPopulated>)>,
     mut commands: Commands,
 ) {
-    if !sim.is_changed() || !sim.game_over { return; }
+    if !sim.game_over { return; }
+
+    let Ok(container) = container_q.single() else { return }; // Already populated
+
+    // Mark immediately so concurrent frames can't double-spawn
+    commands.entity(container).insert(CardsPopulated);
 
     use std::collections::HashMap;
     struct TeamData { kills: u32, deaths: u32 }
@@ -253,11 +250,19 @@ pub fn populate_end_screen_cards(
 // ── Restart ───────────────────────────────────────────────────────────────────
 
 pub fn handle_restart_button(
-    mut restart: MessageWriter<RestartMessage>,
-    buttons:     Query<&Interaction, (Changed<Interaction>, With<RestartButton>)>,
+    mut restart:  MessageWriter<RestartMessage>,
+    mut container_q: Query<Entity, With<TeamStatsContainer>>,
+    mut commands: Commands,
+    buttons:      Query<&Interaction, (Changed<Interaction>, With<RestartButton>)>,
 ) {
     for interaction in buttons.iter() {
         if *interaction == Interaction::Pressed {
+            // Clear CardsPopulated so next episode populates fresh cards
+            if let Ok(container) = container_q.single_mut() {
+                commands.entity(container)
+                    .remove::<CardsPopulated>()
+                    .despawn_related::<Children>();
+            }
             restart.write(RestartMessage);
         }
     }

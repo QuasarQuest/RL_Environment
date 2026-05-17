@@ -5,10 +5,10 @@
 
     match_duration_ticks: 2500,
 
+    // ── Simulation speed ──────────────────────────────────────────────────────
+    sim_speed: 10.0,
+
     // ── Combat ───────────────────────────────────────────────────────────────
-    // melee_range:  tiles an agent can reach with a melee attack (no ammo cost)
-    // ranged_range: tiles an agent can reach with a ranged attack (costs 1 ammo)
-    // kill_reward:  score points awarded to the attacker's team on a kill
     melee_range:  2,
     ranged_range: 6,
     kill_reward:  15,

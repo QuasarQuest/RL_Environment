@@ -8,33 +8,47 @@ mod item;
 mod sim;
 mod style;
 mod team;
-mod viz;
 mod world;
+
+#[cfg(not(feature = "headless"))]
+mod viz;
 
 use bevy::prelude::*;
 use sim::SimPlugin;
-use viz::VizPlugin;
 use world::WorldPlugin;
 use agent::AgentPlugin;
 use item::ItemPlugin;
 
+#[cfg(not(feature = "headless"))]
+use viz::VizPlugin;
+
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title:      config::WINDOW_TITLE.into(),
-                resolution: bevy::window::WindowResolution::new(
-                    config::WINDOW_WIDTH,
-                    config::WINDOW_HEIGHT,
-                ),
-                ..default()
-            }),
+    let mut app = App::new();
+
+    #[cfg(not(feature = "headless"))]
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title:      config::WINDOW_TITLE.into(),
+            resolution: bevy::window::WindowResolution::new(
+                config::WINDOW_WIDTH,
+                config::WINDOW_HEIGHT,
+            ),
             ..default()
-        }))
-        .add_plugins((WorldPlugin, SimPlugin, ItemPlugin, AgentPlugin, VizPlugin))
-        .run();
+        }),
+        ..default()
+    }));
+
+    #[cfg(feature = "headless")]
+    app.add_plugins(MinimalPlugins);
+
+    app.add_plugins((WorldPlugin, SimPlugin, ItemPlugin, AgentPlugin));
+
+    #[cfg(not(feature = "headless"))]
+    app.add_plugins(VizPlugin);
+
+    app.run();
 }
 
-// TODO: Match end screen — trigger when tick >= match_duration_ticks
-//       - Show final scores, winner, K/D summary
-//       - Restart button reloads MapConfig and respawns all agents
+
+//TODO: SImulation doesn't go aboove 500.0
+//TODO: Define RL API Boundaries

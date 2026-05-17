@@ -6,19 +6,22 @@ use super::schedule::OnSimTick;
 use super::timer::TickTimer;
 use crate::world::config::WorldConfig;
 
-/// Public system-set label so other plugins can order after sim writes.
-/// NOTE: exclusive systems (fn(&mut World)) cannot belong to a SystemSet;
-/// fire_sim_tick is scheduled separately with .after(SimSystems).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SimSystems;
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Reads match_duration_ticks from the map asset into SimConfig.
-/// Runs at Startup — MapConfig is inserted during PreStartup by WorldPlugin,
-/// so it is guaranteed to exist by the time Startup runs.
-fn init_sim_config(map: Res<WorldConfig>, mut cfg: ResMut<SimConfig>) {
+/// Reads match_duration_ticks and sim_speed from WorldConfig into SimConfig.
+/// Also primes TickTimer to the correct interval so the first frame fires
+/// at the right rate without needing a manual speed-change key press.
+fn init_sim_config(
+    map:      Res<WorldConfig>,
+    mut cfg:  ResMut<SimConfig>,
+    mut timer: ResMut<TickTimer>,
+) {
     cfg.match_duration_ticks = map.match_duration_ticks;
+    cfg.ticks_per_second     = map.sim_speed;
+    timer.0 = Timer::from_seconds(1.0 / map.sim_speed, TimerMode::Repeating);
 }
 
 fn handle_input(
@@ -48,17 +51,10 @@ fn handle_input(
     }
 
     if speed_changed {
-        // Reset accumulator when speed changes to avoid a burst of catch-up ticks.
         timer.0 = Timer::from_seconds(1.0 / cfg.ticks_per_second, TimerMode::Repeating);
     }
 }
 
-/// Exclusive system — fires as many ticks as the accumulated wall-clock delta
-/// covers at the current ticks_per_second.
-///
-/// Episode length is match_duration_ticks — speed-independent.
-/// At 10 tps a 10 000-tick episode takes ~16 min real time.
-/// At 200 tps the same episode takes ~50 s — ideal for RL throughput.
 pub fn fire_sim_tick(world: &mut World) {
     let (paused, game_over) = {
         let cfg = world.resource::<SimConfig>();
@@ -66,13 +62,11 @@ pub fn fire_sim_tick(world: &mut World) {
     };
 
     if paused || game_over {
-        // Still tick the timer so it doesn't accumulate while paused.
         let delta = world.resource::<Time>().delta();
         world.resource_mut::<TickTimer>().0.tick(delta);
         return;
     }
 
-    // Accumulate wall time into the timer and count how many ticks are due.
     let ticks_due: u32 = {
         let delta = world.resource::<Time>().delta();
         let mut timer = world.resource_mut::<TickTimer>();
@@ -80,10 +74,11 @@ pub fn fire_sim_tick(world: &mut World) {
         timer.0.times_finished_this_tick()
     };
 
-    // Cap ticks per frame to avoid a death-spiral when the sim is too slow
-    // to process all ticks within a frame (e.g. very heavy agent logic).
-    // 200 is enough headroom for 100 tps at 2 fps — adjust if needed.
-    let ticks_to_fire = ticks_due.min(200);
+    #[cfg(feature = "headless")]
+    let ticks_to_fire = ticks_due;           // uncapped — saturate CPU for RL
+
+    #[cfg(not(feature = "headless"))]
+    let ticks_to_fire = ticks_due.min(200);  // capped — keep GUI responsive
 
     for _ in 0..ticks_to_fire {
         let game_over = {

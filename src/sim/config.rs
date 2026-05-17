@@ -3,7 +3,8 @@
 use bevy::prelude::*;
 use crate::config;
 
-pub const AVAILABLE_SPEEDS: &[f32] = &[1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 200.0];
+pub const AVAILABLE_SPEEDS: &[f32] = &[1.0, 2.0, 5.0, 10.0, 25.0, 50.0,
+    100.0, 500.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0];
 
 #[derive(Resource)]
 pub struct SimConfig {

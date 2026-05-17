@@ -64,26 +64,28 @@ impl ItemSpawnerRon {
 fn default_melee_range()  -> i32 { config::MELEE_RANGE }
 fn default_ranged_range() -> i32 { config::RANGED_RANGE }
 fn default_kill_reward()  -> u32 { config::KILL_REWARD }
+fn default_sim_speed()    -> f32 { config::DEFAULT_TICKS_PER_SECOND }
 
-// ── WorldConfig ─────────────────────────────────────────────────────────────────
+// ── WorldConfig ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone, Resource)]
 pub struct WorldConfig {
     pub width:  usize,
     pub height: usize,
 
-    /// Episode length in sim-ticks — loaded from the map asset.
     pub match_duration_ticks: u64,
 
-    /// Melee attack range in tiles. Defaults to config::MELEE_RANGE.
+    /// Starting sim speed in ticks/second. Loaded into SimConfig at startup.
+    /// Can still be changed at runtime with F/S keys or the HUD speed buttons.
+    #[serde(default = "default_sim_speed")]
+    pub sim_speed: f32,
+
     #[serde(default = "default_melee_range")]
     pub melee_range:  i32,
 
-    /// Ranged attack range in tiles. Defaults to config::RANGED_RANGE.
     #[serde(default = "default_ranged_range")]
     pub ranged_range: i32,
 
-    /// Score points awarded to the attacker (and their team) on a kill.
     #[serde(default = "default_kill_reward")]
     pub kill_reward: u32,
 

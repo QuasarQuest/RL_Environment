@@ -10,6 +10,9 @@ ron        = "0.12.1"
 serde      = { version = "1.0.228", features = ["derive"] }
 rustc-hash = "2.1.2"
 
+[features]
+headless = []
+
 # ── Build profiles ────────────────────────────────────────────────────────────
 
 [profile.dev]
