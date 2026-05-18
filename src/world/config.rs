@@ -96,7 +96,7 @@ pub struct WorldConfig {
     #[serde(default = "default_gold_carry_speed")]
     pub gold_carry_speed: f32,
     #[serde(default = "default_base_safe_radius")]
-    pub base_safe_radius: u8,  // used as i32 cast in apply_fixed_tiles
+    pub base_safe_radius: u8,
 
     #[serde(default = "default_melee_range")]
     pub melee_range:  i32,
@@ -123,9 +123,31 @@ pub struct WorldConfig {
 
 impl WorldConfig {
     pub fn load(path: &str) -> Self {
-        let text = std::fs::read_to_string(path)
-            .unwrap_or_else(|_| panic!("Cannot read map config: {path}"));
+        let resolved = Self::resolve_path(path);
+        let text = std::fs::read_to_string(&resolved)
+            .unwrap_or_else(|_| panic!("Cannot read map config: {resolved}"));
         ron::from_str(&text)
-            .unwrap_or_else(|e| panic!("Cannot parse map config {path}: {e}"))
+            .unwrap_or_else(|e| panic!("Cannot parse map config {resolved}: {e}"))
+    }
+
+    /// Walk up from the current working directory until we find `path`.
+    /// This allows the sim to be invoked from any subdirectory of the
+    /// project (e.g. `rl/src/` when running from PyCharm).
+    fn resolve_path(path: &str) -> String {
+        let mut dir = std::env::current_dir()
+            .expect("Cannot determine current directory");
+
+        loop {
+            let candidate = dir.join(path);
+            if candidate.exists() {
+                return candidate.to_string_lossy().into_owned();
+            }
+            if !dir.pop() {
+                // Reached filesystem root without finding the file.
+                // Fall back to the original path so the error message
+                // names the file the user expects.
+                return path.to_owned();
+            }
+        }
     }
 }

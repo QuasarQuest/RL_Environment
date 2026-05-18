@@ -20,6 +20,7 @@ fn init_sim_config(
     timer.0 = Timer::from_seconds(1.0 / map.sim_speed, TimerMode::Repeating);
 }
 
+#[cfg(not(feature = "headless"))]
 fn handle_input(
     keys:      Res<ButtonInput<KeyCode>>,
     mut cfg:   ResMut<SimConfig>,
@@ -47,6 +48,9 @@ fn handle_input(
     }
 }
 
+// In headless mode RlEnv drives ticks directly via world.run_schedule(OnSimTick).
+// fire_sim_tick and handle_input are timer/input driven and not needed.
+#[cfg(not(feature = "headless"))]
 pub fn fire_sim_tick(world: &mut World) {
     let (paused, game_over) = {
         let cfg = world.resource::<SimConfig>();
@@ -66,10 +70,6 @@ pub fn fire_sim_tick(world: &mut World) {
         timer.0.times_finished_this_tick()
     };
 
-    #[cfg(feature = "headless")]
-    let ticks_to_fire = ticks_due;
-
-    #[cfg(not(feature = "headless"))]
     let ticks_to_fire = ticks_due.min(200);
 
     for _ in 0..ticks_to_fire {
@@ -97,7 +97,10 @@ impl Plugin for SimPlugin {
             .init_resource::<SimConfig>()
             .init_resource::<TickTimer>()
             .init_schedule(OnSimTick)
-            .add_systems(Startup, init_sim_config)
+            .add_systems(Startup, init_sim_config);
+
+        #[cfg(not(feature = "headless"))]
+        app
             .add_systems(Update, handle_input.in_set(SimSystems))
             .add_systems(Update, fire_sim_tick.after(SimSystems));
     }

@@ -4,8 +4,6 @@ use bevy::prelude::*;
 use crate::world::Grid;
 use crate::world::coords::GridPos;
 use crate::world::config::WorldConfig;
-use crate::item::ItemKind;
-use crate::config;
 use crate::team::{Team, TeamScore};
 use super::action::Action;
 use super::brain::AgentBrain;
@@ -16,7 +14,9 @@ use super::components::{
 use super::systems::PendingAction;
 
 #[cfg(not(feature = "headless"))]
-use crate::item::ItemBundle;
+use crate::item::{ItemBundle, ItemKind};
+#[cfg(not(feature = "headless"))]
+use crate::config;
 #[cfg(not(feature = "headless"))]
 use crate::viz::grid_offset::GridOffset;
 
@@ -152,9 +152,6 @@ pub fn resolve_combat(
             }
             deaths.0 += 1;
 
-            // Drop gold as world items only in GUI builds — renderer needed.
-            // In headless the gold simply disappears on death; obs/reward
-            // tracks score deltas, not item positions.
             #[cfg(not(feature = "headless"))]
             if gold.0 > 0 {
                 let world_pos = offset.world_pos(def_pos.x, def_pos.y);

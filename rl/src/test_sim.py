@@ -1,4 +1,4 @@
-# rl/src/smoke_test.py
+# rl/src/test_sim.py
 #
 # Verifies the full Rust->Python pipeline:
 #   1. Env constructs and runs Startup

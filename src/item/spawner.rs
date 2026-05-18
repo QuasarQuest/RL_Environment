@@ -3,17 +3,19 @@
 use bevy::prelude::*;
 use crate::sim::config::SimConfig;
 use crate::world::coords::GridPos;
-use crate::world::config::WorldConfig;
 use crate::world::tile::Tile;
+
+#[cfg(not(feature = "headless"))]
+use crate::world::config::WorldConfig;
 use crate::world::Grid;
-use super::{Item, ItemKind};
+use super::ItemKind;
 
 #[cfg(not(feature = "headless"))]
 use crate::config;
 #[cfg(not(feature = "headless"))]
 use crate::viz::grid_offset::GridOffset;
 #[cfg(not(feature = "headless"))]
-use super::ItemBundle;
+use super::{Item, ItemBundle};
 
 // ── Per-item decay ────────────────────────────────────────────────────────────
 
@@ -50,6 +52,10 @@ pub struct ItemSpawnConfig {
     pub max_on_map: usize,
 }
 
+// BandConfig and ItemSpawner are only needed in GUI builds where
+// spawn_items_periodically runs. In headless, initial items from
+// config.ron are sufficient for RL training.
+#[cfg(not(feature = "headless"))]
 #[derive(Clone, Debug)]
 pub struct BandConfig {
     pub kind:           ItemKind,
@@ -67,6 +73,7 @@ pub struct BandConfig {
     effective_batch:    usize,
 }
 
+#[cfg(not(feature = "headless"))]
 impl BandConfig {
     pub fn new(kind: ItemKind, min_on_map: usize, max_on_map: usize, decay_ticks: u64) -> Self {
         Self {
@@ -98,11 +105,13 @@ impl BandConfig {
 
 // ── Spawner resource ──────────────────────────────────────────────────────────
 
+#[cfg(not(feature = "headless"))]
 #[derive(Resource)]
 pub struct ItemSpawner {
     pub bands: Vec<BandConfig>,
 }
 
+#[cfg(not(feature = "headless"))]
 impl ItemSpawner {
     pub fn from_map_config(map: &WorldConfig) -> Self {
         let bands = map.item_spawners.iter()
@@ -124,10 +133,6 @@ pub fn build_free_tile_pool(mut commands: Commands, grid: Res<Grid>) {
     commands.insert_resource(FreeTilePool::build(&grid));
 }
 
-/// Periodically spawns items based on PI controller target.
-/// In headless mode items are not spawned — the RL agent's obs vector
-/// tracks item positions, but item spawning requires GridOffset (viz-only).
-/// For RL training, initial items from config.ron are sufficient.
 #[cfg(not(feature = "headless"))]
 pub fn spawn_items_periodically(
     mut commands: Commands,
