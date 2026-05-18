@@ -16,7 +16,7 @@ impl Plugin for AgentPlugin {
             .add_systems(Startup, spawn_agents)
             .add_systems(OnSimTick, (
                 tick_speed_buff,
-                tick_attack_cooldown,  // decrement before agents decide
+                tick_attack_cooldown,
                 tick_agents,
                 apply_actions,
                 resolve_combat,

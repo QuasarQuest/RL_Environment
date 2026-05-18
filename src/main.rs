@@ -10,6 +10,9 @@ mod style;
 mod team;
 mod world;
 
+#[cfg(feature = "python")]
+mod rl;
+
 #[cfg(not(feature = "headless"))]
 mod viz;
 
@@ -49,8 +52,6 @@ fn main() {
     app.run();
 }
 
-//TODO: Define RL API Boundaries.
-//TODO: Respawn not in base after dead.
-//TODO: Async Timer sim problem with RL.
+//TODO: Agent respawn not in base after dead.
 //TODO: Blue team always wins.
 //TODO: Save Stats after ML run

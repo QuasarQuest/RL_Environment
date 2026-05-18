@@ -149,7 +149,7 @@ pub fn resolve_combat(
 
             if gold.0 > 0 {
                 let world_pos = offset.world_pos(def_pos.x, def_pos.y);
-                for _ in 0..gold.0 {  // u8 range, fine for loop
+                for _ in 0..gold.0 {
                     commands.spawn(ItemBundle::new(
                         ItemKind::Gold, *def_pos, config::TILE_SIZE, world_pos,
                     ));
@@ -157,8 +157,7 @@ pub fn resolve_combat(
                 gold.0 = 0;
             }
 
-            commands.entity(target_entity)
-                .insert(RespawnIn(map.respawn_ticks));
+            commands.entity(target_entity).insert(RespawnIn(map.respawn_ticks));
             info!("Agent {:?} died — respawning in {} ticks",
                 target_entity, map.respawn_ticks);
         }
@@ -166,6 +165,10 @@ pub fn resolve_combat(
 }
 
 // ── Respawn ───────────────────────────────────────────────────────────────────
+//
+// Resets logical state only. Transform is corrected automatically the same
+// frame by sync_agent_transforms in viz/agent_renderer.rs which runs every
+// Update and derives world pos from GridPos + GridOffset.
 
 pub fn tick_respawn(
     mut commands: Commands,
@@ -174,16 +177,21 @@ pub fn tick_respawn(
         &mut Ammo, &SpawnPoint, &mut AgentBrain,
     )>,
 ) {
-    for (entity, mut timer, mut pos, mut hearts, mut ammo, spawn, mut brain) in query.iter_mut() {
+    for (entity, mut timer, mut pos, mut hearts, mut ammo, spawn, mut brain)
+    in query.iter_mut()
+    {
         if timer.0 > 0 { timer.0 -= 1; continue; }
+
         *pos    = spawn.0;
         *hearts = Hearts::default();
         *ammo   = Ammo::default();
         brain.0.reset();
+
         commands.entity(entity)
             .remove::<RespawnIn>()
             .remove::<AttackCooldown>()
             .remove::<super::components::SpeedBuff>();
+
         info!("Agent {:?} respawned at {:?}", entity, spawn.0);
     }
 }

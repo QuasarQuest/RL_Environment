@@ -52,7 +52,7 @@ impl ItemBundle {
         Self {
             item:      Item { kind },
             pos,
-            sprite:    Sprite {
+            sprite: Sprite {
                 color:       kind.color(),
                 custom_size: Some(Vec2::splat(tile_size * 0.6)),
                 ..default()
