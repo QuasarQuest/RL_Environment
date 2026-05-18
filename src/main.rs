@@ -51,7 +51,4 @@ fn main() {
 
     app.run();
 }
-
-//TODO: Agent respawn not in base after dead.
-//TODO: Blue team always wins.
 //TODO: Save Stats after ML run

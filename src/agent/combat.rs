@@ -4,8 +4,7 @@ use bevy::prelude::*;
 use crate::world::Grid;
 use crate::world::coords::GridPos;
 use crate::world::config::WorldConfig;
-use crate::item::{ItemBundle, ItemKind};
-use crate::viz::grid_offset::GridOffset;
+use crate::item::ItemKind;
 use crate::config;
 use crate::team::{Team, TeamScore};
 use super::action::Action;
@@ -15,6 +14,11 @@ use super::components::{
     KillCount, RespawnIn, Score, SpawnPoint,
 };
 use super::systems::PendingAction;
+
+#[cfg(not(feature = "headless"))]
+use crate::item::ItemBundle;
+#[cfg(not(feature = "headless"))]
+use crate::viz::grid_offset::GridOffset;
 
 // ── Tick attack cooldown ──────────────────────────────────────────────────────
 
@@ -36,6 +40,7 @@ pub fn tick_attack_cooldown(
 pub fn resolve_combat(
     mut commands:   Commands,
     grid:           Res<Grid>,
+    #[cfg(not(feature = "headless"))]
     offset:         Res<GridOffset>,
     map:            Res<WorldConfig>,
     mut team_score: ResMut<TeamScore>,
@@ -147,6 +152,10 @@ pub fn resolve_combat(
             }
             deaths.0 += 1;
 
+            // Drop gold as world items only in GUI builds — renderer needed.
+            // In headless the gold simply disappears on death; obs/reward
+            // tracks score deltas, not item positions.
+            #[cfg(not(feature = "headless"))]
             if gold.0 > 0 {
                 let world_pos = offset.world_pos(def_pos.x, def_pos.y);
                 for _ in 0..gold.0 {
@@ -154,8 +163,8 @@ pub fn resolve_combat(
                         ItemKind::Gold, *def_pos, config::TILE_SIZE, world_pos,
                     ));
                 }
-                gold.0 = 0;
             }
+            gold.0 = 0;
 
             commands.entity(target_entity).insert(RespawnIn(map.respawn_ticks));
             info!("Agent {:?} died — respawning in {} ticks",
@@ -165,10 +174,6 @@ pub fn resolve_combat(
 }
 
 // ── Respawn ───────────────────────────────────────────────────────────────────
-//
-// Resets logical state only. Transform is corrected automatically the same
-// frame by sync_agent_transforms in viz/agent_renderer.rs which runs every
-// Update and derives world pos from GridPos + GridOffset.
 
 pub fn tick_respawn(
     mut commands: Commands,

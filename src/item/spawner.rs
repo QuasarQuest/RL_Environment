@@ -1,14 +1,19 @@
 // src/item/spawner.rs
 
 use bevy::prelude::*;
-use crate::config;
 use crate::sim::config::SimConfig;
 use crate::world::coords::GridPos;
 use crate::world::config::WorldConfig;
 use crate::world::tile::Tile;
 use crate::world::Grid;
+use super::{Item, ItemKind};
+
+#[cfg(not(feature = "headless"))]
+use crate::config;
+#[cfg(not(feature = "headless"))]
 use crate::viz::grid_offset::GridOffset;
-use super::{Item, ItemBundle, ItemKind};
+#[cfg(not(feature = "headless"))]
+use super::ItemBundle;
 
 // ── Per-item decay ────────────────────────────────────────────────────────────
 
@@ -47,17 +52,17 @@ pub struct ItemSpawnConfig {
 
 #[derive(Clone, Debug)]
 pub struct BandConfig {
-    pub kind:        ItemKind,
-    pub min_on_map:  usize,
-    pub max_on_map:  usize,
-    pub decay_ticks: u64,
-    pub kp:          f32,
-    pub ki:          f32,
-    pub ki_clamp:    f32,
-    integral:         f32,
-    last_sample_tick: u64,
-    sample_interval:  u64,
-    last_spawn_tick:  u64,
+    pub kind:           ItemKind,
+    pub min_on_map:     usize,
+    pub max_on_map:     usize,
+    pub decay_ticks:    u64,
+    pub kp:             f32,
+    pub ki:             f32,
+    pub ki_clamp:       f32,
+    integral:           f32,
+    last_sample_tick:   u64,
+    sample_interval:    u64,
+    last_spawn_tick:    u64,
     effective_cooldown: u64,
     effective_batch:    usize,
 }
@@ -77,15 +82,17 @@ impl BandConfig {
     fn target(&self) -> f32 { ((self.min_on_map + self.max_on_map) / 2) as f32 }
 
     fn update_pi(&mut self, count: usize) {
-        let error = self.target() - count as f32;
+        let error     = self.target() - count as f32;
         self.integral = (self.integral + error).clamp(-self.ki_clamp, self.ki_clamp);
         let output    = self.kp * error + self.ki * self.integral;
         let max_out   = self.kp * self.max_on_map as f32 + self.ki * self.ki_clamp;
         let t         = (output / max_out).clamp(-1.0, 1.0);
-        self.effective_cooldown = (20.0 * (1.0 - 0.75 * t)).clamp(4.0, 60.0) as u64;
+        self.effective_cooldown =
+            (20.0 * (1.0 - 0.75 * t)).clamp(4.0, 60.0) as u64;
         let nom   = (self.max_on_map / 4).max(1) as f32;
         let max_b = (self.max_on_map / 2).max(1) as f32;
-        self.effective_batch = (nom + t * (max_b - nom)).clamp(1.0, max_b) as usize;
+        self.effective_batch =
+            (nom + t * (max_b - nom)).clamp(1.0, max_b) as usize;
     }
 }
 
@@ -117,6 +124,11 @@ pub fn build_free_tile_pool(mut commands: Commands, grid: Res<Grid>) {
     commands.insert_resource(FreeTilePool::build(&grid));
 }
 
+/// Periodically spawns items based on PI controller target.
+/// In headless mode items are not spawned — the RL agent's obs vector
+/// tracks item positions, but item spawning requires GridOffset (viz-only).
+/// For RL training, initial items from config.ron are sufficient.
+#[cfg(not(feature = "headless"))]
 pub fn spawn_items_periodically(
     mut commands: Commands,
     sim:          Res<SimConfig>,
@@ -157,6 +169,7 @@ pub fn decay_items(
     }
 }
 
+#[cfg(not(feature = "headless"))]
 fn spawn_item(
     commands:     &mut Commands,
     kind:         ItemKind,

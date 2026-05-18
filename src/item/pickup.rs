@@ -13,7 +13,6 @@ pub struct Claimed;
 
 pub fn pickup_items(
     mut commands: Commands,
-    // Dead agents (RespawnIn) can't pick up items.
     mut agents:   Query<(
         Entity, &GridPos, &mut GoldCarried, &mut Hearts, &mut Ammo, &Team,
     ), Without<RespawnIn>>,
@@ -48,20 +47,17 @@ pub fn pickup_items(
                     }
                 }
                 ItemKind::SpeedBoost => {
-                    // Always pick up — refreshes or extends existing buff.
                     commands.entity(agent_entity)
                         .insert(SpeedBuff(config::SPEED_BUFF_TICKS));
                     commands.entity(item_entity).insert(Claimed);
                     info!("Team {} picked up SpeedBoost", team.name());
                 }
             }
-            break; // one agent per item per tick
+            break;
         }
     }
 }
 
-/// Agent standing on their own base tile with gold → deposit all carried gold.
-/// Each deposited gold unit scores 1 point for the agent and their team.
 pub fn deposit_gold(
     grid:           Res<Grid>,
     mut team_score: ResMut<TeamScore>,
@@ -89,6 +85,9 @@ pub fn despawn_claimed(
     }
 }
 
+/// Syncs item world positions from GridPos every frame.
+/// Not needed in headless — items are never rendered.
+#[cfg(not(feature = "headless"))]
 pub fn sync_item_transforms(
     offset:    Res<crate::viz::grid_offset::GridOffset>,
     mut query: Query<(&GridPos, &mut Transform), With<Item>>,

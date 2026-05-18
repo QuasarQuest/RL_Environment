@@ -1,16 +1,9 @@
 // src/factory/display.rs
 //
 // Bridges simulation and visualization.
-//
-// Runs after AgentPlugin::spawn_agents (Startup). Queries all spawned agent
-// entities by their AgentConfigIndex, assigns display components that the viz
-// layer needs but the sim layer must not know about.
-//
-// Dependency arrows:
-//   factory → agent (reads AgentBrain for name, AgentConfigIndex for ordering)
-//   factory → world (reads MapConfig for strategy/planner metadata)
-//   factory → viz   (inserts AgentLabel, AgentInfo, HideRangeViz, HidePathViz, HideViz)
-//   agent   → nothing in factory or viz  ✓
+// Not compiled in headless mode — viz components do not exist there.
+
+#![cfg(not(feature = "headless"))]
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -29,7 +22,6 @@ pub fn assign_display_components(
     map:          Res<WorldConfig>,
     agents:       Query<(Entity, &AgentConfigIndex, &AgentBrain), Without<AgentLabel>>,
 ) {
-    // Pre-compute per-team rank for every config index.
     let mut team_counters: HashMap<u8, usize> = HashMap::new();
     let team_rank: Vec<usize> = map.agents.iter().map(|cfg| {
         let team_id = cfg.team.unwrap_or(0) as u8;
@@ -52,7 +44,7 @@ pub fn assign_display_components(
             .insert(info)
             .insert(HideRangeViz)
             .insert(HidePathViz)
-            .insert(HideViz); // tooltip left-click mirrors both
+            .insert(HideViz);
     }
 }
 
