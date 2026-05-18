@@ -1,6 +1,6 @@
 // src/rl/obs.rs
 //
-// Builds the 53-float observation vector for the RL agent each tick.
+// Builds the 55-float observation vector for the RL agent each tick.
 // Reads directly from the ECS World — called by RlEnv::step().
 //
 // Borrow discipline:
@@ -10,17 +10,22 @@
 //   fully resolve (collect results into owned values) before the next query.
 //
 // Vector layout (indices):
-//  [0..9]   self       (9 floats)
-//  [9..16]  enemy      (7 floats)
-//  [16..24] obstacles  (8 floats — raycasts in 8 directions)
-//  [24..33] gold x3    (9 floats — 3 nearest, padded)
-//  [33..39] health x2  (6 floats — 2 nearest, padded)
-//  [39..45] ammo x2    (6 floats — 2 nearest, padded)
-//  [45..48] speedboost (3 floats — 1 nearest, padded)
-//  [48..50] own base   (2 floats)
-//  [50..53] RESERVED   (3 floats, zeroed)
+//  [0..11]  self        (11 floats)
+//  [11..19] enemy       (8 floats)
+//  [19..27] obstacles   (8 floats — raycasts in 8 directions)
+//  [27..36] gold x3     (9 floats — 3 nearest, padded)
+//  [36..42] health x2   (6 floats — 2 nearest, padded)
+//  [42..48] ammo x2     (6 floats — 2 nearest, padded)
+//  [48..51] speedboost  (3 floats — 1 nearest, padded)
+//  [51..53] own base    (2 floats)
+//  [53..55] RESERVED    (2 floats, zeroed)
 //
-// Total: 53 floats. Shape is fixed regardless of game state.
+// Total: 55 floats. Shape is fixed regardless of game state.
+//
+// Changes from v1 (53 floats):
+//   Self block:    added dist_to_base_norm [9], dist_to_nearest_gold_norm [10]
+//   Enemy block:   added enemy gold_carried [18]
+//   Reserved:      reduced from 3 to 2 (net +2 floats)
 
 use bevy::prelude::*;
 use crate::agent::action::Dir;
@@ -34,12 +39,22 @@ use crate::world::tile::Tile;
 use crate::world::Grid;
 use super::marker::RlAgent;
 
-pub const OBS_SIZE: usize = 53;
+pub const OBS_SIZE: usize = 55;
 
-// ── Intermediate owned structs — avoids holding World borrows across queries ──
+// ── Intermediate owned structs ────────────────────────────────────────────────
 
-struct MapParams { w: f32, h: f32, melee_range: i32, ranged_range: i32 }
-struct SimParams  { tick: u64, match_duration_ticks: u64 }
+struct MapParams {
+    w:            f32,
+    h:            f32,
+    diagonal:     f32,
+    melee_range:  i32,
+    ranged_range: i32,
+}
+
+struct SimParams {
+    tick:                 u64,
+    match_duration_ticks: u64,
+}
 
 struct AgentSnap {
     entity:    Entity,
@@ -56,6 +71,7 @@ struct EnemySnap {
     pos:    GridPos,
     hearts: u8,
     ammo:   u8,
+    gold:   u8,
     is_dead: bool,
 }
 
@@ -64,22 +80,28 @@ struct EnemySnap {
 pub fn build_obs(world: &mut World) -> Vec<f32> {
     let mut obs = vec![0.0f32; OBS_SIZE];
 
-    // ── 1. Clone resource values out before any query ─────────────────────────
+    // ── 1. Clone resource values before any query ──────────────────────────
     let map = {
         let r = world.resource::<WorldConfig>();
+        let w = r.width  as f32;
+        let h = r.height as f32;
         MapParams {
-            w:            r.width  as f32,
-            h:            r.height as f32,
+            w,
+            h,
+            diagonal:     (w * w + h * h).sqrt(),
             melee_range:  r.melee_range,
             ranged_range: r.ranged_range,
         }
     };
     let sim = {
         let r = world.resource::<SimConfig>();
-        SimParams { tick: r.tick, match_duration_ticks: r.match_duration_ticks }
+        SimParams {
+            tick:                 r.tick,
+            match_duration_ticks: r.match_duration_ticks,
+        }
     };
 
-    // ── 2. Query RlAgent — collect into owned AgentSnap ───────────────────────
+    // ── 2. Query RlAgent ───────────────────────────────────────────────────
     let agent: Option<AgentSnap> = {
         let mut q = world.query_filtered::<(
             Entity, &GridPos, &Hearts, &Ammo, &GoldCarried, &Team,
@@ -101,13 +123,22 @@ pub fn build_obs(world: &mut World) -> Vec<f32> {
 
     let Some(agent) = agent else { return obs };
 
-    // ── 3. Read tile under agent — clone Grid tile only ───────────────────────
+    // ── 3. Tile under agent ────────────────────────────────────────────────
     let on_own_base = {
         let grid = world.resource::<Grid>();
         grid.get(agent.pos.x, agent.pos.y) == Some(Tile::Base(agent.team))
     };
 
-    // ── 4. [0..9] Self ────────────────────────────────────────────────────────
+    // ── 4. Nearest base position (needed for dist_to_base) ────────────────
+    let base_pos: Option<GridPos> = {
+        let grid = world.resource::<Grid>();
+        grid.iter()
+            .filter(|(_, _, tile)| *tile == Tile::Base(agent.team))
+            .map(|(x, y, _)| GridPos::new(x as i32, y as i32))
+            .min_by_key(|p| p.dist_sq(agent.pos))
+    };
+
+    // ── 5. [0..11] Self block ──────────────────────────────────────────────
     obs[0] = agent.pos.x as f32 / map.w;
     obs[1] = agent.pos.y as f32 / map.h;
     obs[2] = agent.hearts as f32 / crate::config::AGENT_MAX_HEARTS as f32;
@@ -117,69 +148,75 @@ pub fn build_obs(world: &mut World) -> Vec<f32> {
     obs[6] = sim.tick as f32 / sim.match_duration_ticks as f32;
     obs[7] = if agent.is_dead { 1.0 } else { 0.0 };
     obs[8] = if agent.gold > 0 && on_own_base { 1.0 } else { 0.0 };
+    // [9]  normalised Chebyshev distance to own base (0 = at base, 1 = far)
+    obs[9] = if let Some(bp) = base_pos {
+        chebyshev(agent.pos, bp) as f32 / map.diagonal
+    } else {
+        1.0
+    };
+    // [10] carrying-gold flag × dist_to_base — joint signal for "carry urgency"
+    obs[10] = if agent.gold > 0 { obs[9] } else { 0.0 };
 
-    // ── 5. Query all agents — collect into Vec before dropping query ──────────
+    // ── 6. Query all agents for nearest enemy ──────────────────────────────
     let enemy: Option<EnemySnap> = {
-        let mut q = world.query::<(Entity, &GridPos, &Hearts, &Ammo, &Team, Has<RespawnIn>)>();
+        let mut q = world.query::<(
+            Entity, &GridPos, &Hearts, &Ammo, &GoldCarried, &Team, Has<RespawnIn>,
+        )>();
         q.iter(world)
-            .filter(|(e, _, _, _, team, _)| *e != agent.entity && team.0 != agent.team)
-            .min_by_key(|(_, pos, _, _, _, _)| pos.dist_sq(agent.pos))
-            .map(|(_, pos, hearts, ammo, _, dead)| EnemySnap {
+            .filter(|(e, _, _, _, _, team, _)| {
+                *e != agent.entity && team.0 != agent.team
+            })
+            .min_by_key(|(_, pos, _, _, _, _, _)| pos.dist_sq(agent.pos))
+            .map(|(_, pos, hearts, ammo, gold, _, dead)| EnemySnap {
                 pos:     *pos,
                 hearts:  hearts.0,
                 ammo:    ammo.0,
+                gold:    gold.0,
                 is_dead: dead,
             })
     };
 
-    // ── 6. [9..16] Enemy ─────────────────────────────────────────────────────
+    // ── 7. [11..19] Enemy block ────────────────────────────────────────────
     if let Some(e) = enemy {
-        obs[9]  = (e.pos.x - agent.pos.x) as f32 / map.w;
-        obs[10] = (e.pos.y - agent.pos.y) as f32 / map.h;
-        obs[11] = e.hearts as f32 / crate::config::AGENT_MAX_HEARTS as f32;
-        obs[12] = e.ammo   as f32 / crate::config::AGENT_MAX_AMMO   as f32;
+        obs[11] = (e.pos.x - agent.pos.x) as f32 / map.w;
+        obs[12] = (e.pos.y - agent.pos.y) as f32 / map.h;
+        obs[13] = e.hearts as f32 / crate::config::AGENT_MAX_HEARTS as f32;
+        obs[14] = e.ammo   as f32 / crate::config::AGENT_MAX_AMMO   as f32;
         let dist = chebyshev(agent.pos, e.pos);
-        obs[13] = if dist <= map.melee_range  { 1.0 } else { 0.0 };
-        obs[14] = if dist <= map.ranged_range { 1.0 } else { 0.0 };
-        obs[15] = if e.is_dead { 1.0 } else { 0.0 };
+        obs[15] = if dist <= map.melee_range  { 1.0 } else { 0.0 };
+        obs[16] = if dist <= map.ranged_range { 1.0 } else { 0.0 };
+        obs[17] = if e.is_dead { 1.0 } else { 0.0 };
+        // [18] enemy gold carried — signals whether enemy is a delivery threat
+        obs[18] = e.gold as f32 / crate::config::AGENT_MAX_GOLD as f32;
     }
 
-    // ── 7. [16..24] Raycasts — clone grid snapshot ────────────────────────────
+    // ── 8. [19..27] Raycasts ───────────────────────────────────────────────
     {
         let max_ray = map.w.max(map.h) as i32;
-        // Clone just the tiles we need via a local grid read.
-        // Grid::get takes &self so we can borrow immutably here — no query needed.
         let grid = world.resource::<Grid>();
         for (i, dir) in Dir::all().iter().enumerate() {
-            obs[16 + i] = raycast(grid, agent.pos, *dir, max_ray);
+            obs[19 + i] = raycast(grid, agent.pos, *dir, max_ray);
         }
     }
 
-    // ── 8. Collect item positions — one query, fully owned ────────────────────
+    // ── 9. Collect items ───────────────────────────────────────────────────
     let item_positions: Vec<(GridPos, ItemKind)> = {
         let mut q = world.query::<(&GridPos, &Item)>();
         q.iter(world).map(|(pos, item)| (*pos, item.kind)).collect()
     };
 
-    fill_items(&item_positions, agent.pos, ItemKind::Gold,       3, map.w, map.h, &mut obs[24..33]);
-    fill_items(&item_positions, agent.pos, ItemKind::Health,     2, map.w, map.h, &mut obs[33..39]);
-    fill_items(&item_positions, agent.pos, ItemKind::Ammo,       2, map.w, map.h, &mut obs[39..45]);
-    fill_items(&item_positions, agent.pos, ItemKind::SpeedBoost, 1, map.w, map.h, &mut obs[45..48]);
+    fill_items(&item_positions, agent.pos, ItemKind::Gold,       3, map.w, map.h, &mut obs[27..36]);
+    fill_items(&item_positions, agent.pos, ItemKind::Health,     2, map.w, map.h, &mut obs[36..42]);
+    fill_items(&item_positions, agent.pos, ItemKind::Ammo,       2, map.w, map.h, &mut obs[42..48]);
+    fill_items(&item_positions, agent.pos, ItemKind::SpeedBoost, 1, map.w, map.h, &mut obs[48..51]);
 
-    // ── 9. [48..50] Own base — grid borrow, no query ──────────────────────────
-    {
-        let grid = world.resource::<Grid>();
-        let base = grid.iter()
-            .filter(|(_, _, tile)| *tile == Tile::Base(agent.team))
-            .map(|(x, y, _)| GridPos::new(x as i32, y as i32))
-            .min_by_key(|p| p.dist_sq(agent.pos));
-        if let Some(base_pos) = base {
-            obs[48] = (base_pos.x - agent.pos.x) as f32 / map.w;
-            obs[49] = (base_pos.y - agent.pos.y) as f32 / map.h;
-        }
+    // ── 10. [51..53] Own base vector ───────────────────────────────────────
+    if let Some(bp) = base_pos {
+        obs[51] = (bp.x - agent.pos.x) as f32 / map.w;
+        obs[52] = (bp.y - agent.pos.y) as f32 / map.h;
     }
 
-    // [50..53] reserved — zeroed by default
+    // [53..55] reserved — zeroed by default
     obs
 }
 
@@ -204,7 +241,6 @@ fn raycast(grid: &Grid, origin: GridPos, dir: Dir, max_len: i32) -> f32 {
 }
 
 /// Fill `k` nearest items of `kind` into `slot` (3 floats each: rel_x, rel_y, exists).
-/// Takes a pre-collected owned Vec — no World borrow needed.
 fn fill_items(
     items:  &[(GridPos, ItemKind)],
     origin: GridPos,

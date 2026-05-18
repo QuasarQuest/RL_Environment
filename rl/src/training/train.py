@@ -5,10 +5,9 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 # ── Ensure project root is on sys.path regardless of cwd ─────────────────────
-# Resolves to rl/ directory so `from env.atb_env import ...` works.
 _HERE = Path(__file__).resolve().parent          # rl/src/training/
 _SRC  = _HERE.parent                             # rl/src/
 _RL   = _SRC.parent                             # rl/
@@ -34,6 +33,23 @@ console = Console()
 app     = typer.Typer()
 
 
+# ── Learning rate / entropy schedules ─────────────────────────────────────────
+
+def linear_schedule(start: float, end: float) -> Callable[[float], float]:
+    """
+    Returns a callable that maps progress_remaining ∈ [1, 0] → [start, end].
+    SB3 passes progress_remaining = 1 at the beginning, 0 at the end.
+
+    Example:
+        linear_schedule(3e-4, 1e-5) decays LR from 3e-4 → 1e-5 over training.
+    """
+    def schedule(progress_remaining: float) -> float:
+        return end + progress_remaining * (start - end)
+    return schedule
+
+
+# ── Environment construction ───────────────────────────────────────────────────
+
 def make_env(cfg: TrainConfig):
     env = AtbEnv()
     if cfg.clip_reward:
@@ -44,29 +60,32 @@ def make_env(cfg: TrainConfig):
     return env
 
 
-def build_vec_env(cfg: TrainConfig):
+def build_vec_env(cfg: TrainConfig) -> DummyVecEnv | VecNormalize:
     vec_env = DummyVecEnv([lambda: make_env(cfg)])
-    if cfg.normalize_obs:
+    if cfg.normalize_obs or cfg.normalize_reward:
         vec_env = VecNormalize(
             vec_env,
             norm_obs    = cfg.normalize_obs,
             norm_reward = cfg.normalize_reward,
             clip_obs    = 10.0,
+            clip_reward = 10.0,
         )
     return vec_env
 
+
+# ── Main training entry point ─────────────────────────────────────────────────
 
 @app.command()
 def train(
     total_timesteps: int           = typer.Option(10_000_000, "--total-timesteps"),
     run_name:        str           = typer.Option("run",       "--run-name"),
     resume:          Optional[str] = typer.Option(None,        "--resume"),
-    device:          str           = typer.Option("cpu",      "--device"),
+    device:          str           = typer.Option("cpu",       "--device"),
     seed:            int           = typer.Option(42,          "--seed"),
 ):
     """Train a PPO agent on the Algorithm Test Bed simulation."""
 
-    cfg     = TrainConfig(
+    cfg = TrainConfig(
         total_timesteps = total_timesteps,
         run_name        = run_name,
         device          = device,
@@ -85,9 +104,16 @@ def train(
     console.print(f"  total_timesteps : {total_timesteps:,}")
     console.print(f"  device          : {device}")
     console.print(f"  seed            : {seed}")
+    console.print(f"  normalize_reward: {cfg.normalize_reward}")
 
     console.print("\nBuilding environment ...")
     vec_env = build_vec_env(cfg)
+
+    # ── LR and entropy schedules ───────────────────────────────────────────
+    # LR: 3e-4 → 1e-5 (linear decay — conservative at end of training)
+    lr_schedule  = linear_schedule(ppo_cfg.learning_rate, 1e-5)
+    # ent_coef: 0.05 → 0.005 (strong early exploration, tighten later)
+    ent_schedule = linear_schedule(ppo_cfg.ent_coef, 0.005)
 
     if resume:
         console.print(f"Resuming from {resume} ...")
@@ -101,14 +127,14 @@ def train(
         model = PPO(
             policy          = "MlpPolicy",
             env             = vec_env,
-            learning_rate   = ppo_cfg.learning_rate,
+            learning_rate   = lr_schedule,
             n_steps         = ppo_cfg.n_steps,
             batch_size      = ppo_cfg.batch_size,
             n_epochs        = ppo_cfg.n_epochs,
             gamma           = ppo_cfg.gamma,
             gae_lambda      = ppo_cfg.gae_lambda,
             clip_range      = ppo_cfg.clip_range,
-            ent_coef        = ppo_cfg.ent_coef,
+            ent_coef        = ent_schedule,
             vf_coef         = ppo_cfg.vf_coef,
             max_grad_norm   = ppo_cfg.max_grad_norm,
             policy_kwargs   = ATB_POLICY_KWARGS,
@@ -118,7 +144,10 @@ def train(
             device          = device,
         )
 
-    console.print(f"  Parameters: {sum(p.numel() for p in model.policy.parameters()):,}")
+    n_params = sum(p.numel() for p in model.policy.parameters())
+    console.print(f"  Parameters: {n_params:,}")
+    console.print(f"  LR schedule: {ppo_cfg.learning_rate:.1e} → 1e-5 (linear)")
+    console.print(f"  Ent schedule: {ppo_cfg.ent_coef:.3f} → 0.005 (linear)")
 
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
     checkpoint_cb = CheckpointCallback(
@@ -144,7 +173,9 @@ def train(
     )
 
     elapsed = time.time() - t0
-    console.print(f"\n[bold green]Training complete in {elapsed/3600:.2f}h[/bold green]")
+    console.print(
+        f"\n[bold green]Training complete in {elapsed / 3600:.2f}h[/bold green]"
+    )
 
     final_path = models_dir / f"{run_tag}_final"
     model.save(str(final_path))
