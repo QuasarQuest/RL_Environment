@@ -5,30 +5,17 @@ description = "RL training pipeline for Algorithm Test Bed"
 requires-python = ">=3.11"
 
 dependencies = [
-    # Core RL — no [extra] to avoid ale-py/opencv/pygame
     "stable-baselines3>=2.3.0",
     "gymnasium>=0.29.0",
     "torch>=2.3.0",
-
-    # Hyperparameter tuning
     "optuna>=3.6.0",
     "optuna-integration>=3.6.0",
-
-    # ONNX export
     "onnx>=1.16.0",
     "onnxruntime>=1.18.0",
-
-    # Stats / logging
     "h5py>=3.11.0",
     "numpy>=1.26.0",
     "pandas>=2.2.0",
-    "tensorboard>=2.17.0",
-    "setuptools>=41.0.0",   # required by tensorboard on Python 3.11+
-
-    # Visualisation
     "plotext>=5.2.0",
-
-    # Utilities
     "rich>=13.7.0",
     "typer>=0.12.0",
 ]
@@ -39,9 +26,8 @@ atb-tune   = "training.tune:app"
 atb-export = "model.export:app"
 
 [build-system]
-requires = ["maturin>=1.5"]
-build-backend = "maturin"
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
 
-[tool.maturin]
-features = ["python"]
-python-source = "src"
+[tool.setuptools.packages.find]
+where = ["src"]

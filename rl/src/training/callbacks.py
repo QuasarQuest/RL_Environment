@@ -1,5 +1,3 @@
-# rl/src/training/callbacks.py
-
 from __future__ import annotations
 
 import time
@@ -13,30 +11,25 @@ from stable_baselines3.common.vec_env import VecNormalize
 
 
 class CheckpointCallback(BaseCallback):
-    """
-    Saves a SB3 model checkpoint and VecNormalize statistics every
-    `save_freq` steps. Also saves the best model by mean episode reward.
-    """
-
     def __init__(
         self,
-        save_freq:     int,
-        models_dir:    str,
-        run_name:      str,
+        save_freq: int,
+        models_dir: Path,
+        run_name: str,
         vec_normalize: Optional[VecNormalize] = None,
-        verbose:       int = 1,
+        verbose: int = 1,
     ) -> None:
         super().__init__(verbose)
-        self.save_freq     = save_freq
-        self.models_dir    = Path(models_dir)
-        self.run_name      = run_name
+        self.save_freq = save_freq
+        self.models_dir = models_dir
+        self.run_name = run_name
         self.vec_normalize = vec_normalize
-        self.best_reward   = -float("inf")
+        self.best_reward = -float("inf")
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
     def _on_step(self) -> bool:
         if self.n_calls % self.save_freq == 0:
-            self._save(tag=f"step_{self.num_timesteps}")
+            self._save(f"step_{self.num_timesteps}")
 
         ep_rewards = [
             info["episode"]["r"]
@@ -47,12 +40,9 @@ class CheckpointCallback(BaseCallback):
             mean_r = float(np.mean(ep_rewards))
             if mean_r > self.best_reward:
                 self.best_reward = mean_r
-                self._save(tag="best")
+                self._save("best")
                 if self.verbose:
-                    print(
-                        f"  ✓ New best model — mean_r={mean_r:.3f} "
-                        f"@ step {self.num_timesteps}"
-                    )
+                    print(f"  ✓ New best — mean_r={mean_r:.3f} @ step {self.num_timesteps}")
         return True
 
     def _save(self, tag: str) -> None:
@@ -63,23 +53,13 @@ class CheckpointCallback(BaseCallback):
 
 
 class EpisodeStatsCallback(BaseCallback):
-    """
-    Logs per-episode game stats to HDF5 and TensorBoard.
-    Also logs training diagnostics: current LR, entropy coefficient,
-    and explained variance to aid convergence monitoring.
-
-    HDF5 schema /episodes/:
-      timestep, episode_reward, episode_length,
-      kills, deaths, score, win
-    """
-
-    def __init__(self, stats_dir: str, run_name: str, verbose: int = 0) -> None:
+    def __init__(self, stats_path: Path, verbose: int = 0) -> None:
         super().__init__(verbose)
-        self.stats_path   = Path(stats_dir) / f"{run_name}.h5"
+        self.stats_path = stats_path
         self.stats_path.parent.mkdir(parents=True, exist_ok=True)
-        self._buffer:     list[dict] = []
+        self._buffer: list[dict] = []
         self._flush_every = 100
-        self._start_time  = time.time()
+        self._start_time = time.time()
 
     def _on_step(self) -> bool:
         for info in self.locals.get("infos", []):
@@ -87,49 +67,36 @@ class EpisodeStatsCallback(BaseCallback):
                 continue
             ep = info["episode"]
             self._buffer.append({
-                "timestep":       self.num_timesteps,
+                "timestep": self.num_timesteps,
                 "episode_reward": float(ep["r"]),
                 "episode_length": int(ep["l"]),
-                "kills":          int(info.get("kills",  0)),
-                "deaths":         int(info.get("deaths", 0)),
-                "score":          float(info.get("score", 0.0)),
-                "win":            int(info.get("win",    0)),
+                "score": float(info.get("score", 0.0)),
+                "win": int(info.get("win", 0)),
             })
             self.logger.record("game/episode_reward", ep["r"])
             self.logger.record("game/episode_length", ep["l"])
-            self.logger.record("game/kills",          info.get("kills",  0))
-            self.logger.record("game/deaths",         info.get("deaths", 0))
-            self.logger.record("game/score",          info.get("score",  0.0))
-            self.logger.record("game/win_rate",       info.get("win",    0))
+            self.logger.record("game/score", info.get("score", 0.0))
+            self.logger.record("game/win_rate", info.get("win", 0))
             self.logger.record(
                 "perf/steps_per_sec",
                 self.num_timesteps / max(time.time() - self._start_time, 1),
             )
 
-        # ── Training diagnostics ───────────────────────────────────────────
-        # Log current LR (resolved from schedule if callable).
-        if hasattr(self.model, "lr_schedule"):
-            lr = self.model.lr_schedule
-            if callable(lr):
-                progress   = 1.0 - self.num_timesteps / max(self.model._total_timesteps, 1)
-                current_lr = lr(progress)
-            else:
-                current_lr = float(lr)
-            self.logger.record("train/learning_rate", current_lr)
-
-        # Log current entropy coefficient (resolved from schedule if callable).
-        if hasattr(self.model, "ent_coef"):
-            ent = self.model.ent_coef
-            if callable(ent):
-                progress    = 1.0 - self.num_timesteps / max(self.model._total_timesteps, 1)
-                current_ent = ent(progress)
-            else:
-                current_ent = float(ent)
-            self.logger.record("train/ent_coef_current", current_ent)
+        self._log_schedule("lr_schedule", "train/learning_rate")
+        self._log_schedule("ent_coef", "train/ent_coef")
 
         if len(self._buffer) >= self._flush_every:
             self._flush()
         return True
+
+    def _log_schedule(self, attr: str, key: str) -> None:
+        if not hasattr(self.model, attr):
+            return
+        val = getattr(self.model, attr)
+        if callable(val):
+            progress = 1.0 - self.num_timesteps / max(self.model._total_timesteps, 1)
+            val = val(progress)
+        self.logger.record(key, float(val))
 
     def _on_training_end(self) -> None:
         self._flush()
@@ -137,7 +104,7 @@ class EpisodeStatsCallback(BaseCallback):
     def _flush(self) -> None:
         if not self._buffer:
             return
-        keys   = list(self._buffer[0].keys())
+        keys = list(self._buffer[0].keys())
         arrays = {k: np.array([row[k] for row in self._buffer]) for k in keys}
         with h5py.File(self.stats_path, "a") as f:
             grp = f.require_group("episodes")
@@ -148,7 +115,5 @@ class EpisodeStatsCallback(BaseCallback):
                     ds.resize(old_len + len(arr), axis=0)
                     ds[old_len:] = arr
                 else:
-                    grp.create_dataset(
-                        k, data=arr, maxshape=(None,), compression="gzip"
-                    )
+                    grp.create_dataset(k, data=arr, maxshape=(None,), compression="gzip")
         self._buffer.clear()

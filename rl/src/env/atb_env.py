@@ -1,90 +1,57 @@
-# rl/src/env/atb_env.py
+from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-# ── Set cwd to project root before importing atb ─────────────────────────────
-# The Rust sim loads assets/world/config.ron relative to cwd.
+
 def _find_project_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:
         if (parent / "assets" / "world" / "config.ron").exists():
             return parent
-    raise RuntimeError(
-        f"Cannot find project root (assets/world/config.ron) "
-        f"starting from {here}"
-    )
+    raise RuntimeError(f"Cannot find project root starting from {here}")
 
-_PROJECT_ROOT = _find_project_root()
-os.chdir(_PROJECT_ROOT)
-# ─────────────────────────────────────────────────────────────────────────────
 
-import atb
+PROJECT_ROOT = _find_project_root()
+DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config.ron")
 
 
 class AtbEnv(gym.Env):
-    """
-    Single-agent Gymnasium environment backed by the Bevy/Rust sim.
-
-    Observation space : Box(55,) float32
-                        Bounds are [-1, 1] for relative/normalised features.
-                        Some features (e.g. exists flags) are in [0, 1].
-                        Using [-1, 1] as a conservative outer bound — VecNormalize
-                        will rescale further during training.
-
-    Action space      : Discrete(26)
-                        0..7   Move       (8 directions)
-                        8..15  Attack     (8 directions)
-                        16..23 RangedAttack (8 directions)
-                        24     Drop
-                        25     Wait
-    """
-
     metadata = {"render_modes": []}
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: str = DEFAULT_CONFIG) -> None:
         super().__init__()
 
-        self._env = atb.PyRlEnv()
+        import os
+        os.chdir(PROJECT_ROOT)
+        import atb
 
-        obs_dim     = atb.PyRlEnv.obs_dim()      # 55
-        action_size = atb.PyRlEnv.action_size()  # 26
+        self._atb = atb
+        self._env = atb.PyRlEnv(config_path)
 
-        # Observation bounds.
-        # Relative position features are in (-1, 1); distance / normalised
-        # scalars in [0, 1]; flags in {0, 1}. Using (-inf, inf) here and
-        # relying on VecNormalize (clip_obs=10) is also valid, but explicit
-        # bounds help SB3 policy initialisation.
+        obs_dim = atb.PyRlEnv.obs_dim()
+        action_size = atb.PyRlEnv.action_size()
+
         self.observation_space = spaces.Box(
-            low   = -1.0,
-            high  =  1.0,
-            shape = (obs_dim,),
-            dtype = np.float32,
+            low=-1.0,
+            high=1.0,
+            shape=(obs_dim,),
+            dtype=np.float32,
         )
         self.action_space = spaces.Discrete(action_size)
 
-        # Episode accumulators — reset in reset()
-        self.episode_reward: float = 0.0
-        self.episode_length: int   = 0
-
-        # Game stat accumulators exposed via info dict
-        self._kills:  int = 0
-        self._deaths: int = 0
-        self._score:  int = 0
-
-    # ── Gymnasium API ─────────────────────────────────────────────────────────
+        self._episode_reward: float = 0.0
+        self._episode_length: int = 0
+        self._score: float = 0.0
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.episode_reward = 0.0
-        self.episode_length = 0
-        self._kills  = 0
-        self._deaths = 0
-        self._score  = 0
+        self._episode_reward = 0.0
+        self._episode_length = 0
+        self._score = 0.0
         obs = np.array(self._env.reset(), dtype=np.float32)
         return obs, {}
 
@@ -92,22 +59,21 @@ class AtbEnv(gym.Env):
         obs_raw, reward, done = self._env.step(int(action))
         obs = np.array(obs_raw, dtype=np.float32)
 
-        self.episode_reward += float(reward)
-        self.episode_length += 1
+        self._episode_reward += float(reward)
+        self._episode_length += 1
 
-        # Build info dict — game stats are populated by Rust via pyo3 when
-        # available; fall back to zero if the Rust side doesn't expose them yet.
+        score_delta = max(0.0, float(reward))
+        self._score += score_delta
+
         info: dict = {
-            "kills":  self._kills,
-            "deaths": self._deaths,
-            "score":  self._score,
-            "win":    0,
+            "score": self._score,
+            "win": 0,
         }
 
         if done:
             info["episode"] = {
-                "r": self.episode_reward,
-                "l": self.episode_length,
+                "r": self._episode_reward,
+                "l": self._episode_length,
             }
 
         return obs, reward, done, False, info
