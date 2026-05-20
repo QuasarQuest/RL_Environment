@@ -70,8 +70,8 @@ class AtbEnv(gym.Env):
         # Spatial observation: (C, H, W). Values are already in [0, 1] from
         # the Rust side, so we set a tight Box. `normalize_images=False` is
         # set on the CNN policy side so SB3 won't divide by 255.
-        self._obs_shape: tuple[int, int, int] = atb.PyRlEnv.obs_shape()
-        action_size = atb.PyRlEnv.action_size()
+        self._obs_shape: tuple[int, int, int] = atb.PyRlEnv.obs_shape()  # type: ignore[attr-defined]
+        action_size = atb.PyRlEnv.action_size()  # type: ignore[attr-defined]
 
         self.observation_space = spaces.Box(
             low=0.0,

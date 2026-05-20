@@ -1,4 +1,4 @@
-// src/rl/grid.rs
+// src/rl/obs.rs
 //
 // Spatial (CNN-shaped) observation builder for the RL agent.
 //

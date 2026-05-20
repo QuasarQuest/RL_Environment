@@ -1,54 +1,12 @@
 // src/main.rs
-
-mod agent;
-mod algorithm;
-mod config;
-mod factory;
-mod item;
-mod sim;
-mod style;
-mod team;
-mod world;
-
-#[cfg(feature = "python")]
-mod rl;
-
-#[cfg(not(feature = "headless"))]
-mod viz;
-
-use bevy::prelude::*;
-use sim::SimPlugin;
-use world::WorldPlugin;
-use agent::AgentPlugin;
-use item::ItemPlugin;
-
-#[cfg(not(feature = "headless"))]
-use viz::VizPlugin;
+//
+// Thin binary entry point. All module declarations and the App builder
+// live in the library crate (`atb`); this file only exists so `cargo run`
+// has something to launch. Adding modules here would create a parallel
+// module tree and compile every file twice.
 
 fn main() {
-    let mut app = App::new();
-
-    #[cfg(not(feature = "headless"))]
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title:      config::WINDOW_TITLE.into(),
-            resolution: bevy::window::WindowResolution::new(
-                config::WINDOW_WIDTH,
-                config::WINDOW_HEIGHT,
-            ),
-            ..default()
-        }),
-        ..default()
-    }));
-
-    #[cfg(feature = "headless")]
-    app.add_plugins(MinimalPlugins);
-
-    app.add_plugins((WorldPlugin, SimPlugin, ItemPlugin, AgentPlugin));
-
-    #[cfg(not(feature = "headless"))]
-    app.add_plugins(VizPlugin);
-
-    app.run();
+    atb::run();
 }
-//TODO: Save Stats after ML run
+
+// TODO: Save Stats after ML run

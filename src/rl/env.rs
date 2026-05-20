@@ -22,19 +22,19 @@ use crate::item::Item;
 use crate::item::spawner::FreeTilePool;
 use crate::sim::config::SimConfig;
 use crate::sim::schedule::OnSimTick;
-use crate::team::{Team, TeamScore};
+use crate::team::TeamScore;
 use crate::world::config::WorldConfig;
 use crate::world::Grid;
 use crate::world::plugin::{rebuild_grid, ConfigPath};
 use crate::config as global;
 use crate::world::coords::GridPos;
 use super::marker::RlAgent;
-use super::obs_grid::{build_obs_grid, OBS_TOTAL};
+use super::obs::{build_obs_grid, OBS_TOTAL};
 use super::action::int_to_action;
-use super::reward_simple::{compute_reward, PrevState};
+use super::reward::{compute_reward, PrevState};
 
 pub use super::action::ACTION_SIZE;
-pub use super::obs_grid::{OBS_SHAPE, OBS_CHANNELS, OBS_CROP_SIZE};
+pub use super::obs::{OBS_SHAPE, OBS_CHANNELS, OBS_CROP_SIZE};
 
 /// Total floats in one observation. Python reshapes this to OBS_SHAPE.
 pub const OBS_DIM: usize = OBS_TOTAL;
@@ -136,16 +136,17 @@ fn headless_restart(world: &mut World) {
 
     // Respawn items
     {
-        let cfg = world.resource::<WorldConfig>().clone();
+        let cfg  = world.resource::<WorldConfig>().clone();
         let grid = world.resource::<Grid>().clone();
-        // We need Commands — use world.spawn() directly for items
-        let free_count = crate::world::layout::count_free_tiles(
-            &(0..grid.height).flat_map(|y| {
-                (0..grid.width).map(move |x| {
-                    grid.get(x as i32, y as i32).unwrap_or(crate::world::tile::Tile::Free)
-                })
-            }).collect::<Vec<_>>()
-        );
+
+        // Count free tiles via Grid::iter (already exists on the Grid type).
+        // The previous nested-closure version moved `grid` into the inner
+        // FnMut, which the borrow checker rejects because the outer flat_map
+        // closure may run multiple times.
+        let free_count = grid.iter()
+            .filter(|(_, _, tile)| *tile == crate::world::tile::Tile::Free)
+            .count();
+
         let item_cfgs = crate::world::layout::item_configs_for_free_count(&cfg, free_count);
         for item_cfg in &item_cfgs {
             let initial = (item_cfg.max_on_map / 2).max(1);
@@ -176,6 +177,26 @@ fn headless_restart(world: &mut World) {
     // Respawn agents — spawn_agent_world is the single source of truth
     for (idx, resolved) in layout.agents.iter().enumerate() {
         crate::agent::spawn::spawn_agent_world(world, resolved, &layout, idx);
+    }
+
+    // Tag the first (team-0) agent with the RlAgent marker. The marker is a
+    // zero-size component that obs / reward / action-injection filter on.
+    // We tag here rather than relying on `strategy: Rl` in config.ron because
+    // the Python entry point owns RL-ness — the world config shouldn't need
+    // to know whether it's being driven by a strategy or by an external policy.
+    {
+        let agent_e: Option<Entity> = world
+            .query_filtered::<(Entity, &crate::team::Team), With<AgentBrain>>()
+            .iter(world)
+            .find(|(_, team)| team.0 == 0)
+            .map(|(e, _)| e);
+        match agent_e {
+            Some(e) => {
+                world.entity_mut(e).insert(RlAgent);
+                info!("Tagged entity {:?} with RlAgent marker", e);
+            }
+            None => warn!("No team-0 agent found to tag as RlAgent"),
+        }
     }
 
     info!("Headless restart complete — tick 0");

@@ -37,16 +37,20 @@ def _resolve_dirs(cfg: TrainConfig) -> tuple[Path, Path, Path]:
     return models, stats, tb
 
 
+# Defaults pulled from TrainConfig so there is a single source of truth.
+_DEFAULTS = TrainConfig()
+
+
 @app.command()
 def train(
-    stage: int = typer.Option(1, "--stage"),
-    total_timesteps: int = typer.Option(2_000_000, "--total-timesteps"),
-    run_name: str = typer.Option("run", "--run-name"),
+    stage: int = typer.Option(_DEFAULTS.stage, "--stage"),
+    total_timesteps: int = typer.Option(_DEFAULTS.total_timesteps, "--total-timesteps"),
+    run_name: str = typer.Option(_DEFAULTS.run_name, "--run-name"),
     resume: Optional[str] = typer.Option(None, "--resume"),
-    device: str = typer.Option("cpu", "--device"),
-    seed: int = typer.Option(42, "--seed"),
-    algo: str = typer.Option("ppo", "--algo"),
-    n_envs: int = typer.Option(1, "--n-envs"),
+    device: str = typer.Option(_DEFAULTS.device, "--device"),
+    seed: int = typer.Option(_DEFAULTS.seed, "--seed"),
+    algo: str = typer.Option(_DEFAULTS.algo, "--algo"),
+    n_envs: int = typer.Option(_DEFAULTS.n_envs, "--n-envs"),
 ) -> None:
     cfg = TrainConfig(
         stage=stage,
@@ -75,12 +79,13 @@ def train(
     vec_env = build_vec_env(cfg)
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
 
-    # Separate eval env. We deep-copy the normaliser's running stats so eval
-    # sees the same input distribution but does NOT update them.
+    # Separate eval env — always DummyVecEnv(1) regardless of n_envs.
+    # factory.py wraps it in VecNormalize(training=False, norm_reward=False)
+    # when normalize_obs/reward is on, so eval observations stay on the same
+    # scale as training without updating the running stats.
+    # No manual stat-sync here: when normalization is off eval_env is a bare
+    # DummyVecEnv with no obs_rms attribute, so any assignment would crash.
     eval_env = build_vec_env(cfg, eval_mode=True)
-    if isinstance(eval_env, VecNormalize) and vec_normalize is not None:
-        eval_env.obs_rms = vec_normalize.obs_rms
-        eval_env.ret_rms = vec_normalize.ret_rms
 
     # Schedules: PPO consumes lr and clip_range as callables; ent_coef needs
     # the dedicated callback because PPO reads it as a plain float.
@@ -97,7 +102,7 @@ def train(
             tensorboard_log=str(tb_dir),
         )
     else:
-        model = algo_spec.cls(
+        model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,
             learning_rate=lr_schedule,

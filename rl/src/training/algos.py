@@ -22,10 +22,39 @@ flat-vector pipeline requires:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any, Protocol, Type, runtime_checkable
 
+import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
+
+
+# ---------------------------------------------------------------------------
+# Protocol — the constructor surface that train.py actually calls.
+#
+# Every algorithm we might add (PPO, SAC, DQN …) accepts at least these
+# kwargs. The Protocol lets the type checker validate call sites without
+# forcing AlgoSpec.cls to be typed as a concrete class.
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class SB3AlgoConstructor(Protocol):
+    """Structural type for any SB3 on- or off-policy algorithm constructor."""
+
+    def __call__(
+        self,
+        policy: str | type,
+        env: GymEnv,
+        *,
+        learning_rate: float | Schedule = 3e-4,
+        policy_kwargs: dict[str, Any] | None = None,
+        tensorboard_log: str | None = None,
+        verbose: int = 0,
+        seed: int | None = None,
+        device: th.device | str = "auto",
+        **kwargs: Any,           # algorithm-specific params (n_steps, etc.)
+    ) -> BaseAlgorithm: ...
 
 
 @dataclass
@@ -38,6 +67,18 @@ class AlgoSpec:
     supports_discrete: bool
     supports_continuous: bool
     default_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def constructor(self) -> SB3AlgoConstructor:
+        """
+        Return ``cls`` cast to ``SB3AlgoConstructor``.
+
+        Use this at call sites that pass algorithm-specific kwargs (e.g.
+        ``n_steps``, ``clip_range``) so the type checker validates the
+        shared surface while ``**kwargs`` absorbs the algo-specific ones
+        without spurious "Unexpected argument" warnings.
+        """
+        return self.cls  # type: ignore[return-value]
 
 
 # --------------------------------------------------------------------------

@@ -50,8 +50,8 @@ class PpoConfig:
     constant (handled in `schedules.linear_schedule`).
     """
 
-    n_steps: int = 2_000
-    batch_size: int = 200
+    n_steps: int = 128
+    batch_size: int = 256
     n_epochs: int = 10
     gamma: float = 0.99
     gae_lambda: float = 0.95
@@ -90,7 +90,7 @@ class TrainConfig:
     tensorboard_dir: Path = Path("runs/tensorboard")
 
     # Env wrappers.
-    n_envs: int = 1
+    n_envs: int = 16
     max_episode_steps: Optional[int] = None
     clip_reward: bool = True
     clip_reward_max: float = 10.0
@@ -105,7 +105,7 @@ class TrainConfig:
     ppo: PpoConfig = field(default_factory=PpoConfig)
 
     # Runtime.
-    device: str = "cpu"
+    device: str = "auto"
     seed: Optional[int] = 42
 
     @property

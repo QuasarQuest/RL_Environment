@@ -1,13 +1,20 @@
 // src/sim/reset.rs
 //
 // Shared episode reset — called by both the viz restart path and the RL
-// headless path.  Takes &mut World directly; no Commands, no feature gates.
+// headless path.  Takes &mut World directly; no Commands.
+//
+// The ItemSpawner / BandConfig rebuild is GUI-only: under the `headless`
+// feature the PI-controlled spawner doesn't exist (initial items are placed
+// once at episode start and that's it). We gate just that block, not the
+// whole function, so headless still gets grid rebuild + item placement.
 
 use bevy::prelude::*;
 use crate::agent::brain::AgentBrain;
 use crate::agent::spawn::spawn_agent_world;
 use crate::item::Item;
-use crate::item::spawner::{BandConfig, FreeTilePool, ItemSpawner};
+use crate::item::spawner::FreeTilePool;
+#[cfg(not(feature = "headless"))]
+use crate::item::spawner::{BandConfig, ItemSpawner};
 use crate::sim::config::SimConfig;
 use crate::team::TeamScore;
 use crate::world::config::WorldConfig;
@@ -25,10 +32,11 @@ use crate::config as global;
 ///   2. Reset TeamScore
 ///   3. Despawn all agents and items
 ///   4. Rebuild grid (tiles, safe zones, obstacles)
-///   5. Rebuild FreeTilePool and ItemSpawner
-///   6. Spawn initial items
-///   7. Respawn agents
-///   8. Update ResolvedLayout resource
+///   5. Rebuild FreeTilePool
+///   6. Compute item configs (and rebuild ItemSpawner under GUI builds)
+///   7. Update ResolvedLayout resource
+///   8. Spawn initial items
+///   9. Respawn agents
 pub fn reset_episode(world: &mut World) {
     // 1. Reset SimConfig
     {
@@ -68,7 +76,7 @@ pub fn reset_episode(world: &mut World) {
         world.insert_resource(pool);
     }
 
-    // 7. Compute item configs and rebuild ItemSpawner
+    // 7. Compute item configs (GUI build also rebuilds ItemSpawner here)
     {
         let cfg      = world.resource::<WorldConfig>().clone();
         let grid     = world.resource::<Grid>().clone();
@@ -76,11 +84,16 @@ pub fn reset_episode(world: &mut World) {
         let free     = count_free_tiles(&tile_vec);
         let item_cfgs = item_configs_for_free_count(&cfg, free);
 
-        // Update ItemSpawner bands
-        let bands = item_cfgs.iter().map(|c| {
-            BandConfig::new(c.kind, (c.max_on_map / 2).max(1), c.max_on_map, 300)
-        }).collect();
-        world.insert_resource(ItemSpawner { bands });
+        // Update ItemSpawner bands — GUI only.
+        // The PI-controlled spawner doesn't exist under `headless`; headless
+        // gets a one-shot item placement (step 9) and that's it.
+        #[cfg(not(feature = "headless"))]
+        {
+            let bands = item_cfgs.iter().map(|c| {
+                BandConfig::new(c.kind, (c.max_on_map / 2).max(1), c.max_on_map, 300)
+            }).collect();
+            world.insert_resource(ItemSpawner { bands });
+        }
 
         // Store on layout so ResolvedLayout resource is consistent
         layout.item_configs = item_cfgs;

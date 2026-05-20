@@ -9,6 +9,7 @@ use crate::world::config::WorldConfig;
 use crate::sim::config::SimConfig;
 use crate::team::{Team, TeamScore};
 use crate::item::Item;
+use crate::rl::marker::RlAgent;
 use super::action::Action;
 use super::brain::AgentBrain;
 use super::components::{Ammo, GoldCarried, Hearts, RespawnIn, Score, SpeedBuff};
@@ -18,6 +19,11 @@ use super::observation::{Observation, VisibleAgent, VisibleItem, WorldSnapshot};
 pub struct PendingAction(pub Option<Action>);
 
 // ── Tick agents ───────────────────────────────────────────────────────────────
+//
+// Runs the strategy (BT / FSM / GOAP / Random) for every agent and writes
+// the chosen Action into PendingAction. Agents tagged with `RlAgent` are
+// explicitly skipped — their PendingAction is set by Python through
+// `RlEnv::inject_action` before each tick and must not be overwritten.
 
 pub fn tick_agents(
     grid:      Res<Grid>,
@@ -26,7 +32,7 @@ pub fn tick_agents(
     mut query: Query<(
         &GridPos, &GoldCarried, &Hearts, &Ammo, &Score, &Team,
         &mut AgentBrain, &mut PendingAction,
-    ), Without<RespawnIn>>,
+    ), (Without<RespawnIn>, Without<RlAgent>)>,
 ) {
     let tick = sim_cfg.tick;
 
