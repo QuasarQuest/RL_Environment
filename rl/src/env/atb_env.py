@@ -5,6 +5,12 @@ Gymnasium API and nothing more. Reward shaping, normalisation, clipping, and
 score/win accounting live in `env.wrappers`. Vectorisation lives in
 `env.factory`.
 
+Observation contract
+--------------------
+The Rust side returns a flat `list[float]` of length `obs_dim()`. We reshape
+it to `(C, H, W)` using `obs_shape()` so PyTorch / SB3's `CnnPolicy` sees a
+proper image tensor. The reshape is a zero-copy view.
+
 Multi-agent forward-compat
 --------------------------
 `agent_id` is accepted but currently unused. When the Rust side gains
@@ -61,13 +67,16 @@ class AtbEnv(gym.Env):
         self._agent_id = agent_id  # reserved for future multi-agent use
         self._env = atb.PyRlEnv(config_path)
 
-        obs_dim = atb.PyRlEnv.obs_dim()
+        # Spatial observation: (C, H, W). Values are already in [0, 1] from
+        # the Rust side, so we set a tight Box. `normalize_images=False` is
+        # set on the CNN policy side so SB3 won't divide by 255.
+        self._obs_shape: tuple[int, int, int] = atb.PyRlEnv.obs_shape()
         action_size = atb.PyRlEnv.action_size()
 
         self.observation_space = spaces.Box(
-            low=-1.0,
+            low=0.0,
             high=1.0,
-            shape=(obs_dim,),
+            shape=self._obs_shape,
             dtype=np.float32,
         )
         self.action_space = spaces.Discrete(action_size)
@@ -83,12 +92,13 @@ class AtbEnv(gym.Env):
         self._episode_reward = 0.0
         self._episode_length = 0
         self._score = 0.0
-        obs = np.asarray(self._env.reset(), dtype=np.float32)
+        obs_flat = self._env.reset()
+        obs = np.asarray(obs_flat, dtype=np.float32).reshape(self._obs_shape)
         return obs, {}
 
     def step(self, action: int):
-        obs_raw, reward, done = self._env.step(int(action))
-        obs = np.asarray(obs_raw, dtype=np.float32)
+        obs_flat, reward, done = self._env.step(int(action))
+        obs = np.asarray(obs_flat, dtype=np.float32).reshape(self._obs_shape)
         reward = float(reward)
 
         self._episode_reward += reward

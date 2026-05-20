@@ -1,15 +1,10 @@
 // assets/world/config.ron
-//
-// Minimal config for the RL gold-collection task.
-// One agent on team 0, no enemies, no obstacles, gold-only items.
 
 (
-    width:  20,
-    height: 20,
+    width:  100,
+    height: 100,
 
-    // Short episodes — at 500 ticks with no enemies the agent has plenty
-    // of time to find gold and return, but bad policies terminate quickly.
-    match_duration_ticks: 500,
+    match_duration_ticks: 2500,
 
     // ── Game mode ─────────────────────────────────────────────────────────────
     game_mode: GoldRush,
@@ -22,42 +17,42 @@
     ],
 
     // ── Bases ─────────────────────────────────────────────────────────────────
-    // Single base in the bottom-left corner. margin × short_side = 0.05 × 20 = 1 tile inset.
+    // margin: fraction of shorter grid dimension → 0.08 × 50 = 4 tiles inset.
     bases: [
         ( team: 0, corner: BottomLeft, margin: 0.05 ),
+        // ( team: 1, corner: TopRight,   margin: 0.05 ),
     ],
 
     // ── Agents ────────────────────────────────────────────────────────────────
-    // Single agent, near base. strategy/planner are ignored under headless RL
-    // (the RlAgent marker bypasses strategy dispatch) but the fields are required.
+    // spawn_offset: fraction of shorter grid dimension → 0.10 × 50 = 5 tiles from base.
     agents: [
         ( team: 0, strategy: BehaviorTree, planner: AStar, spawn: NearBase, spawn_offset: 0.10 ),
+        // ( team: 1, strategy: BehaviorTree, planner: AStar, spawn: NearBase, spawn_offset: 0.10 ),
     ],
 
     // ── Safe zone ─────────────────────────────────────────────────────────────
-    // Small safe zone — agent rarely uses it without combat, but the CNN
-    // shouldn't see it as an obstacle either.
+    // Fraction of grid diagonal. Default DEFAULT_SAFE_ZONE_FRACTION = 0.06.
+    // 0.06 × 70.7 (50×50 diagonal) ≈ 4 tiles. Scales automatically with map size.
     safe_zone_fraction: 0.03,
 
     // ── Obstacles ─────────────────────────────────────────────────────────────
-    // Disabled for the gold task. Set profile to None and density to 0 to
-    // make the intent unambiguous (place_obstacles short-circuits on either).
+    // density: fraction of total tiles → 0.08 = 8% become obstacles.
     obstacles: (
-        density:            0.0,
-        profile:            None,
+        density:            0.08,
+        profile:            Mixed,
         max_block_fraction: 0.12,
         max_wall_fraction:  0.14,
     ),
 
     // ── Items ─────────────────────────────────────────────────────────────────
-    // Gold only. Density is per 100 free tiles. With 20×20 = 400 tiles and no
-    // obstacles, ~400 free tiles, so gold = 2.0 yields ~8 initial gold items
-    // and max_on_map = 16 (the (initial * 2) rule in ItemDensityConfig).
+    // Unit: items per 100 free tiles after obstacle placement.
+    // At 50×50 with 8% obstacles ≈ 2100 free tiles:
+    //   gold 0.5 → ~10 items   health 0.3 → ~6   ammo 0.4 → ~8   speed 0.1 → ~2
     item_density: (
-        gold:        2.0,
-        health:      0.0,
-        ammo:        0.0,
-        speed_boost: 0.0,
+        gold:        0.05,
+        health:      0.025,
+        ammo:        0.010,
+        speed_boost: 0.009,
     ),
 
     // ── Agent stats ───────────────────────────────────────────────────────────
@@ -65,8 +60,6 @@
     gold_carry_speed: 0.95,
 
     // ── Combat ────────────────────────────────────────────────────────────────
-    // Unused in this task (no enemies) but kept at defaults so the config
-    // still validates if a second team is added later.
     melee_range:           2,
     ranged_range:          6,
     kill_reward:           15,

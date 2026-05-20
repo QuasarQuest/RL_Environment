@@ -1,50 +1,51 @@
 // src/rl/reward.rs
 //
-// Computes the per-tick scalar reward for the RL agent.
+// Minimal reward for the gold-collection task. No combat, no death, no
+// survival bonus — just enough signal to learn "find gold, bring it back".
 //
-// Design:
-//   +score_delta     gold delivery and kills already flow through Score,
-//                    so one delta captures both without separate tracking.
-//   -death_penalty   discourages dying — separate from score loss because
-//                    dying has strategic cost beyond losing gold.
-//   +survival_bonus  tiny per-tick reward to encourage staying alive and
-//                    acting rather than waiting in a corner.
+// Reward formula (per tick):
+//   +PICKUP_REWARD * (gold_carried_now - gold_carried_prev)   if positive
+//   +DELIVERY_REWARD * (score_now - score_prev)                if positive
+//   +TICK_PENALTY                                              always (negative)
 //
-// Keep shaping minimal for now — get the pipeline working first,
-// tune magnitudes once training is confirmed to run end-to-end.
+// Why two separate deltas rather than just score-delta:
+//   Score only fires on delivery. The agent needs an earlier reinforcement
+//   signal for the act of picking gold up at all, otherwise the gradient
+//   from "do nothing" to "carry one gold" is zero.
 
 use bevy::prelude::*;
-use crate::agent::components::{RespawnIn, Score};
+use crate::agent::components::{GoldCarried, Score};
 use super::marker::RlAgent;
 
 // ── Reward constants ──────────────────────────────────────────────────────────
 
-/// Awarded per point of score gained this tick (gold delivery = +1 per gold,
-/// kill = +kill_reward from MapConfig). Keep at 1.0 — score is already scaled.
-const SCORE_SCALE:      f32 = 1.0;
+/// Per gold picked up (gold_carried increase from one tick to the next).
+const PICKUP_REWARD:   f32 =  0.5;
 
-/// Penalty on death. Tune upward if agent plays recklessly.
-const DEATH_PENALTY:    f32 = -5.0;
+/// Per unit of score gained. With no combat, score == gold delivered, so
+/// this is effectively per-gold-delivered reward.
+const DELIVERY_REWARD: f32 =  5.0;
 
-/// Tiny per-tick bonus for being alive. Encourages action over hiding.
-const SURVIVAL_BONUS:   f32 = 0.01;
+/// Small constant time pressure — discourages standing still forever.
+const TICK_PENALTY:    f32 = -0.001;
 
-// ── State carried between ticks ───────────────────────────────────────────────
+// ── Prev-state snapshot ───────────────────────────────────────────────────────
 
-/// Snapshot of agent state from the previous tick.
-/// RlEnv holds one of these and passes it into compute_reward each tick.
 #[derive(Default, Clone, Copy)]
-pub struct PrevAgentState {
-    pub score:    u32,
-    pub was_dead: bool,
+pub struct PrevState {
+    pub gold_carried: u8,
+    pub score:        u32,
 }
 
-impl PrevAgentState {
+impl PrevState {
     pub fn read(world: &mut World) -> Self {
-        let mut q = world.query_filtered::<(&Score, Has<RespawnIn>), With<RlAgent>>();
+        let mut q = world.query_filtered::<
+            (&GoldCarried, &Score),
+            With<RlAgent>,
+        >();
         match q.single(world) {
-            Ok((score, is_dead)) => Self { score: score.0, was_dead: is_dead },
-            Err(_)               => Self::default(),
+            Ok((gold, score)) => Self { gold_carried: gold.0, score: score.0 },
+            Err(_)            => Self::default(),
         }
     }
 }
@@ -52,26 +53,27 @@ impl PrevAgentState {
 // ── Reward ────────────────────────────────────────────────────────────────────
 
 /// Compute the reward for the tick that just ran.
-/// Call after `app.update()`, before updating `prev`.
-pub fn compute_reward(world: &mut World, prev: &PrevAgentState) -> f32 {
-    let mut q = world.query_filtered::<(&Score, Has<RespawnIn>), With<RlAgent>>();
-    let Ok((score, is_dead)) = q.single(world) else { return 0.0 };
+/// Call AFTER `app.update()` / `OnSimTick`, BEFORE refreshing `prev`.
+pub fn compute_reward(world: &mut World, prev: &PrevState) -> f32 {
+    let mut q = world.query_filtered::<
+        (&GoldCarried, &Score),
+        With<RlAgent>,
+    >();
+    let Ok((gold, score)) = q.single(world) else { return 0.0 };
 
-    let mut reward = 0.0;
+    let mut reward = TICK_PENALTY;
 
-    // Score delta — captures gold delivery and kills
+    // Pickup: gold_carried went up.
+    // Note: gold_carried also drops when the agent dies (gold scatters) or
+    // when it delivers (score goes up, gold_carried resets to 0). Using
+    // saturating_sub means those events contribute 0 to pickup_delta, which
+    // is the correct behaviour.
+    let pickup_delta = gold.0.saturating_sub(prev.gold_carried) as f32;
+    reward += PICKUP_REWARD * pickup_delta;
+
+    // Delivery: score went up. In this task that means gold was deposited.
     let score_delta = score.0.saturating_sub(prev.score) as f32;
-    reward += score_delta * SCORE_SCALE;
-
-    // Death penalty — fires on the tick the agent transitions to dead
-    if is_dead && !prev.was_dead {
-        reward += DEATH_PENALTY;
-    }
-
-    // Survival bonus — only while alive
-    if !is_dead {
-        reward += SURVIVAL_BONUS;
-    }
+    reward += DELIVERY_REWARD * score_delta;
 
     reward
 }

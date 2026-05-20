@@ -2,6 +2,14 @@
 
 These are the *only* place to define defaults. `train.py` and `tune.py`
 construct them and never duplicate values.
+
+Observation normalisation note
+------------------------------
+`normalize_obs` defaults to False because our CNN observations are already
+in [0, 1] with semantic per-channel meaning (binary masks, broadcast
+indicator planes). Running them through `VecNormalize`'s running-mean
+subtraction would destroy that semantics. Re-enable only if returning to
+the legacy flat-vector observation.
 """
 from __future__ import annotations
 
@@ -13,7 +21,17 @@ from env.atb_env import PROJECT_ROOT
 
 
 def stage_config_path(stage: int) -> str:
-    """Resolve `assets/world/config_stage{N}.ron` with a useful error message."""
+    """Resolve `assets/world/config_stage{N}.ron` with a useful error message.
+
+    Stage support is currently unused (stage=1 falls back to config.ron) —
+    kept so curriculum staging can be added without touching this signature.
+    """
+    if stage <= 1:
+        # No staged config yet — use the canonical single config.
+        path = PROJECT_ROOT / "assets" / "world" / "config.ron"
+        if not path.exists():
+            raise FileNotFoundError(f"No world config: {path}")
+        return str(path)
     path = PROJECT_ROOT / "assets" / "world" / f"config_stage{stage}.ron"
     if not path.exists():
         raise FileNotFoundError(f"No config for stage {stage}: {path}")
@@ -77,7 +95,8 @@ class TrainConfig:
     clip_reward: bool = True
     clip_reward_max: float = 10.0
     reward_scale: float = 1.0
-    normalize_obs: bool = True
+    # See module docstring: CNN obs are already in [0, 1].
+    normalize_obs: bool = False
     normalize_reward: bool = True
 
     # Algo hyperparameters. Only one of these will be active at a time;

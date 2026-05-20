@@ -3,12 +3,16 @@
 // Headless Bevy environment for RL training.
 //
 // Config path flow:
-//   Python: atb.PyRlEnv("assets/world/config_stage1.ron")
+//   Python: atb.PyRlEnv("assets/world/config.ron")
 //     → pyo3.rs: RlEnv::new(path)
 //       → env.rs: build_headless_app(path) inserts ConfigPath resource
 //         → world/plugin.rs: load_map reads ConfigPath → WorldConfig::load()
 //
-// This means every stage config is fully supported with no code changes.
+// Observation contract:
+//   The env returns a flat Vec<f32> of length OBS_TOTAL. The Python side
+//   reshapes it to (C, H, W) using OBS_SHAPE. We deliberately do the
+//   reshape in Python (zero-copy view) rather than constructing a 3D array
+//   on the Rust side — keeps the PyO3 boundary boring.
 
 use bevy::prelude::*;
 
@@ -23,19 +27,23 @@ use crate::world::config::WorldConfig;
 use crate::world::Grid;
 use crate::world::plugin::{rebuild_grid, ConfigPath};
 use crate::config as global;
+use crate::world::coords::GridPos;
 use super::marker::RlAgent;
-use super::obs::{build_obs, OBS_SIZE};
+use super::obs_grid::{build_obs_grid, OBS_TOTAL};
 use super::action::int_to_action;
-use super::reward::{compute_reward, PrevAgentState};
+use super::reward_simple::{compute_reward, PrevState};
 
 pub use super::action::ACTION_SIZE;
-pub const OBS_DIM: usize = OBS_SIZE;
+pub use super::obs_grid::{OBS_SHAPE, OBS_CHANNELS, OBS_CROP_SIZE};
+
+/// Total floats in one observation. Python reshapes this to OBS_SHAPE.
+pub const OBS_DIM: usize = OBS_TOTAL;
 
 // ── RlEnv ─────────────────────────────────────────────────────────────────────
 
 pub struct RlEnv {
     app:        App,
-    prev_state: PrevAgentState,
+    prev_state: PrevState,
 }
 
 impl RlEnv {
@@ -43,14 +51,14 @@ impl RlEnv {
     pub fn new(config_path: String) -> Self {
         let mut app = build_headless_app(config_path);
         app.update();
-        let prev_state = PrevAgentState::read(app.world_mut());
+        let prev_state = PrevState::read(app.world_mut());
         Self { app, prev_state }
     }
 
     pub fn reset(&mut self) -> Vec<f32> {
         headless_restart(self.app.world_mut());
-        self.prev_state = PrevAgentState::read(self.app.world_mut());
-        build_obs(self.app.world_mut())
+        self.prev_state = PrevState::read(self.app.world_mut());
+        build_obs_grid(self.app.world_mut())
     }
 
     pub fn step(&mut self, action: u32) -> (Vec<f32>, f32, bool) {
@@ -58,8 +66,8 @@ impl RlEnv {
         let done   = self.advance_tick();
         self.app.world_mut().run_schedule(OnSimTick);
         let reward = compute_reward(self.app.world_mut(), &self.prev_state);
-        let obs    = build_obs(self.app.world_mut());
-        self.prev_state = PrevAgentState::read(self.app.world_mut());
+        let obs    = build_obs_grid(self.app.world_mut());
+        self.prev_state = PrevState::read(self.app.world_mut());
         (obs, reward, done)
     }
 

@@ -8,6 +8,16 @@ training loop.
 Today only PPO is wired up because the env exposes a Discrete action space
 without a continuous variant. SAC/TD3 are listed as TODOs to make the
 intent explicit.
+
+Policy choice
+-------------
+`policy="CnnPolicy"` is paired with `ATB_CNN_POLICY_KWARGS` (and its
+`normalize_images=False` flag) in policy.py. Switching back to the legacy
+flat-vector pipeline requires:
+  - here:        policy="MlpPolicy"
+  - policy.py:   ATB_POLICY_KWARGS = ATB_MLP_POLICY_KWARGS
+  - env.rs:      import obs::build_obs / reward::compute_reward
+  - atb_env.py:  swap observation_space back to Box(shape=(obs_dim,))
 """
 from __future__ import annotations
 
@@ -37,7 +47,7 @@ class AlgoSpec:
 PPO_SPEC = AlgoSpec(
     name="ppo",
     cls=PPO,
-    policy="MlpPolicy",
+    policy="CnnPolicy",
     supports_discrete=True,
     supports_continuous=True,
     default_kwargs={
