@@ -4,9 +4,6 @@ use bevy::prelude::*;
 use crate::sim::config::SimConfig;
 use crate::world::coords::GridPos;
 use crate::world::tile::Tile;
-
-#[cfg(not(feature = "headless"))]
-use crate::world::config::WorldConfig;
 use crate::world::Grid;
 use super::ItemKind;
 
@@ -52,9 +49,10 @@ pub struct ItemSpawnConfig {
     pub max_on_map: usize,
 }
 
-// BandConfig and ItemSpawner are only needed in GUI builds where
-// spawn_items_periodically runs. In headless, initial items from
-// config.ron are sufficient for RL training.
+// ── BandConfig — visual sim only ──────────────────────────────────────────────
+// The PI-controller spawner is only needed in GUI builds.
+// In headless mode, items are placed at episode start from item_density config.
+
 #[cfg(not(feature = "headless"))]
 #[derive(Clone, Debug)]
 pub struct BandConfig {
@@ -86,7 +84,9 @@ impl BandConfig {
         }
     }
 
-    fn target(&self) -> f32 { ((self.min_on_map + self.max_on_map) / 2) as f32 }
+    fn target(&self) -> f32 {
+        ((self.min_on_map + self.max_on_map) / 2) as f32
+    }
 
     fn update_pi(&mut self, count: usize) {
         let error     = self.target() - count as f32;
@@ -103,7 +103,7 @@ impl BandConfig {
     }
 }
 
-// ── Spawner resource ──────────────────────────────────────────────────────────
+// ── ItemSpawner resource — visual sim only ────────────────────────────────────
 
 #[cfg(not(feature = "headless"))]
 #[derive(Resource)]
@@ -113,16 +113,17 @@ pub struct ItemSpawner {
 
 #[cfg(not(feature = "headless"))]
 impl ItemSpawner {
-    pub fn from_map_config(map: &WorldConfig) -> Self {
-        let bands = map.item_spawners.iter()
-            .filter_map(|ron| ron.to_config())
-            .map(|cfg| BandConfig::new(
+    /// Build from resolved item spawn configs (post-obstacle free tile count).
+    /// Called by WorldPlugin after obstacles are placed and by viz/restart.rs.
+    pub fn from_item_configs(configs: &[ItemSpawnConfig]) -> Self {
+        let bands = configs.iter().map(|cfg| {
+            BandConfig::new(
                 cfg.kind,
                 (cfg.max_on_map / 2).max(1),
                 cfg.max_on_map,
                 300,
-            ))
-            .collect();
+            )
+        }).collect();
         Self { bands }
     }
 }

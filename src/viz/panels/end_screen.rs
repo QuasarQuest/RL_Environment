@@ -1,23 +1,18 @@
-// src/viz/end_screen.rs
-
+// src/viz/panels/end_screen.rs
 use bevy::prelude::*;
 use crate::sim::config::SimConfig;
 use crate::team::{Team, TeamScore};
 use crate::agent::components::{DeathCount, KillCount, Score};
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG, SIZE_XL};
 use crate::style::color::team_color;
-use crate::viz::restart::RestartMessage;
-
-// ── Markers ───────────────────────────────────────────────────────────────────
+use crate::viz::events::RestartEvent;
 
 #[derive(Component)] pub struct EndScreen;
 #[derive(Component)] pub struct WinnerLabel;
 #[derive(Component)] pub struct TeamStatsContainer;
-#[derive(Component)] pub struct CardsPopulated; // guard: cards spawned once only
+#[derive(Component)] pub struct CardsPopulated;
 #[derive(Component)] pub struct QuitButton;
 #[derive(Component)] pub struct RestartButton;
-
-// ── Spawn ─────────────────────────────────────────────────────────────────────
 
 pub fn spawn_end_screen(mut commands: Commands) {
     let bg     = ThemeColor::Background.resolve();
@@ -73,7 +68,6 @@ pub fn spawn_end_screen(mut commands: Commands) {
             },
         ));
         divider(panel, border);
-        // Button row: RESTART (green) + QUIT
         panel.spawn(Node {
             flex_direction: FlexDirection::Row,
             column_gap:     Val::Px(16.0),
@@ -121,10 +115,6 @@ pub fn spawn_end_screen(mut commands: Commands) {
     });
 }
 
-// ── Show overlay + winner label ───────────────────────────────────────────────
-//
-// Split from card population to stay under Bevy's system parameter limit.
-
 pub fn show_end_screen(
     sim:          Res<SimConfig>,
     team_score:   Res<TeamScore>,
@@ -138,11 +128,7 @@ pub fn show_end_screen(
         *vis         = Visibility::Visible;
     }
 
-    // Collect team ids from TeamScore — all teams that have scored appear here.
-    // Also include team 0 and 1 as fallback so the screen always shows something.
-    let mut team_ids: Vec<u8> = vec![0, 1];
-    team_ids.dedup();
-
+    let team_ids: Vec<u8> = vec![0, 1];
     let winner_id = team_ids.iter()
         .max_by_key(|&&id| team_score.get(Team(id)));
 
@@ -164,8 +150,6 @@ pub fn show_end_screen(
     }
 }
 
-// ── Populate stat cards ───────────────────────────────────────────────────────
-
 pub fn populate_end_screen_cards(
     sim:          Res<SimConfig>,
     team_score:   Res<TeamScore>,
@@ -174,10 +158,7 @@ pub fn populate_end_screen_cards(
     mut commands: Commands,
 ) {
     if !sim.game_over { return; }
-
-    let Ok(container) = container_q.single() else { return }; // Already populated
-
-    // Mark immediately so concurrent frames can't double-spawn
+    let Ok(container) = container_q.single() else { return };
     commands.entity(container).insert(CardsPopulated);
 
     use std::collections::HashMap;
@@ -191,21 +172,17 @@ pub fn populate_end_screen_cards(
     }
 
     let mut team_ids: Vec<u8> = map.keys().copied().collect();
-    team_ids.sort();
-    // Ensure at least teams 0+1 appear even if they haven't scored
-    for id in [0u8, 1u8] {
-        if !team_ids.contains(&id) { team_ids.push(id); }
-    }
+    for id in [0u8, 1u8] { if !team_ids.contains(&id) { team_ids.push(id); } }
     team_ids.sort();
 
-    let Ok(container) = container_q.single() else { return };
     commands.entity(container).with_children(|c| {
         for &team_id in &team_ids {
             let tc     = team_color(team_id);
             let ts     = team_score.get(Team(team_id));
             let kills  = map.get(&team_id).map(|d| d.kills).unwrap_or(0);
             let deaths = map.get(&team_id).map(|d| d.deaths).unwrap_or(0);
-            let kd     = if deaths == 0 { kills as f32 } else { kills as f32 / deaths as f32 };
+            let kd     = if deaths == 0 { kills as f32 }
+            else { kills as f32 / deaths as f32 };
 
             c.spawn(Node {
                 flex_direction: FlexDirection::Column,
@@ -247,28 +224,23 @@ pub fn populate_end_screen_cards(
     });
 }
 
-// ── Restart ───────────────────────────────────────────────────────────────────
-
 pub fn handle_restart_button(
-    mut restart:  MessageWriter<RestartMessage>,
-    mut container_q: Query<Entity, With<TeamStatsContainer>>,
+    mut restart:  MessageWriter<RestartEvent>,
+    container_q:  Query<Entity, With<TeamStatsContainer>>,
     mut commands: Commands,
     buttons:      Query<&Interaction, (Changed<Interaction>, With<RestartButton>)>,
 ) {
     for interaction in buttons.iter() {
         if *interaction == Interaction::Pressed {
-            // Clear CardsPopulated so next episode populates fresh cards
-            if let Ok(container) = container_q.single_mut() {
+            if let Ok(container) = container_q.single() {
                 commands.entity(container)
                     .remove::<CardsPopulated>()
                     .despawn_related::<Children>();
             }
-            restart.write(RestartMessage);
+            restart.write(RestartEvent);
         }
     }
 }
-
-// ── Quit ─────────────────────────────────────────────────────────────────────
 
 pub fn handle_quit_button(
     mut app_exit: MessageWriter<AppExit>,
@@ -280,8 +252,6 @@ pub fn handle_quit_button(
         }
     }
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn divider(parent: &mut ChildSpawnerCommands, color: Color) {
     parent.spawn((

@@ -1,14 +1,19 @@
 // src/rl/env.rs
+//
+// Headless Bevy environment for RL training.
+//
+// Config path flow:
+//   Python: atb.PyRlEnv("assets/world/config_stage1.ron")
+//     → pyo3.rs: RlEnv::new(path)
+//       → env.rs: build_headless_app(path) inserts ConfigPath resource
+//         → world/plugin.rs: load_map reads ConfigPath → WorldConfig::load()
+//
+// This means every stage config is fully supported with no code changes.
 
 use bevy::prelude::*;
 
 use crate::agent::brain::AgentBrain;
-use crate::agent::components::{
-    Ammo, DeathCount, GoldCarried, GridPos, Hearts, KillCount, Score, SpawnPoint,
-};
-use crate::agent::registry::make_agent;
 use crate::agent::systems::PendingAction;
-use crate::factory::AgentConfigIndex;
 use crate::item::Item;
 use crate::item::spawner::FreeTilePool;
 use crate::sim::config::SimConfig;
@@ -16,8 +21,8 @@ use crate::sim::schedule::OnSimTick;
 use crate::team::{Team, TeamScore};
 use crate::world::config::WorldConfig;
 use crate::world::Grid;
-use crate::world::plugin::{apply_fixed_tiles, regenerate_obstacles};
-use crate::config;
+use crate::world::plugin::{rebuild_grid, ConfigPath};
+use crate::config as global;
 use super::marker::RlAgent;
 use super::obs::{build_obs, OBS_SIZE};
 use super::action::int_to_action;
@@ -34,8 +39,9 @@ pub struct RlEnv {
 }
 
 impl RlEnv {
-    pub fn new() -> Self {
-        let mut app = build_headless_app();
+    /// Create a new headless environment loading the given config file.
+    pub fn new(config_path: String) -> Self {
+        let mut app = build_headless_app(config_path);
         app.update();
         let prev_state = PrevAgentState::read(app.world_mut());
         Self { app, prev_state }
@@ -57,6 +63,8 @@ impl RlEnv {
         (obs, reward, done)
     }
 
+    // ── Private ───────────────────────────────────────────────────────────────
+
     fn inject_action(&mut self, action: u32) {
         let sim_action = int_to_action(action);
         let world = self.app.world_mut();
@@ -77,41 +85,40 @@ impl RlEnv {
     }
 }
 
-// ── Headless restart ──────────────────────────────────────────────────────────
+// ── Headless episode restart ──────────────────────────────────────────────────
 
 fn headless_restart(world: &mut World) {
     info!("=== Headless episode restart ===");
 
+    // Reset sim state
     {
-        let mut cfg = world.resource_mut::<SimConfig>();
-        cfg.tick      = 0;
-        cfg.game_over = false;
-        cfg.paused    = false;
+        let mut sim = world.resource_mut::<SimConfig>();
+        sim.tick      = 0;
+        sim.game_over = false;
+        sim.paused    = false;
     }
-
     *world.resource_mut::<TeamScore>() = TeamScore::default();
 
-    // Despawn agents
+    // Despawn all agents
     let agents: Vec<Entity> = world
         .query_filtered::<Entity, With<AgentBrain>>()
         .iter(world)
         .collect();
     for e in agents { world.despawn(e); }
 
-    // Despawn items
+    // Despawn all items
     let items: Vec<Entity> = world
         .query_filtered::<Entity, With<Item>>()
         .iter(world)
         .collect();
     for e in items { world.despawn(e); }
 
-    // Reset grid
-    {
-        let map = world.resource::<WorldConfig>().clone();
+    // Rebuild grid (bases, safe zones, fresh obstacles)
+    let layout = {
+        let cfg = world.resource::<WorldConfig>().clone();
         let mut grid = world.resource_mut::<Grid>();
-        apply_fixed_tiles(&map, &mut grid);
-        regenerate_obstacles(&map, &mut grid);
-    }
+        rebuild_grid(&cfg, &mut grid)
+    };
 
     // Rebuild FreeTilePool
     {
@@ -119,64 +126,61 @@ fn headless_restart(world: &mut World) {
         world.insert_resource(pool);
     }
 
-    // Respawn agents — tag Blue (team=1) with RlAgent
+    // Respawn items
     {
-        let map = world.resource::<WorldConfig>().clone();
-        for (idx, cfg) in map.agents.iter().enumerate() {
-            let team_id     = cfg.team.unwrap_or(0) as u8;
-            let team        = Team(team_id);
-            let brain       = AgentBrain(make_agent(cfg));
-            let color       = team.color();
-            let start_pos   = GridPos::new(cfg.x, cfg.y);
-            let spawn_point = find_base_tile(&map, team_id).unwrap_or(start_pos);
-
-            let mut cmd = world.spawn((
-                start_pos,
-                SpawnPoint(spawn_point),
-                Hearts::default(),
-                Ammo::default(),
-                GoldCarried::default(),
-                Score::default(),
-                KillCount::default(),
-                DeathCount::default(),
-                brain,
-                team,
-                PendingAction::default(),
-                Sprite {
-                    color,
-                    custom_size: Some(Vec2::splat(config::TILE_SIZE * 0.8)),
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 0.0, 1.0),
-                Visibility::default(),
-                AgentConfigIndex(idx),
-            ));
-
-            if cfg.team == Some(1) {
-                cmd.insert(RlAgent);
+        let cfg = world.resource::<WorldConfig>().clone();
+        let grid = world.resource::<Grid>().clone();
+        // We need Commands — use world.spawn() directly for items
+        let free_count = crate::world::layout::count_free_tiles(
+            &(0..grid.height).flat_map(|y| {
+                (0..grid.width).map(move |x| {
+                    grid.get(x as i32, y as i32).unwrap_or(crate::world::tile::Tile::Free)
+                })
+            }).collect::<Vec<_>>()
+        );
+        let item_cfgs = crate::world::layout::item_configs_for_free_count(&cfg, free_count);
+        for item_cfg in &item_cfgs {
+            let initial = (item_cfg.max_on_map / 2).max(1);
+            let mut placed   = 0usize;
+            let mut attempts = 0usize;
+            while placed < initial && attempts < initial * 200 {
+                attempts += 1;
+                let x = rand::random_range(0..cfg.width  as i32);
+                let y = rand::random_range(0..cfg.height as i32);
+                if grid.get(x, y) == Some(crate::world::tile::Tile::Free) {
+                    world.spawn((
+                        Item { kind: item_cfg.kind },
+                        GridPos::new(x, y),
+                        Sprite {
+                            color:       item_cfg.kind.color(),
+                            custom_size: Some(Vec2::splat(global::TILE_SIZE * 0.6)),
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, 0.0, item_cfg.kind.z_layer()),
+                        Visibility::default(),
+                    ));
+                    placed += 1;
+                }
             }
         }
     }
 
-    info!("Headless restart complete — tick 0.");
-}
+    // Respawn agents — spawn_agent_world is the single source of truth
+    for (idx, resolved) in layout.agents.iter().enumerate() {
+        crate::agent::spawn::spawn_agent_world(world, resolved, &layout, idx);
+    }
 
-fn find_base_tile(map: &WorldConfig, team_id: u8) -> Option<GridPos> {
-    use crate::world::config::TileKind;
-    map.fixed.iter().find_map(|f| {
-        let matches = match f.tile {
-            TileKind::BaseRed  | TileKind::Base => team_id == 0,
-            TileKind::BaseBlue                  => team_id == 1,
-            _                                   => false,
-        };
-        if matches { Some(GridPos::new(f.x as i32, f.y as i32)) } else { None }
-    })
+    info!("Headless restart complete — tick 0");
 }
 
 // ── App builder ───────────────────────────────────────────────────────────────
 
-fn build_headless_app() -> App {
+fn build_headless_app(config_path: String) -> App {
     let mut app = App::new();
+
+    // Inject config path BEFORE WorldPlugin runs
+    app.insert_resource(ConfigPath(config_path));
+
     app.add_plugins(MinimalPlugins);
     app.add_plugins((
         crate::world::plugin::WorldPlugin,

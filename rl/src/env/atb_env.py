@@ -1,13 +1,29 @@
+"""Gymnasium adapter around the Rust `atb.PyRlEnv` simulation.
+
+This module deliberately stays minimal: it adapts the PyO3 environment to the
+Gymnasium API and nothing more. Reward shaping, normalisation, clipping, and
+score/win accounting live in `env.wrappers`. Vectorisation lives in
+`env.factory`.
+
+Multi-agent forward-compat
+--------------------------
+`agent_id` is accepted but currently unused. When the Rust side gains
+per-agent observations, this class will be wrapped (or subclassed) by a
+PettingZoo `ParallelEnv` that constructs one `AtbEnv` per agent or queries
+a shared simulation by id. Today it is single-agent and ignores the value.
+"""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Optional
 
-import numpy as np
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 
 
 def _find_project_root() -> Path:
+    """Walk upward to find the Rust project root (contains assets/world/config.ron)."""
     here = Path(__file__).resolve()
     for parent in here.parents:
         if (parent / "assets" / "world" / "config.ron").exists():
@@ -20,16 +36,29 @@ DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config.ron")
 
 
 class AtbEnv(gym.Env):
+    """Single-agent Gymnasium adapter over `atb.PyRlEnv`."""
+
     metadata = {"render_modes": []}
 
-    def __init__(self, config_path: str = DEFAULT_CONFIG) -> None:
+    def __init__(
+        self,
+        config_path: str = DEFAULT_CONFIG,
+        *,
+        agent_id: Optional[int] = None,
+    ) -> None:
         super().__init__()
 
-        import os
-        os.chdir(PROJECT_ROOT)
+        # Resolve the config to an absolute path so we never rely on the
+        # process working directory. The previous implementation called
+        # `os.chdir(PROJECT_ROOT)` here which mutated global state and broke
+        # under SubprocVecEnv. We avoid that entirely.
+        config_path = str(Path(config_path).expanduser().resolve())
+
+        # Import lazily so unit tests that mock atb can patch it before import.
         import atb
 
         self._atb = atb
+        self._agent_id = agent_id  # reserved for future multi-agent use
         self._env = atb.PyRlEnv(config_path)
 
         obs_dim = atb.PyRlEnv.obs_dim()
@@ -47,39 +76,48 @@ class AtbEnv(gym.Env):
         self._episode_length: int = 0
         self._score: float = 0.0
 
-    def reset(self, *, seed=None, options=None):
+    # ------------------------------------------------------------------ API
+
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
         self._episode_reward = 0.0
         self._episode_length = 0
         self._score = 0.0
-        obs = np.array(self._env.reset(), dtype=np.float32)
+        obs = np.asarray(self._env.reset(), dtype=np.float32)
         return obs, {}
 
     def step(self, action: int):
         obs_raw, reward, done = self._env.step(int(action))
-        obs = np.array(obs_raw, dtype=np.float32)
+        obs = np.asarray(obs_raw, dtype=np.float32)
+        reward = float(reward)
 
-        self._episode_reward += float(reward)
+        self._episode_reward += reward
         self._episode_length += 1
+        # `score` is the cumulative positive-reward signal we surface to the
+        # logger. Negative shaping terms still affect `episode_reward`.
+        if reward > 0.0:
+            self._score += reward
 
-        score_delta = max(0.0, float(reward))
-        self._score += score_delta
+        # The Rust env exposes a single `done` flag. Without a separate
+        # truncation signal we cannot distinguish a true terminal state from
+        # a step-limit cutoff, which matters for GAE bootstrapping. Until
+        # the Rust side exposes both flags, treat `done` as termination and
+        # rely on a `gymnasium.wrappers.TimeLimit` (added in the env factory)
+        # to set `truncated` for step-limit cases.
+        terminated = bool(done)
+        truncated = False
 
-        info: dict = {
-            "score": self._score,
-            "win": 0,
-        }
-
-        if done:
+        info: dict[str, Any] = {"score": self._score, "win": 0}
+        if terminated:
             info["episode"] = {
                 "r": self._episode_reward,
                 "l": self._episode_length,
             }
 
-        return obs, reward, done, False, info
+        return obs, reward, terminated, truncated, info
 
-    def render(self):
-        pass
+    def render(self):  # pragma: no cover - no-op for headless training
+        return None
 
-    def close(self):
-        pass
+    def close(self):  # pragma: no cover - PyO3 env owns its resources
+        return None

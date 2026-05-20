@@ -1,54 +1,30 @@
+"""Training entry point. Algorithm-agnostic via the registry in `algos.py`."""
 from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import typer
 from rich.console import Console
-from stable_baselines3 import PPO
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.vec_env import VecNormalize
 
-from env.atb_env import AtbEnv
-from env.wrappers import ClipRewardWrapper, RewardScaleWrapper
+from env.factory import build_vec_env
 from model.policy import ATB_POLICY_KWARGS
-from training.callbacks import CheckpointCallback, EpisodeStatsCallback
+from training.algos import get_algo
+from training.callbacks import (
+    CheckpointCallback,
+    EntropyCoefScheduleCallback,
+    EpisodeStatsCallback,
+)
 from training.config import TrainConfig
+from training.schedules import linear_schedule
 
 console = Console()
 app = typer.Typer()
 
 _RL_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _linear_schedule(start: float, end: float) -> Callable[[float], float]:
-    def schedule(progress: float) -> float:
-        return end + progress * (start - end)
-    return schedule
-
-
-def _make_env(cfg: TrainConfig) -> gym.Env:
-    from gymnasium import Env
-    env: Env = AtbEnv(cfg.config_path)
-    if cfg.clip_reward:
-        env = ClipRewardWrapper(env, max_abs=cfg.clip_reward_max)
-    if cfg.reward_scale != 1.0:
-        env = RewardScaleWrapper(env, scale=cfg.reward_scale)
-    return Monitor(env)
-
-
-def _build_vec_env(cfg: TrainConfig) -> DummyVecEnv | VecNormalize:
-    vec_env = DummyVecEnv([lambda: _make_env(cfg)])
-    if cfg.normalize_obs or cfg.normalize_reward:
-        vec_env = VecNormalize(
-            vec_env,
-            norm_obs=cfg.normalize_obs,
-            norm_reward=cfg.normalize_reward,
-            clip_obs=10.0,
-            clip_reward=10.0,
-        )
-    return vec_env
 
 
 def _resolve_dirs(cfg: TrainConfig) -> tuple[Path, Path, Path]:
@@ -69,6 +45,8 @@ def train(
     resume: Optional[str] = typer.Option(None, "--resume"),
     device: str = typer.Option("cpu", "--device"),
     seed: int = typer.Option(42, "--seed"),
+    algo: str = typer.Option("ppo", "--algo"),
+    n_envs: int = typer.Option(1, "--n-envs"),
 ) -> None:
     cfg = TrainConfig(
         stage=stage,
@@ -76,29 +54,51 @@ def train(
         run_name=run_name,
         device=device,
         seed=seed,
+        algo=algo,
+        n_envs=n_envs,
     )
     ppo = cfg.ppo
+    algo_spec = get_algo(cfg.algo)
     run_tag = f"{run_name}_s{stage}_{int(time.time())}"
     models_dir, stats_dir, tb_dir = _resolve_dirs(cfg)
 
     console.rule(f"[bold green]ATB Training — {run_tag}")
+    console.print(f"  algo            : {cfg.algo}")
     console.print(f"  stage           : {stage}")
     console.print(f"  config          : {cfg.config_path}")
     console.print(f"  total_timesteps : {total_timesteps:,}")
+    console.print(f"  n_envs          : {n_envs}")
     console.print(f"  device          : {device}")
     console.print(f"  seed            : {seed}")
 
-    vec_env = _build_vec_env(cfg)
+    # Training vec env (may use VecNormalize in training mode).
+    vec_env = build_vec_env(cfg)
+    vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
 
-    lr_schedule = _linear_schedule(ppo.learning_rate, ppo.learning_rate_final)
-    ent_schedule = _linear_schedule(ppo.ent_coef, ppo.ent_coef_final)
+    # Separate eval env. We deep-copy the normaliser's running stats so eval
+    # sees the same input distribution but does NOT update them.
+    eval_env = build_vec_env(cfg, eval_mode=True)
+    if isinstance(eval_env, VecNormalize) and vec_normalize is not None:
+        eval_env.obs_rms = vec_normalize.obs_rms
+        eval_env.ret_rms = vec_normalize.ret_rms
+
+    # Schedules: PPO consumes lr and clip_range as callables; ent_coef needs
+    # the dedicated callback because PPO reads it as a plain float.
+    lr_schedule = linear_schedule(ppo.learning_rate, ppo.learning_rate_final)
+    clip_schedule = linear_schedule(ppo.clip_range, ppo.clip_range_final)
+    ent_schedule = linear_schedule(ppo.ent_coef, ppo.ent_coef_final)
 
     if resume:
         console.print(f"Resuming from {resume}")
-        model = PPO.load(resume, env=vec_env, device=device, tensorboard_log=str(tb_dir))
+        model = algo_spec.cls.load(
+            resume,
+            env=vec_env,
+            device=device,
+            tensorboard_log=str(tb_dir),
+        )
     else:
-        model = PPO(
-            policy="MlpPolicy",
+        model = algo_spec.cls(
+            policy=algo_spec.policy,
             env=vec_env,
             learning_rate=lr_schedule,
             n_steps=ppo.n_steps,
@@ -106,8 +106,8 @@ def train(
             n_epochs=ppo.n_epochs,
             gamma=ppo.gamma,
             gae_lambda=ppo.gae_lambda,
-            clip_range=ppo.clip_range,
-            ent_coef=ent_schedule,
+            clip_range=clip_schedule,
+            ent_coef=ppo.ent_coef,  # initial value; callback updates it
             vf_coef=ppo.vf_coef,
             max_grad_norm=ppo.max_grad_norm,
             policy_kwargs=ATB_POLICY_KWARGS,
@@ -117,9 +117,9 @@ def train(
             device=device,
         )
 
-    console.print(f"  parameters      : {sum(p.numel() for p in model.policy.parameters()):,}")
+    n_params = sum(p.numel() for p in model.policy.parameters())
+    console.print(f"  parameters      : {n_params:,}")
 
-    vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
     callbacks = [
         CheckpointCallback(
             save_freq=cfg.checkpoint_freq,
@@ -128,15 +128,34 @@ def train(
             vec_normalize=vec_normalize,
         ),
         EpisodeStatsCallback(stats_path=stats_dir / f"{run_tag}.h5"),
+        EntropyCoefScheduleCallback(
+            schedule=ent_schedule,
+            total_timesteps=total_timesteps,
+        ),
+        EvalCallback(
+            eval_env=eval_env,
+            best_model_save_path=str(models_dir / f"{run_tag}_eval_best"),
+            log_path=str(stats_dir / f"{run_tag}_eval"),
+            eval_freq=max(cfg.eval_freq // max(n_envs, 1), 1),
+            n_eval_episodes=cfg.eval_episodes,
+            deterministic=True,
+            render=False,
+        ),
     ]
 
     t0 = time.time()
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=callbacks,
-        tb_log_name=run_tag,
-        reset_num_timesteps=resume is None,
-    )
+    try:
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=callbacks,
+            tb_log_name=run_tag,
+            reset_num_timesteps=resume is None,
+        )
+    finally:
+        # Ensure envs are torn down even on Ctrl-C, otherwise SubprocVecEnv
+        # leaves worker processes around.
+        vec_env.close()
+        eval_env.close()
 
     elapsed = time.time() - t0
     console.print(f"[bold green]Done in {elapsed / 3600:.2f}h[/bold green]")

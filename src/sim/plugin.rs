@@ -1,10 +1,11 @@
 // src/sim/plugin.rs
-
 use bevy::prelude::*;
 use super::config::SimConfig;
+use super::mode::ActiveGameMode;
 use super::schedule::OnSimTick;
 use super::timer::TickTimer;
 use crate::world::config::WorldConfig;
+use crate::world::plugin::spawn_world;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SimSystems;
@@ -18,6 +19,10 @@ fn init_sim_config(
     cfg.ticks_per_second     = map.sim_speed;
     cfg.available_speeds     = map.sim_speeds.clone();
     timer.0 = Timer::from_seconds(1.0 / map.sim_speed, TimerMode::Repeating);
+}
+
+fn init_game_mode(cfg: Res<WorldConfig>, mut commands: Commands) {
+    commands.insert_resource(ActiveGameMode::from_kind(cfg.game_mode));
 }
 
 #[cfg(not(feature = "headless"))]
@@ -48,8 +53,6 @@ fn handle_input(
     }
 }
 
-// In headless mode RlEnv drives ticks directly via world.run_schedule(OnSimTick).
-// fire_sim_tick and handle_input are timer/input driven and not needed.
 #[cfg(not(feature = "headless"))]
 pub fn fire_sim_tick(world: &mut World) {
     let (paused, game_over) = {
@@ -97,7 +100,8 @@ impl Plugin for SimPlugin {
             .init_resource::<SimConfig>()
             .init_resource::<TickTimer>()
             .init_schedule(OnSimTick)
-            .add_systems(Startup, init_sim_config);
+            .add_systems(Startup, init_sim_config.after(spawn_world))
+            .add_systems(Startup, init_game_mode.after(spawn_world));
 
         #[cfg(not(feature = "headless"))]
         app

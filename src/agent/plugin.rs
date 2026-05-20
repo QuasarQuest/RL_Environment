@@ -1,8 +1,8 @@
 // src/agent/plugin.rs
-
 use bevy::prelude::*;
 use crate::sim::OnSimTick;
 use crate::team::TeamScore;
+use crate::world::plugin::spawn_world;
 use super::systems::{tick_agents, apply_actions, tick_speed_buff};
 use super::spawn::spawn_agents;
 use super::combat::{tick_attack_cooldown, resolve_combat, tick_respawn};
@@ -13,7 +13,7 @@ impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<TeamScore>()
-            .add_systems(Startup, spawn_agents)
+            .add_systems(Startup, spawn_agents.after(spawn_world))
             .add_systems(OnSimTick, (
                 tick_speed_buff,
                 tick_attack_cooldown,

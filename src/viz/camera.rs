@@ -8,10 +8,6 @@ use crate::config;
 #[derive(Component)]
 pub struct MainCamera;
 
-const ZOOM_MIN:   f32 = 0.1;
-const ZOOM_MAX:   f32 = 10.0;
-const ZOOM_SPEED: f32 = 0.08; // smaller = finer steps
-
 #[derive(Resource, Default)]
 pub struct PanState {
     dragging: bool,
@@ -27,18 +23,18 @@ pub fn spawn_camera(mut commands: Commands) {
 }
 
 pub fn fit_camera_to_grid(
-    grid:       Res<Grid>,
-    windows:    Query<&Window>,
-    mut cam:    Single<&mut Transform, With<MainCamera>>,
-    mut proj:   Single<&mut Projection, With<MainCamera>>,
+    grid:     Res<Grid>,
+    windows:  Query<&Window>,
+    mut cam:  Single<&mut Transform, With<MainCamera>>,
+    mut proj: Single<&mut Projection, With<MainCamera>>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let step      = config::TILE_SIZE + config::TILE_GAP;
-    let scale_x   = grid.width  as f32 * step / window.width()  * 1.10;
-    let scale_y   = grid.height as f32 * step / window.height() * 1.10;
+    let step    = config::TILE_SIZE + config::TILE_GAP;
+    let scale_x = grid.width  as f32 * step / window.width()  * config::CAMERA_FIT_MARGIN;
+    let scale_y = grid.height as f32 * step / window.height() * config::CAMERA_FIT_MARGIN;
 
     if let Projection::Orthographic(ref mut ortho) = **proj {
-        ortho.scale = scale_x.max(scale_y).clamp(ZOOM_MIN, ZOOM_MAX);
+        ortho.scale = scale_x.max(scale_y).clamp(config::ZOOM_MIN, config::ZOOM_MAX);
     }
     cam.translation = Vec3::ZERO;
 }
@@ -55,31 +51,28 @@ pub fn camera_controls(
     let Projection::Orthographic(ref mut ortho) = **projection else { return };
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
-    // Clamp the raw delta so one frame can never jump more than ~1 step
     let raw = match scroll.unit {
         MouseScrollUnit::Line  => scroll.delta.y,
-        MouseScrollUnit::Pixel => scroll.delta.y / 20.0, // normalise pixels
+        MouseScrollUnit::Pixel => scroll.delta.y / 20.0,
     };
-    let clamped = raw.clamp(-1.0, 1.0); // max one "tick" per frame
+    let clamped = raw.clamp(-1.0, 1.0);
 
     if clamped.abs() > f32::EPSILON {
         let old_scale = ortho.scale;
-        // Multiplicative zoom: each tick multiplies scale by a fixed factor
         let factor    = if clamped > 0.0 {
-            1.0 - ZOOM_SPEED   // scroll up   → zoom in  → smaller scale
+            1.0 - config::ZOOM_SPEED
         } else {
-            1.0 + ZOOM_SPEED   // scroll down → zoom out → larger scale
+            1.0 + config::ZOOM_SPEED
         };
-        let new_scale = (old_scale * factor).clamp(ZOOM_MIN, ZOOM_MAX);
+        let new_scale = (old_scale * factor).clamp(config::ZOOM_MIN, config::ZOOM_MAX);
 
-        // Cursor-centred: keep the world point under cursor fixed
         if let Some(cursor) = window.cursor_position() {
-            let win      = Vec2::new(window.width(), window.height());
-            let ndc      = (cursor / win - 0.5) * 2.0;
-            let world    = tf.translation.truncate()
+            let win   = Vec2::new(window.width(), window.height());
+            let ndc   = (cursor / win - 0.5) * 2.0;
+            let world = tf.translation.truncate()
                 + Vec2::new(ndc.x * win.x / 2.0 * old_scale,
                             -ndc.y * win.y / 2.0 * old_scale);
-            let new_cam  = world
+            let new_cam = world
                 - Vec2::new(ndc.x * win.x / 2.0 * new_scale,
                             -ndc.y * win.y / 2.0 * new_scale);
             tf.translation.x = new_cam.x;

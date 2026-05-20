@@ -13,7 +13,7 @@
 //   8. Flee               — hurt + enemy nearby + no health
 //   9. Roam
 
-use crate::agent::action::Action;
+use crate::agent::action::{Action, Dir};
 use crate::agent::components::GridPos;
 use crate::agent::debug::DebugDraw;
 use crate::agent::observation::Observation;
@@ -55,17 +55,37 @@ fn resolve_nav(
     nav:     &mut NavState,
 ) -> Action {
     let walkable = obs.walkability_fn();
+
     let goal = match target {
         NavTarget::Gold   => obs.nearest_item(ItemKind::Gold),
         NavTarget::Base   => obs.nearest_own_base(),
         NavTarget::Health => obs.nearest_item(ItemKind::Health),
+
+        // Flee: pick the walkable neighbour that maximises distance from the
+        // enemy. O(8), no planner needed — replanning every tick as the enemy
+        // moves would thrash the path cache and standing still is the worst
+        // possible outcome when injured.
         NavTarget::FleeFrom(enemy_pos) => {
-            let dx   = (obs.pos.x - enemy_pos.x).signum();
-            let dy   = (obs.pos.y - enemy_pos.y).signum();
-            let flee = GridPos::new(obs.pos.x + dx, obs.pos.y + dy);
-            if obs.is_walkable(flee) { Some(flee) } else { None }
+            return Dir::all().iter().copied()
+                .map(|d| {
+                    let (dx, dy) = d.delta();
+                    GridPos::new(obs.pos.x + dx, obs.pos.y + dy)
+                })
+                .filter(|&p| obs.is_walkable(p))
+                .max_by_key(|p| p.dist_sq(enemy_pos))
+                .map(|best| {
+                    // Convert best tile back to a Move action.
+                    let dx = (best.x - obs.pos.x).signum();
+                    let dy = (best.y - obs.pos.y).signum();
+                    Dir::all().iter().copied()
+                        .find(|d| d.delta() == (dx, dy))
+                        .map(Action::Move)
+                        .unwrap_or(Action::Wait)
+                })
+                .unwrap_or(Action::Wait);
         }
     };
+
     let Some(goal) = goal else { nav.reset(); return Action::Wait; };
     if nav.current_goal != Some(goal) {
         planner.set_goal(obs.pos, goal, &walkable);
@@ -90,23 +110,28 @@ fn build_tree() -> Box<dyn BtNode<Observation, BtOutput>> {
                 Status::Running
             }),
         ]),
-        // 2. Ranged attack
+        // 2. Ranged attack — evaluate dir once, store in output
         sequence(vec![
             cond(|o: &Observation| o.has_ammo() && ranged_enemy_dir(o).is_some()),
             leaf(|o: &Observation, out: &mut Option<BtOutput>| {
-                match ranged_enemy_dir(o) {
-                    Some(d) => { *out = Some(BtOutput::Direct(Action::RangedAttack(d))); Status::Running }
-                    None    => Status::Failure,
+                // ranged_enemy_dir called once here; cond already confirmed Some
+                if let Some(d) = ranged_enemy_dir(o) {
+                    *out = Some(BtOutput::Direct(Action::RangedAttack(d)));
+                    Status::Running
+                } else {
+                    Status::Failure
                 }
             }),
         ]),
-        // 3. Melee attack
+        // 3. Melee attack — evaluate dir once, store in output
         sequence(vec![
             cond(|o: &Observation| adjacent_enemy_dir(o).is_some()),
             leaf(|o: &Observation, out: &mut Option<BtOutput>| {
-                match adjacent_enemy_dir(o) {
-                    Some(d) => { *out = Some(BtOutput::Direct(Action::Attack(d))); Status::Running }
-                    None    => Status::Failure,
+                if let Some(d) = adjacent_enemy_dir(o) {
+                    *out = Some(BtOutput::Direct(Action::Attack(d)));
+                    Status::Running
+                } else {
+                    Status::Failure
                 }
             }),
         ]),
@@ -121,7 +146,7 @@ fn build_tree() -> Box<dyn BtNode<Observation, BtOutput>> {
                 Status::Running
             }),
         ]),
-        // 5. Deliver
+        // 5. Deliver — full bag, or base is closer than nearest gold
         sequence(vec![
             cond(|o: &Observation| {
                 if o.gold_carried.is_empty() { return false; }
@@ -143,7 +168,7 @@ fn build_tree() -> Box<dyn BtNode<Observation, BtOutput>> {
                 Status::Running
             }),
         ]),
-        // 7. Opportunistic heal
+        // 7. Opportunistic heal — hurt, health available, no enemy nearby
         sequence(vec![
             cond(|o: &Observation| {
                 o.needs_health()
@@ -155,7 +180,7 @@ fn build_tree() -> Box<dyn BtNode<Observation, BtOutput>> {
                 Status::Running
             }),
         ]),
-        // 8. Flee
+        // 8. Flee — hurt, enemy nearby, no health pickup available
         sequence(vec![
             cond(|o: &Observation| {
                 o.needs_health()
@@ -196,7 +221,7 @@ impl BtStrategy {
 impl DecisionStrategy for BtStrategy {
     fn name(&self) -> &'static str { "BT" }
 
-    fn decide(&mut self, obs: &Observation, _planner: &mut impl PathPlanner) -> Action {
+    fn decide(&mut self, obs: &Observation) -> Action {
         let mut out = None;
         self.tree.tick(obs, &mut out);
         match out.unwrap_or(BtOutput::Direct(Action::Wait)) {
@@ -206,7 +231,6 @@ impl DecisionStrategy for BtStrategy {
         }
     }
 
-    /// Forward to the inner planner — all draw logic lives there.
     fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> {
         self.planner.debug_draw()
     }

@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use crate::world::Grid;
 use crate::config;
-use super::grid_offset::GridOffset;
+use crate::viz::grid_offset::GridOffset;
 
 #[derive(Component)]
 pub struct TileMarker {

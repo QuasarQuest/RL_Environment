@@ -1,7 +1,7 @@
 // src/factory/display.rs
 //
-// Bridges simulation and visualization.
-// Not compiled in headless mode — viz components do not exist there.
+// Bridges simulation and visualization — assigns display components to agents.
+// Not compiled in headless mode.
 
 #![cfg(not(feature = "headless"))]
 
@@ -11,7 +11,7 @@ use crate::agent::brain::AgentBrain;
 use crate::agent::strategy::StrategyKind;
 use crate::agent::planner::PlannerKind;
 use crate::team::Team;
-use crate::world::config::{AgentConfig, WorldConfig};
+use crate::world::layout::{ResolvedAgent, ResolvedLayout};
 use crate::viz::components::{AgentInfo, AgentLabel, HidePathViz, HideRangeViz, HideViz};
 use super::AgentConfigIndex;
 
@@ -19,23 +19,25 @@ use super::AgentConfigIndex;
 
 pub fn assign_display_components(
     mut commands: Commands,
-    map:          Res<WorldConfig>,
+    layout:       Res<ResolvedLayout>,
     agents:       Query<(Entity, &AgentConfigIndex, &AgentBrain), Without<AgentLabel>>,
 ) {
+    // Count how many agents per team so we can number them (Red #1, Red #2…)
     let mut team_counters: HashMap<u8, usize> = HashMap::new();
-    let team_rank: Vec<usize> = map.agents.iter().map(|cfg| {
-        let team_id = cfg.team.unwrap_or(0) as u8;
-        let rank    = team_counters.entry(team_id).or_insert(0);
-        *rank      += 1;
+
+    // Pre-compute ranks in layout order so indexing stays stable
+    let team_ranks: Vec<usize> = layout.agents.iter().map(|a| {
+        let rank = team_counters.entry(a.team).or_insert(0);
+        *rank += 1;
         *rank
     }).collect();
 
     for (entity, AgentConfigIndex(idx), brain) in &agents {
-        let cfg   = &map.agents[*idx];
-        let team  = Team(cfg.team.unwrap_or(0) as u8);
-        let rank  = team_rank[*idx];
-        let label = agent_label(team, rank);
-        let info  = agent_info(cfg);
+        let Some(agent) = layout.agents.get(*idx) else { continue };
+        let team  = Team(agent.team);
+        let rank  = team_ranks[*idx];
+        let label = format!("{} #{}", team.name(), rank);
+        let info  = agent_info(agent);
 
         info!("Assigned display: {} [{}]", label, brain.0.name());
 
@@ -48,20 +50,16 @@ pub fn assign_display_components(
     }
 }
 
-// ── Display helpers ───────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn agent_label(team: Team, rank: usize) -> String {
-    format!("{} #{}", team.name(), rank)
-}
-
-fn agent_info(cfg: &AgentConfig) -> AgentInfo {
-    let strategy = match cfg.strategy {
+fn agent_info(agent: &ResolvedAgent) -> AgentInfo {
+    let strategy = match agent.strategy {
         StrategyKind::Fsm          => "FSM",
         StrategyKind::BehaviorTree => "Behavior Tree",
         StrategyKind::Goap         => "GOAP",
         StrategyKind::Random       => "Random",
     };
-    let planner = match cfg.planner {
+    let planner = match agent.planner {
         PlannerKind::AStar     => "A*",
         PlannerKind::DStarLite => "D* Lite",
         PlannerKind::None      => "None",

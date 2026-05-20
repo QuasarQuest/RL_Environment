@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use super::tile::Tile;
 
-#[derive(Resource, Clone)] // Added Clone here
+#[derive(Resource, Clone)]
 pub struct Grid {
     tiles:      Vec<Tile>,
     pub width:  usize,

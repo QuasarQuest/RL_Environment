@@ -1,8 +1,9 @@
 // src/world.rs
 
 pub mod coords;
-pub mod grid;
 pub mod config;
+pub mod grid;
+pub mod layout;
 pub mod plugin;
 pub mod tile;
 

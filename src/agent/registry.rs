@@ -1,26 +1,27 @@
 // src/agent/registry.rs
 //
-// Pure simulation factory: constructs AgentBehavior implementations from config.
-// No display concerns — labels, colors, and info live in src/factory/.
+// Pure simulation factory: constructs DecisionStrategy implementations
+// from config. No display concerns — labels, colors, and info live in
+// src/factory/.
 
 use crate::world::config::AgentConfig;
-use super::composition::Brain;
-use super::brain::AgentBehavior;
-use super::planner::{AStarPlanner, DStarPlanner, NoPlanner, PlannerKind};
-use super::strategy::{BtStrategy, FsmStrategy, GoapStrategy, RandomStrategy, StrategyKind};
+use super::strategy::{
+    BtStrategy, DecisionStrategy, FsmStrategy, GoapStrategy, RandomStrategy, StrategyKind,
+};
+use super::planner::PlannerKind;
 
-pub fn make_agent(cfg: &AgentConfig) -> Box<dyn AgentBehavior> {
+pub fn make_agent(cfg: &AgentConfig) -> Box<dyn DecisionStrategy> {
     match (cfg.strategy, cfg.planner) {
-        (StrategyKind::Fsm, PlannerKind::AStar)     => Box::new(Brain::new(FsmStrategy::new(), AStarPlanner::new())),
-        (StrategyKind::Fsm, PlannerKind::DStarLite) => Box::new(Brain::new(FsmStrategy::new(), DStarPlanner::new())),
-        (StrategyKind::Fsm, PlannerKind::None)      => Box::new(Brain::new(FsmStrategy::new(), NoPlanner)),
+        (StrategyKind::Fsm, PlannerKind::AStar)     => Box::new(FsmStrategy::new_astar()),
+        (StrategyKind::Fsm, PlannerKind::DStarLite) => Box::new(FsmStrategy::new_dstar()),
+        (StrategyKind::Fsm, PlannerKind::None)      => Box::new(FsmStrategy::new_astar()),
 
-        (StrategyKind::BehaviorTree, PlannerKind::DStarLite) => Box::new(Brain::new(BtStrategy::new_dstar(), NoPlanner)),
-        (StrategyKind::BehaviorTree, _)                      => Box::new(Brain::new(BtStrategy::new_astar(), NoPlanner)),
+        (StrategyKind::BehaviorTree, PlannerKind::DStarLite) => Box::new(BtStrategy::new_dstar()),
+        (StrategyKind::BehaviorTree, _)                      => Box::new(BtStrategy::new_astar()),
 
-        (StrategyKind::Goap, PlannerKind::DStarLite) => Box::new(Brain::new(GoapStrategy::new(), DStarPlanner::new())),
-        (StrategyKind::Goap, _)                      => Box::new(Brain::new(GoapStrategy::new(), AStarPlanner::new())),
+        (StrategyKind::Goap, PlannerKind::DStarLite) => Box::new(GoapStrategy::new_dstar()),
+        (StrategyKind::Goap, _)                      => Box::new(GoapStrategy::new_astar()),
 
-        (StrategyKind::Random, _) => Box::new(Brain::new(RandomStrategy, NoPlanner)),
+        (StrategyKind::Random, _) => Box::new(RandomStrategy),
     }
 }

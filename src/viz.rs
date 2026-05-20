@@ -1,15 +1,13 @@
 // src/viz.rs
-
 pub mod world;
-pub mod agent_renderer;
+pub mod renderer;
 pub mod camera;
 pub mod components;
 pub mod core_ui;
+pub mod events;
 pub mod grid_offset;
 pub mod hud;
 pub mod panels;
 pub mod plugin;
-pub mod restart;
-pub mod tile_renderer;
 
 pub use plugin::VizPlugin;

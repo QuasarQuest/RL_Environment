@@ -2,11 +2,9 @@
 
 pub mod a_star;
 pub mod d_star;
-pub mod none;
 
 pub use a_star::AStarPlanner;
 pub use d_star::DStarPlanner;
-pub use none::NoPlanner;
 
 use serde::Deserialize;
 use crate::agent::components::GridPos;

@@ -21,13 +21,14 @@ use crate::algorithm::path_planning::graph_utils::dir_to;
 use crate::world::tile::Tile;
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
+//
+// A DecisionStrategy is everything an agent needs to act. It owns its own
+// planner internally (if any), so there is no second "planner" layer in
+// the ECS. Strategies without planning (Random, Rl) simply don't store one.
 
 pub trait DecisionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
-    fn decide(&mut self, obs: &Observation, planner: &mut impl PathPlanner) -> Action;
-    /// Strategies that own their own planner (BtStrategy) override this
-    /// to expose it. All others return None — Brain falls back to its
-    /// outer planner's debug_draw().
+    fn decide(&mut self, obs: &Observation) -> Action;
     fn debug_draw(&self) -> Option<Box<dyn DebugDraw>> { None }
     fn reset(&mut self) {}
 }
@@ -65,7 +66,7 @@ pub fn ranged_enemy_dir(obs: &Observation) -> Option<Dir> {
     let mut best_dist: i32         = i32::MAX;
     for &dir in Dir::all() {
         let (dx, dy) = dir.delta();
-        for dist in 1..=crate::config::RANGED_RANGE {
+        for dist in 1..=crate::config::RANGED_RANGE as i32 {
             let check = GridPos::new(obs.pos.x + dx * dist, obs.pos.y + dy * dist);
             if obs.grid_tile(check) == Some(Tile::Obstacle) { break; }
             if obs.visible_agents().iter().any(|a| a.is_enemy(obs.team) && a.pos == check) {

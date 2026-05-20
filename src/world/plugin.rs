@@ -1,190 +1,204 @@
 // src/world/plugin.rs
+//
+// WorldPlugin — thin orchestrator.
+//
+// This file contains NO layout math. All coordinate computation lives in
+// world/layout.rs. This file only:
+//   1. Loads WorldConfig from disk
+//   2. Builds the Grid resource
+//   3. Calls layout functions to place tiles, obstacles, items
+//   4. Exposes reset functions for the headless RL restart path
 
 use bevy::prelude::*;
+use super::config::WorldConfig;
 use super::grid::Grid;
-use super::config::{WorldConfig, ObstacleKind, TileKind};
+use super::layout::{
+    self, ResolvedLayout, place_obstacles, item_configs_for_free_count,
+};
 use super::tile::Tile;
 use crate::item::Item;
-use crate::config;
+use crate::config as global;
+use crate::world::coords::GridPos;
 
-fn load_map(mut commands: Commands) {
-    let cfg = WorldConfig::load("assets/world/config.ron");
+// ── Config path resource ──────────────────────────────────────────────────────
+
+/// Injected before `WorldPlugin` runs — tells `load_map` which file to load.
+/// Defaults to the standard project-relative path.
+#[derive(Resource)]
+pub struct ConfigPath(pub String);
+
+impl Default for ConfigPath {
+    fn default() -> Self {
+        Self("assets/world/config.ron".to_owned())
+    }
+}
+
+// ── Startup systems ───────────────────────────────────────────────────────────
+
+fn load_map(path: Res<ConfigPath>, mut commands: Commands) {
+    let cfg = WorldConfig::load(&path.0);
     commands.insert_resource(Grid::new(cfg.width, cfg.height));
     commands.insert_resource(cfg);
 }
 
-fn spawn_world(
+pub fn spawn_world(
     mut commands: Commands,
-    map:          Res<WorldConfig>,
+    cfg:          Res<WorldConfig>,
     mut grid:     ResMut<Grid>,
 ) {
-    apply_fixed_tiles(&map, &mut grid);
-    regenerate_obstacles(&map, &mut grid);
-    spawn_initial_items(&mut commands, &map, &grid);
+    let mut layout = build_world_layout(&cfg, &mut grid);
+
+    // Compute item configs now that free tile count is known, store on layout
+    // so ItemPlugin::init_item_spawner can read them without recomputation.
+    let free_count = layout::count_free_tiles(&grid_to_vec(&grid));
+    layout.item_configs = item_configs_for_free_count(&cfg, free_count);
+
+    spawn_initial_items(&mut commands, &cfg, &grid, &layout);
+
+    // Store layout as a Bevy resource — agent spawner, display system,
+    // RL restart path all read from it.
+    commands.insert_resource(layout);
 }
 
-// ── Public — also called by restart ───────────────────────────────────────────
+// ── Public API — called by headless restart ───────────────────────────────────
 
-pub fn apply_fixed_tiles(map: &WorldConfig, grid: &mut Grid) {
-    // Reset everything to Free
-    for y in 0..grid.height as i32 {
-        for x in 0..grid.width as i32 {
-            grid.set(x, y, Tile::Free);
-        }
-    }
-
-    // Fixed tiles (bases)
-    for fixed in &map.fixed {
-        let tile = match fixed.tile {
-            TileKind::Free     => Tile::Free,
-            TileKind::Obstacle => Tile::Obstacle,
-            TileKind::Base     => Tile::Base(0),
-            TileKind::BaseRed  => Tile::Base(0),
-            TileKind::BaseBlue => Tile::Base(1),
-        };
-        grid.set(fixed.x as i32, fixed.y as i32, tile);
-    }
-
-    // Stamp SafeZone(team_id) in a (2*radius+1)² area around each base.
-    // radius=3 → 7×7 zone. The base centre tile stays as Tile::Base.
-    let radius = map.base_safe_radius as i32;
-    for fixed in &map.fixed {
-        let team_id = match fixed.tile {
-            TileKind::BaseRed | TileKind::Base => 0u8,
-            TileKind::BaseBlue                 => 1u8,
-            _                                  => continue,
-        };
-        let bx = fixed.x as i32;
-        let by = fixed.y as i32;
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                if dx == 0 && dy == 0 { continue; } // keep Base tile
-                let cx = bx + dx;
-                let cy = by + dy;
-                if grid.in_bounds(cx, cy) {
-                    grid.set(cx, cy, Tile::SafeZone(team_id));
-                }
-            }
-        }
-    }
+/// Rebuild the grid from scratch: fixed tiles, safe zones, obstacles.
+/// Returns the resolved layout so the caller can respawn agents/items.
+///
+/// This is the only function that should be called on episode reset —
+/// it is guaranteed to leave the grid in a consistent state.
+pub fn rebuild_grid(cfg: &WorldConfig, grid: &mut Grid) -> ResolvedLayout {
+    build_world_layout(cfg, grid)
 }
 
-pub fn regenerate_obstacles(map: &WorldConfig, grid: &mut Grid) {
-    for cluster in &map.obstacle_clusters {
-        let (w, h)       = cluster.size;
-        let mut placed   = 0;
-        let mut attempts = 0;
-        while placed < cluster.count && attempts < cluster.count * 200 {
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+/// Core layout builder: clears the grid, places bases + safe zones, then
+/// places procedural obstacles.  Returns the resolved layout.
+fn build_world_layout(cfg: &WorldConfig, grid: &mut Grid) -> ResolvedLayout {
+    // 1. Clear everything to Free
+    clear_grid(grid);
+
+    // 2. Resolve bases and agent positions (no randomness needed here)
+    let layout = layout::resolve(cfg);
+
+    // 3. Place base tiles and surrounding safe zones
+    let safe_radius = cfg.safe_zone_radius();
+    for base in &layout.bases {
+        // Safe zone first so the base tile overwrites the centre
+        stamp_safe_zone(grid, base.x, base.y, base.team, safe_radius);
+        grid.set(base.x, base.y, Tile::Base(base.team));
+    }
+
+    // 4. Place procedural obstacles into a flat tile buffer, then write back
+    //    (layout::place_obstacles works on a Vec<Tile> for borrow reasons)
+    let mut tiles = grid_to_vec(grid);
+    place_obstacles(&mut tiles, cfg, &layout);
+    vec_to_grid(grid, &tiles);
+
+    layout
+}
+
+/// Spawn items proportional to free tile count after obstacle placement.
+fn spawn_initial_items(
+    commands: &mut Commands,
+    cfg:      &WorldConfig,
+    grid:     &Grid,
+    layout:   &ResolvedLayout,  // kept for future: avoid spawning on spawn points
+) {
+    let _ = layout; // currently unused, reserved for spawn-point exclusion
+    let free_count = layout::count_free_tiles(&grid_to_vec(grid));
+    let item_cfgs  = item_configs_for_free_count(cfg, free_count);
+
+    for item_cfg in &item_cfgs {
+        // Spawn `initial` items = half of max_on_map (see ItemDensityConfig)
+        let initial = (item_cfg.max_on_map / 2).max(1);
+        let mut placed   = 0usize;
+        let mut attempts = 0usize;
+
+        while placed < initial && attempts < initial * 200 {
             attempts += 1;
-            match cluster.kind {
-                ObstacleKind::Block => {
-                    let max_x = (map.width  as i32 - w as i32 - 1).max(1);
-                    let max_y = (map.height as i32 - h as i32 - 1).max(1);
-                    let ox = rand::random_range(1..max_x);
-                    let oy = rand::random_range(1..max_y);
-                    if footprint_is_free(grid, ox, oy, w as i32, h as i32) {
-                        for dy in 0..h as i32 {
-                            for dx in 0..w as i32 {
-                                grid.set(ox + dx, oy + dy, Tile::Obstacle);
-                            }
-                        }
-                        placed += 1;
-                    }
-                }
-                ObstacleKind::Wall => {
-                    let length     = w as i32;
-                    let ox         = rand::random_range(1..map.width  as i32 - length - 1);
-                    let oy         = rand::random_range(1..map.height as i32 - 2);
-                    let horizontal = rand::random_range(0..2) == 0;
-                    let (ex, ey)   = if horizontal { (ox + length, oy) } else { (ox, oy + length) };
-                    if !grid.in_bounds(ex, ey) { continue; }
-                    let clear = if horizontal {
-                        (ox..=ox+length).all(|x| grid.get(x, oy) == Some(Tile::Free))
-                    } else {
-                        (oy..=oy+length).all(|y| grid.get(ox, y) == Some(Tile::Free))
-                    };
-                    if clear {
-                        if horizontal {
-                            for x in ox..=ox+length { grid.set(x, oy, Tile::Obstacle); }
-                        } else {
-                            for y in oy..=oy+length { grid.set(ox, y, Tile::Obstacle); }
-                        }
-                        placed += 1;
-                    }
-                }
-                ObstacleKind::Scatter => {
-                    let x = rand::random_range(1..map.width  as i32 - 1);
-                    let y = rand::random_range(1..map.height as i32 - 1);
-                    if grid.get(x, y) == Some(Tile::Free) {
-                        grid.set(x, y, Tile::Obstacle);
-                        placed += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    // Clear spawn perimeters
-    const SPAWN_CLEAR_RADIUS: i32 = 2;
-    for agent_cfg in &map.agents {
-        for dy in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
-            for dx in -SPAWN_CLEAR_RADIUS..=SPAWN_CLEAR_RADIUS {
-                let cx = agent_cfg.x + dx;
-                let cy = agent_cfg.y + dy;
-                if grid.in_bounds(cx, cy) && grid.get(cx, cy) == Some(Tile::Obstacle) {
-                    grid.set(cx, cy, Tile::Free);
-                }
-            }
-        }
-    }
-}
-
-pub fn spawn_initial_items(commands: &mut Commands, map: &WorldConfig, grid: &Grid) {
-    for spawner_cfg in &map.item_spawners {
-        if spawner_cfg.initial == 0 { continue; }
-        let Some(cfg) = spawner_cfg.to_config() else { continue };
-        let mut placed   = 0;
-        let mut attempts = 0;
-        while placed < spawner_cfg.initial && attempts < spawner_cfg.initial * 100 {
-            attempts += 1;
-            let x = rand::random_range(0..map.width  as i32);
-            let y = rand::random_range(0..map.height as i32);
-            // Only Free tiles — not SafeZone or Base
+            let x = rand::random_range(0..cfg.width  as i32);
+            let y = rand::random_range(0..cfg.height as i32);
             if grid.get(x, y) == Some(Tile::Free) {
-                let pos = crate::world::coords::GridPos::new(x, y);
+                let pos = GridPos::new(x, y);
                 commands.spawn((
-                    Item { kind: cfg.kind },
+                    Item { kind: item_cfg.kind },
                     pos,
                     Sprite {
-                        color:       cfg.kind.color(),
-                        custom_size: Some(Vec2::splat(config::TILE_SIZE * 0.6)),
+                        color:       item_cfg.kind.color(),
+                        custom_size: Some(Vec2::splat(global::TILE_SIZE * 0.6)),
                         ..default()
                     },
-                    Transform::from_xyz(0.0, 0.0, cfg.kind.z_layer()),
+                    Transform::from_xyz(0.0, 0.0, item_cfg.kind.z_layer()),
                     Visibility::default(),
                 ));
                 placed += 1;
             }
         }
     }
+
+    // Rebuild the free tile pool resource so the item spawner stays accurate.
+    // (FreeTilePool is rebuilt by the RL restart path too — keep in sync.)
 }
 
-/// A footprint can only be placed on Tile::Free — never SafeZone or Base.
-fn footprint_is_free(grid: &Grid, ox: i32, oy: i32, w: i32, h: i32) -> bool {
-    for dy in 0..h {
-        for dx in 0..w {
-            if grid.get(ox + dx, oy + dy) != Some(Tile::Free) { return false; }
+fn stamp_safe_zone(grid: &mut Grid, bx: i32, by: i32, team: u8, radius: i32) {
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx == 0 && dy == 0 { continue; } // base tile stamped separately
+            let cx = bx + dx;
+            let cy = by + dy;
+            if grid.in_bounds(cx, cy) {
+                // Only overwrite Free — don't clobber another team's base/safe zone
+                if grid.get(cx, cy) == Some(Tile::Free) {
+                    grid.set(cx, cy, Tile::SafeZone(team));
+                }
+            }
         }
     }
-    true
 }
+
+fn clear_grid(grid: &mut Grid) {
+    for y in 0..grid.height as i32 {
+        for x in 0..grid.width as i32 {
+            grid.set(x, y, Tile::Free);
+        }
+    }
+}
+
+// ── Grid ↔ Vec<Tile> helpers ─────────────────────────────────────────────────
+// layout::place_obstacles mutates a Vec<Tile> (avoids borrowing Grid twice).
+// These two functions bridge the gap cheaply.
+
+fn grid_to_vec(grid: &Grid) -> Vec<Tile> {
+    (0..grid.height).flat_map(|y| {
+        (0..grid.width).map(move |x| {
+            grid.get(x as i32, y as i32).unwrap_or(Tile::Free)
+        })
+    }).collect()
+}
+
+fn vec_to_grid(grid: &mut Grid, tiles: &[Tile]) {
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            grid.set(x as i32, y as i32, tiles[y * grid.width + x]);
+        }
+    }
+}
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
+        // Insert default config path if the caller hasn't set one.
+        if !app.world().contains_resource::<ConfigPath>() {
+            app.init_resource::<ConfigPath>();
+        }
         app
             .add_systems(PreStartup, load_map)
-            .add_systems(Startup, spawn_world);
+            .add_systems(Startup,    spawn_world);
     }
 }

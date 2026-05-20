@@ -89,8 +89,8 @@ pub fn build_obs(world: &mut World) -> Vec<f32> {
             w,
             h,
             diagonal:     (w * w + h * h).sqrt(),
-            melee_range:  r.melee_range,
-            ranged_range: r.ranged_range,
+            melee_range:  r.melee_range as i32,
+            ranged_range: r.ranged_range as i32,
         }
     };
     let sim = {

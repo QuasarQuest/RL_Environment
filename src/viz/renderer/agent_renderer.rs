@@ -18,7 +18,7 @@
 
 use bevy::prelude::*;
 use crate::world::coords::GridPos;
-use super::grid_offset::GridOffset;
+use crate::viz::grid_offset::GridOffset;
 
 /// Syncs GridPos → world Transform every frame.
 pub fn sync_agent_transforms(
