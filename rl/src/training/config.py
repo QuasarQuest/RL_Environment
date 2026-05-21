@@ -1,15 +1,14 @@
-"""Training and tuning configuration dataclasses.
+"""Structured config schemas for Hydra.
 
-These are the *only* place to define defaults. `train.py` and `tune.py`
-construct them and never duplicate values.
+Dataclasses define *types and structure only* — no hardcoded defaults.
+All values live in ``configs/*.yaml``. Hydra populates these at runtime.
 
-Observation normalisation note
-------------------------------
-`normalize_obs` defaults to False because our CNN observations are already
-in [0, 1] with semantic per-channel meaning (binary masks, broadcast
-indicator planes). Running them through `VecNormalize`'s running-mean
-subtraction would destroy that semantics. Re-enable only if returning to
-the legacy flat-vector observation.
+Adding a new algorithm
+-----------------------
+1. Add a ``FooConfig`` dataclass here.
+2. Register it in ``ConfigStore`` below.
+3. Add ``configs/foo/default.yaml``.
+4. Wire it into ``algos.py``.
 """
 from __future__ import annotations
 
@@ -17,112 +16,99 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING
+
 from env.atb_env import PROJECT_ROOT
 
 
-def stage_config_path(stage: int) -> str:
-    """Resolve `assets/world/config_stage{N}.ron` with a useful error message.
-
-    Stage support is currently unused (stage=1 falls back to config.ron) —
-    kept so curriculum staging can be added without touching this signature.
-    """
+def resolve_config_path(stage: int) -> str:
+    """Return the absolute path to the Bevy world config for *stage*."""
     if stage <= 1:
-        # No staged config yet — use the canonical single config.
         path = PROJECT_ROOT / "assets" / "world" / "config.ron"
-        if not path.exists():
-            raise FileNotFoundError(f"No world config: {path}")
-        return str(path)
-    path = PROJECT_ROOT / "assets" / "world" / f"config_stage{stage}.ron"
+    else:
+        path = PROJECT_ROOT / "assets" / "world" / f"config_stage{stage}.ron"
     if not path.exists():
-        raise FileNotFoundError(f"No config for stage {stage}: {path}")
+        raise FileNotFoundError(f"World config not found for stage {stage}: {path}")
     return str(path)
 
 
 # ---------------------------------------------------------------------------
-# PPO hyperparameters
+# Sub-configs
 # ---------------------------------------------------------------------------
+
 @dataclass
 class PpoConfig:
-    """PPO hyperparameters.
-
-    `*_final` fields are the end-of-training values for linear schedules; if
-    a `*_final` equals its base counterpart, the schedule degenerates to a
-    constant (handled in `schedules.linear_schedule`).
-    """
-
-    n_steps: int = 128
-    batch_size: int = 256
-    n_epochs: int = 10
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
-
-    # Scheduled fields.
-    learning_rate: float = 3e-4
-    learning_rate_final: float = 1e-5
-    clip_range: float = 0.2
-    clip_range_final: float = 0.2  # constant by default
-    ent_coef: float = 0.05
-    ent_coef_final: float = 0.005
-
-    vf_coef: float = 0.5
-    max_grad_norm: float = 0.5
+    n_steps: int = MISSING
+    batch_size: int = MISSING
+    n_epochs: int = MISSING
+    gamma: float = MISSING
+    gae_lambda: float = MISSING
+    learning_rate: float = MISSING
+    learning_rate_final: float = MISSING
+    clip_range: float = MISSING
+    clip_range_final: float = MISSING
+    ent_coef: float = MISSING
+    ent_coef_final: float = MISSING
+    vf_coef: float = MISSING
+    max_grad_norm: float = MISSING
+    target_kl: float = MISSING
 
 
-# ---------------------------------------------------------------------------
-# Training-loop configuration
-# ---------------------------------------------------------------------------
 @dataclass
-class TrainConfig:
-    # Identity / stage.
-    stage: int = 1
-    run_name: str = "run"
-    algo: str = "ppo"
-
-    # Budget.
-    total_timesteps: int = 2_000_000
-    checkpoint_freq: int = 50_000
-    eval_freq: int = 50_000
-    eval_episodes: int = 10
-
-    # Output directories (relative to the `rl/` package root).
-    models_dir: Path = Path("runs/models")
-    stats_dir: Path = Path("runs/stats")
-    tensorboard_dir: Path = Path("runs/tensorboard")
-
-    # Env wrappers.
-    n_envs: int = 16
+class EnvConfig:
+    stage: int = MISSING
+    n_envs: int = MISSING
+    seed: Optional[int] = None          # moved here from TrainConfig
     max_episode_steps: Optional[int] = None
-    clip_reward: bool = True
-    clip_reward_max: float = 10.0
-    reward_scale: float = 1.0
-    # See module docstring: CNN obs are already in [0, 1].
-    normalize_obs: bool = False
-    normalize_reward: bool = True
-
-    # Algo hyperparameters. Only one of these will be active at a time;
-    # when more algos are added, swap `ppo` for an `algo_config` union or a
-    # registry-driven loader.
-    ppo: PpoConfig = field(default_factory=PpoConfig)
-
-    # Runtime.
-    device: str = "auto"
-    seed: Optional[int] = 42
+    clip_reward: bool = MISSING
+    clip_reward_max: float = MISSING
+    reward_scale: float = MISSING
+    normalize_obs: bool = MISSING
+    normalize_reward: bool = MISSING
 
     @property
     def config_path(self) -> str:
-        return stage_config_path(self.stage)
+        return resolve_config_path(self.stage)
+
+
+@dataclass
+class TrainConfig:
+    run_name: str = MISSING
+    algo: str = MISSING
+    total_timesteps: int = MISSING
+    checkpoint_freq: int = MISSING
+    eval_freq: int = MISSING
+    eval_episodes: int = MISSING
+    models_dir: str = MISSING
+    stats_dir: str = MISSING
+    tensorboard_dir: str = MISSING
+    device: str = MISSING
+    resume: Optional[str] = None        # optional resume path
 
 
 # ---------------------------------------------------------------------------
-# Optuna search space
+# Root config
 # ---------------------------------------------------------------------------
+
+@dataclass
+class ATBConfig:
+    """Root structured config. Hydra composes this from YAML groups."""
+    train: TrainConfig = MISSING
+    ppo: PpoConfig = MISSING
+    env: EnvConfig = MISSING
+
+
+# ---------------------------------------------------------------------------
+# Optuna search space — one per algorithm, tune.py only, not Hydra-driven
+# ---------------------------------------------------------------------------
+
 @dataclass
 class TuneConfig:
     n_trials: int = 50
     n_timesteps: int = 500_000
     stage: int = 1
     pruning: bool = True
-
     lr_min: float = 1e-5
     lr_max: float = 5e-4
     clip_range_min: float = 0.1
@@ -133,5 +119,17 @@ class TuneConfig:
     gamma_max: float = 0.999
     gae_lambda_min: float = 0.9
     gae_lambda_max: float = 0.99
-    batch_size_opts: list[int] = field(default_factory=lambda: [100, 200, 500])
-    n_epochs_opts: list[int] = field(default_factory=lambda: [5, 10, 15])
+    batch_size_opts: list = field(default_factory=lambda: [256, 512, 1024])
+    n_epochs_opts: list = field(default_factory=lambda: [5, 10, 15])
+
+
+# ---------------------------------------------------------------------------
+# ConfigStore registration
+# ---------------------------------------------------------------------------
+
+def register_configs() -> None:
+    """Call once at process startup (done in train.py / tune.py)."""
+    cs = ConfigStore.instance()
+    cs.store(name="atb_config", node=ATBConfig)
+    cs.store(group="ppo", name="schema", node=PpoConfig)
+    cs.store(group="env", name="schema", node=EnvConfig)

@@ -24,9 +24,9 @@ class _PolicyWrapper(torch.nn.Module):
         self.policy = policy
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        features = self.policy.extract_features(obs, self.policy.pi_features_extractor)
-        latent = self.policy.mlp_extractor.forward_actor(features)
-        return self.policy.action_net(latent)
+        features = self.policy.extract_features(obs, self.policy.pi_features_extractor)  # type: ignore[arg-type]
+        latent = self.policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
+        return self.policy.action_net(latent)  # type: ignore[return-value]
 
 
 @app.command()
@@ -44,17 +44,17 @@ def export_onnx(
     policy = PPO.load(str(model_path)).policy
     policy.eval()  # critical: LayerNorm/BatchNorm in inference mode
 
-    obs_dim = policy.observation_space.shape[0]
+    obs_shape = policy.observation_space.shape  # (C, H, W) for CNN, (D,) for MLP
+    assert obs_shape is not None, "observation_space.shape must not be None"
     wrapper = _PolicyWrapper(policy)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use a non-zero dummy input so we exercise the LayerNorm code path
-    # rather than the degenerate all-zeros case.
-    dummy = torch.randn(1, obs_dim, dtype=torch.float32)
+    # Non-zero dummy so LayerNorm / BatchNorm code paths are exercised.
+    dummy = torch.randn(1, *obs_shape, dtype=torch.float32)
 
     torch.onnx.export(
         wrapper,
-        dummy,
+        (dummy,),
         str(out_path),
         opset_version=opset,
         input_names=["obs"],
@@ -66,8 +66,8 @@ def export_onnx(
     onnx.checker.check_model(onnx.load(str(out_path)))
 
     # Cross-check against PyTorch on a fresh random batch.
-    obs_np = np.random.RandomState(0).randn(4, obs_dim).astype(np.float32)
-    onnx_out = ort.InferenceSession(str(out_path)).run(["logits"], {"obs": obs_np})[0]
+    obs_np = np.random.RandomState(0).randn(4, *obs_shape).astype(np.float32)
+    onnx_out = np.array(ort.InferenceSession(str(out_path)).run(["logits"], {"obs": obs_np})[0])
     with torch.no_grad():
         torch_out = wrapper(torch.from_numpy(obs_np)).numpy()
 

@@ -1,0 +1,14 @@
+# @package ppo
+# Aggressive PPO profile — higher LR, more exploration.
+# Use when starting a new curriculum stage from scratch.
+# CLI: atb-train ppo=aggressive
+
+defaults:
+  - default
+
+# Overrides only what changes.
+learning_rate: 3e-4
+learning_rate_final: 1e-5
+ent_coef: 0.1
+ent_coef_final: 0.01
+target_kl: 0.03

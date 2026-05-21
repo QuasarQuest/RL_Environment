@@ -11,15 +11,12 @@ Columns produced by `EpisodeStatsCallback`:
     episode_length  : number of env steps in the episode
     score           : env-defined score signal at episode end
     win             : 0/1 (env-defined win condition)
-
-The file currently used to be called `logger.py` and only had two helpers.
-This is the replacement.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 import h5py
 import numpy as np
@@ -174,62 +171,6 @@ def bin_by_step(
 
 
 # ---------------------------------------------------------------------------
-# Plotting (optional dependency: matplotlib)
-# ---------------------------------------------------------------------------
-def plot_reward(
-    df: pd.DataFrame,
-    window: int = 100,
-    title: str = "Episode reward",
-    ax=None,
-):
-    """Plot raw episode reward plus a rolling-mean line.
-
-    Returns the matplotlib `Axes`. Importing matplotlib is deferred so this
-    module stays usable in headless test environments.
-    """
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(10, 4))
-
-    ax.plot(df["timestep"], df["episode_reward"], alpha=0.25, label="raw")
-    rolled = df["episode_reward"].rolling(window, min_periods=1).mean()
-    ax.plot(df["timestep"], rolled, label=f"rolling-{window} mean")
-    ax.set_xlabel("env step")
-    ax.set_ylabel("episode reward")
-    ax.set_title(title)
-    ax.legend(loc="best")
-    ax.grid(alpha=0.3)
-    return ax
-
-
-def plot_runs(
-    paths: Iterable[str | Path],
-    window: int = 100,
-    metric: str = "episode_reward",
-    ax=None,
-):
-    """Overlay rolling means from multiple runs for side-by-side comparison."""
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(10, 4))
-
-    for p in paths:
-        p = Path(p)
-        df = read_stats(p)
-        rolled = df[metric].rolling(window, min_periods=1).mean()
-        ax.plot(df["timestep"], rolled, label=p.stem)
-
-    ax.set_xlabel("env step")
-    ax.set_ylabel(f"{metric} (rolling-{window} mean)")
-    ax.set_title(f"Run comparison: {metric}")
-    ax.legend(loc="best", fontsize=8)
-    ax.grid(alpha=0.3)
-    return ax
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 try:
@@ -278,45 +219,6 @@ try:
                 cells.append(f"{v:.3f}" if isinstance(v, float) else str(v))
             table.add_row(*cells)
         _console.print(table)
-
-    @app.command()
-    def plot(
-        path: Path = typer.Argument(..., exists=True),
-        window: int = typer.Option(100, "--window"),
-        out: Optional[Path] = typer.Option(None, "--out", help="Save PNG instead of showing"),
-    ) -> None:
-        """Plot reward for a single run."""
-        import matplotlib.pyplot as plt
-
-        df = read_stats(path)
-        plot_reward(df, window=window, title=path.stem)
-        if out is not None:
-            plt.savefig(out, dpi=120, bbox_inches="tight")
-            _console.print(f"saved → {out}")
-        else:
-            plt.show()
-
-    @app.command(name="plot-runs")
-    def plot_runs_cmd(
-        stats_dir: Path = typer.Argument(..., exists=True),
-        window: int = typer.Option(100, "--window"),
-        metric: str = typer.Option("episode_reward", "--metric"),
-        pattern: str = typer.Option("*.h5", "--pattern"),
-        out: Optional[Path] = typer.Option(None, "--out"),
-    ) -> None:
-        """Overlay rolling means from all runs in a directory."""
-        import matplotlib.pyplot as plt
-
-        paths = discover_runs(stats_dir, pattern)
-        if not paths:
-            _console.print(f"[yellow]No runs matching {pattern}[/yellow]")
-            raise typer.Exit(code=1)
-        plot_runs(paths, window=window, metric=metric)
-        if out is not None:
-            plt.savefig(out, dpi=120, bbox_inches="tight")
-            _console.print(f"saved → {out}")
-        else:
-            plt.show()
 
     if __name__ == "__main__":
         app()

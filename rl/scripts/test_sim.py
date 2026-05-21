@@ -1,4 +1,4 @@
-# rl/src/test_sim.py
+# rl/scripts/test_sim.py
 #
 # Smoke-test for the full Rust → Python (atb / PyRlEnv) pipeline.
 #
@@ -18,8 +18,7 @@
 #   8. Ten random actions exercise the full action space without raising.
 #
 # Run with:
-#   python -m test_sim          # from rl/src/
-#   python rl/src/test_sim.py   # from the project root
+#   python scripts/test_sim.py   # from rl/
 
 from __future__ import annotations
 
@@ -76,10 +75,10 @@ class EnvConfig:
 
 class ObsChannel(IntEnum):
     """Indices into the C dimension of the (C, H, W) observation tensor."""
-    OOB      = 0
+    OOB = 0
     OWN_BASE = 1
-    GOLD     = 2
-    SELF     = 3
+    GOLD = 2
+    SELF = 3
     CARRYING = 4
 
 
@@ -198,8 +197,8 @@ def test_static_metadata() -> tuple[tuple[int, int, int], int, int]:
     Returns ``(shape, obs_dim, action_size)`` for downstream use.
     """
     shape: tuple[int, int, int] = atb.PyRlEnv.obs_shape()  # type: ignore[attr-defined]
-    obs_dim: int                = atb.PyRlEnv.obs_dim()     # type: ignore[attr-defined]
-    action_size: int            = atb.PyRlEnv.action_size() # type: ignore[attr-defined]
+    obs_dim: int = atb.PyRlEnv.obs_dim()  # type: ignore[attr-defined]
+    action_size: int = atb.PyRlEnv.action_size()  # type: ignore[attr-defined]
 
     log.info("obs_shape   = %s", shape)
     log.info("obs_dim     = %d  (C*H*W = %d)", obs_dim, shape[0] * shape[1] * shape[2])

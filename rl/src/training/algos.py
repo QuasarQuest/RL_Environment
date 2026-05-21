@@ -21,7 +21,7 @@ flat-vector pipeline requires:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol, Type, runtime_checkable
 
 import torch as th
@@ -59,14 +59,13 @@ class SB3AlgoConstructor(Protocol):
 
 @dataclass
 class AlgoSpec:
-    """Static description of an RL algorithm and its defaults."""
+    """Static description of an RL algorithm."""
 
     name: str
     cls: Type[BaseAlgorithm]
     policy: str
     supports_discrete: bool
     supports_continuous: bool
-    default_kwargs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def constructor(self) -> SB3AlgoConstructor:
@@ -91,18 +90,6 @@ PPO_SPEC = AlgoSpec(
     policy="CnnPolicy",
     supports_discrete=True,
     supports_continuous=True,
-    default_kwargs={
-        "n_steps": 2_000,
-        "batch_size": 200,
-        "n_epochs": 10,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "clip_range": 0.2,
-        "ent_coef": 0.05,
-        "vf_coef": 0.5,
-        "learning_rate": 3e-4,
-        "max_grad_norm": 0.5,
-    },
 )
 
 

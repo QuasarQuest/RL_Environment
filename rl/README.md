@@ -1,73 +1,65 @@
-# ATB — RL Training Pipeline
+# ATB RL
 
-## Structure
-
-```
-rl/
-├── src/
-│   ├── env/
-│   │   ├── atb_env.py      # Gymnasium wrapper around Rust sim
-│   │   └── wrappers.py     # Reward scaling, clipping
-│   ├── model/
-│   │   ├── policy.py       # MLP architecture + policy kwargs
-│   │   └── export.py       # ONNX export for Rust inference
-│   ├── training/
-│   │   ├── config.py       # All hyperparameters
-│   │   ├── train.py        # PPO entry point
-│   │   ├── tune.py         # Optuna hyperparameter search
-│   │   └── callbacks.py    # Checkpointing + HDF5/TB stat logging
-│   └── utils/
-│       └── logger.py       # Read HDF5 stats into Pandas
-├── runs/                   # gitignored
-│   ├── models/             # .zip checkpoints + .onnx exports
-│   ├── stats/              # HDF5 episode stats + Optuna DB
-│   └── tensorboard/        # TensorBoard event files
-└── pyproject.toml
-```
+Reinforcement learning pipeline for Algorithm Test Bed. PPO via Stable-Baselines3, Hydra config, HDF5 stats.
 
 ## Setup
 
 ```bash
-cd rl
-python -m venv .venv
-source .venv/bin/activate
-pip install maturin[patchelf]
-pip install stable-baselines3[extra] optuna optuna-integration h5py onnx onnxruntime rich typer pandas
-cd ..
-maturin develop --release --features python
+cd rl/
+pip install -e .
 ```
+
+Run all commands from `rl/`.
 
 ## Train
 
 ```bash
-python -m src.training.train
-python -m src.training.train --total-timesteps 5000000 --run-name exp1
-python -m src.training.train --resume runs/models/run_best.zip
+atb-train                                              # defaults: ppo, stage1, 2M steps
+atb-train train.total_timesteps=5000000                # override a value
+atb-train ppo=aggressive                               # swap PPO profile
+atb-train ppo=aggressive env=stage2                    # aggressive + stage 2
+atb-train +train.resume=runs/models/run_s1_XYZ_final  # resume
+atb-train --multirun ppo.learning_rate=1e-4,3e-4       # grid search
 ```
 
-## Monitor
+## Monitor (second terminal while training)
 
 ```bash
+atb-monitor runs/stats/run_s1_<timestamp>.h5
+```
+
+## Analyse
+
+```bash
+atb-stats summary runs/stats/run_s1_<timestamp>.h5   # single run numbers
+atb-stats compare runs/stats/                        # compare all runs
+atb-plot runs/stats/run_s1_<timestamp>.h5            # reward/length/score/win plots
+atb-plot runs/stats/ --compare                       # overlay all runs
 tensorboard --logdir runs/tensorboard
 ```
 
-## Tune
+## Tune (after reward signal is stable)
 
 ```bash
-python -m src.training.tune --n-trials 50 --n-timesteps 500000
+atb-tune --stage 1 --n-trials 50 --n-timesteps 500000
 ```
 
-## Export to ONNX (for Rust)
+## Export
 
 ```bash
-python -m src.model.export --model runs/models/run_best.zip --out runs/models/policy.onnx
+atb-export --model runs/models/run_s1_XYZ_final --out runs/exports/model.onnx
 ```
 
-## Analyse stats
+## Output layout
 
-```python
-from src.utils.logger import read_stats, print_summary
-print_summary("runs/stats/run_123.h5")
-df = read_stats("runs/stats/run_123.h5")
-df["episode_reward"].rolling(100).mean().plot()
 ```
+runs/
+  models/       checkpoints + final model
+  stats/        HDF5 episode data
+  tensorboard/  TensorBoard logs
+  outputs/      Hydra logs + resolved configs per run
+```
+
+## Config
+
+Configs live in `configs/`. Override anything on the CLI with `key=value` or swap a whole group with `ppo=aggressive`. To see the full resolved config for a run check `runs/outputs/`.

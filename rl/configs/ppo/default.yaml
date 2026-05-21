@@ -1,0 +1,22 @@
+# @package ppo
+# Default PPO hyperparameters.
+# These are the single source of truth — do not duplicate in code.
+
+n_steps: 1024
+batch_size: 2048
+n_epochs: 15
+gamma: 0.99
+gae_lambda: 0.95
+
+learning_rate: 1e-4
+learning_rate_final: 1e-5
+
+clip_range: 0.2
+clip_range_final: 0.2       # constant — set different value to enable schedule
+
+ent_coef: 0.05
+ent_coef_final: 0.001       # aggressive decay → exploitation
+
+vf_coef: 0.5
+max_grad_norm: 0.5
+target_kl: 0.02             # abort epoch early if KL divergence exceeds this

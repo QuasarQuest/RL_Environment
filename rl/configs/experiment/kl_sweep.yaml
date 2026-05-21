@@ -1,0 +1,16 @@
+# @package _global_
+# Example composed experiment — override groups + individual values.
+# CLI: atb-train +experiment=kl_sweep
+#
+# This composes on top of train.yaml defaults.
+
+defaults:
+  - override /ppo: aggressive
+  - override /env: stage1
+
+train:
+  total_timesteps: 1_000_000
+  run_name: kl_sweep
+
+ppo:
+  target_kl: 0.015

@@ -1,0 +1,31 @@
+# @package _global_
+# Base training configuration.
+# Override individual groups via CLI:
+#   atb-train ppo=aggressive env=stage2
+#   atb-train ++train.total_timesteps=5000000
+
+defaults:
+  - ppo: default
+  - env: stage1
+  - _self_
+
+train:
+  run_name: run
+  algo: ppo
+  total_timesteps: 5_000_000
+  checkpoint_freq: 50_000
+  eval_freq: 50_000
+  eval_episodes: 10
+  device: auto
+
+  # Output dirs (relative to rl/ root)
+  models_dir: runs/models
+  stats_dir: runs/stats
+  tensorboard_dir: runs/tensorboard
+
+hydra:
+  run:
+    dir: ${oc.env:ATB_RL_ROOT}/runs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${oc.env:ATB_RL_ROOT}/runs/outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
