@@ -205,11 +205,14 @@ class _RichWriter(KVWriter):
         elapsed = int(kv.get("time/time_elapsed", 0))
 
         # elapsed == 0 means this dump came from EvalCallback, not the main
-        # training loop — time/* keys are absent. Skip the separator so eval
-        # output flows inline without a misleading all-zero time table.
-        is_eval_dump = elapsed == 0 and itr == 0
-        if not is_eval_dump:
-            self._console.rule(style="dim")
+        # training loop. EvalCallback flushes leftover train/* metrics from the
+        # previous iteration alongside its own eval/* keys — showing them here
+        # is misleading. SB3 already prints eval results to stdout, so we skip
+        # the entire write for eval dumps.
+        if elapsed == 0 and itr == 0:
+            return
+
+        self._console.rule(style="dim")
 
         game_keys = [
             ("ep_reward",  "game/episode_reward"),
@@ -238,15 +241,12 @@ class _RichWriter(KVWriter):
         game_rows = [(lbl, _fmt(kv[key])) for lbl, key in game_keys if key in kv]
         train_rows = [(lbl, _fmt(kv[key])) for lbl, key in train_keys if key in kv]
 
-        tables = []
-        if not is_eval_dump:
-            tables.append(_kv("time", time_rows))
+        tables = [_kv("time", time_rows)]
         if game_rows:
             tables.append(_kv("game", game_rows))
         if train_rows:
             tables.append(_kv("train", train_rows))
-        if tables:
-            self._console.print(Columns(tables, equal=False, expand=False))
+        self._console.print(Columns(tables, equal=False, expand=False))
 
     def close(self) -> None:
         pass

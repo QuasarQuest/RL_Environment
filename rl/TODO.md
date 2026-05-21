@@ -117,3 +117,6 @@ new wrapper transparently.
 
 Do after reward shaping is confirmed working — no point optimizing the
 pipeline before the policy converges.
+
+
+CHANGE THE GITIGNORE IT INGNORES env
