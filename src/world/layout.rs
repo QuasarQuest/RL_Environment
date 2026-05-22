@@ -1,26 +1,14 @@
 // src/world/layout.rs
 //
-// Layout resolution — converts declarative WorldConfig into concrete tile
-// coordinates and spawn positions.
-//
-// Rules:
-//   - No Bevy types except the Resource derive (needed so ResolvedLayout
-//     can be stored as a Bevy resource for other systems to read).
-//   - All randomness uses rand::random_range — no caller-supplied RNG needed
-//     because reproducibility is handled at the config/seed level.
-//   - This module is the ONLY place that converts fractions → tile coords.
-//     world/plugin.rs calls these functions; nothing else should.
+// Converts declarative WorldConfig into concrete tile coordinates and spawn
+// positions. All fraction → tile coord resolution happens here.
 
-use bevy::prelude::Resource;
-use crate::agent::strategy::StrategyKind;
-use crate::agent::planner::PlannerKind;
-use crate::item::spawner::ItemSpawnConfig;
+use crate::item::ItemSpawnConfig;
 use super::config::{AgentConfig, ObstacleProfile, SpawnIntent, WorldConfig};
 use super::tile::Tile;
 
 // ── Resolved types ────────────────────────────────────────────────────────────
 
-/// A base that has been placed on the grid.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedBase {
     pub team: u8,
@@ -28,38 +16,28 @@ pub struct ResolvedBase {
     pub y:    i32,
 }
 
-/// An agent ready to spawn — position already resolved, strategy chosen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ResolvedAgent {
-    pub team:     u8,
-    pub x:        i32,
-    pub y:        i32,
-    pub strategy: StrategyKind,
-    pub planner:  PlannerKind,
+    pub team: u8,
+    pub x:    i32,
+    pub y:    i32,
 }
 
-/// Complete resolved layout — stored as a Bevy resource so agent spawners,
-/// the factory display system, and the RL restart path can all read it
-/// without recomputing positions.
-#[derive(Debug, Clone, Resource)]
+#[derive(Debug, Clone)]
 pub struct ResolvedLayout {
     pub bases:        Vec<ResolvedBase>,
     pub agents:       Vec<ResolvedAgent>,
-    /// Populated after obstacle placement (call item_configs_for_free_count).
     pub item_configs: Vec<ItemSpawnConfig>,
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
-/// Resolve bases and agent spawn positions. Item configs are empty — call
-/// `item_configs_for_free_count` after obstacle placement to fill them.
 pub fn resolve(cfg: &WorldConfig) -> ResolvedLayout {
     let bases  = resolve_bases(cfg);
     let agents = resolve_agents(cfg, &bases);
     ResolvedLayout { bases, agents, item_configs: Vec::new() }
 }
 
-/// Compute item spawn configs once the free tile count is known.
 pub fn item_configs_for_free_count(cfg: &WorldConfig, free_tiles: usize) -> Vec<ItemSpawnConfig> {
     cfg.item_density.to_spawn_configs(free_tiles)
 }
@@ -78,13 +56,7 @@ fn resolve_bases(cfg: &WorldConfig) -> Vec<ResolvedBase> {
 fn resolve_agents(cfg: &WorldConfig, bases: &[ResolvedBase]) -> Vec<ResolvedAgent> {
     cfg.agents.iter().map(|agent_cfg| {
         let (x, y) = resolve_spawn(cfg, agent_cfg, bases);
-        ResolvedAgent {
-            team:     agent_cfg.team,
-            x,
-            y,
-            strategy: agent_cfg.strategy,
-            planner:  agent_cfg.planner,
-        }
+        ResolvedAgent { team: agent_cfg.team, x, y }
     }).collect()
 }
 
@@ -93,10 +65,9 @@ fn resolve_spawn(cfg: &WorldConfig, agent: &AgentConfig, bases: &[ResolvedBase])
         SpawnIntent::NearBase => {
             let base = bases.iter()
                 .find(|b| b.team == agent.team)
-                .expect("resolve_spawn: no base for team — validate() should have caught this");
+                .expect("resolve_spawn: no base for team");
 
-            let offset = ((cfg.short_side() as f32) * agent.spawn_offset)
-                .round() as i32;
+            let offset = ((cfg.short_side() as f32) * agent.spawn_offset).round() as i32;
             let offset = offset.max(1);
 
             let cx = cfg.width  as i32 / 2;
@@ -116,10 +87,6 @@ fn resolve_spawn(cfg: &WorldConfig, agent: &AgentConfig, bases: &[ResolvedBase])
 
 // ── Obstacle generation ───────────────────────────────────────────────────────
 
-/// Place obstacles into `tiles` (row-major, width × height) until `density`
-/// fraction of tiles are occupied or attempts are exhausted.
-///
-/// Protected tiles (base areas, spawn perimeters) are never overwritten.
 pub fn place_obstacles(tiles: &mut Vec<Tile>, cfg: &WorldConfig, layout: &ResolvedLayout) {
     if matches!(cfg.obstacles.profile, ObstacleProfile::None) { return; }
 
@@ -135,7 +102,6 @@ pub fn place_obstacles(tiles: &mut Vec<Tile>, cfg: &WorldConfig, layout: &Resolv
 
     let idx = |x: i32, y: i32| -> usize { y as usize * cfg.width + x as usize };
 
-    // ── Protection mask ───────────────────────────────────────────────────────
     let safe_radius = cfg.safe_zone_radius();
     let mut protected = vec![false; total];
 
@@ -163,9 +129,6 @@ pub fn place_obstacles(tiles: &mut Vec<Tile>, cfg: &WorldConfig, layout: &Resolv
         }
     }
 
-    // ── Placement loop ────────────────────────────────────────────────────────
-    // Count by scanning rather than a closure so there is no immutable borrow
-    // alive when we mutate the slice.
     let max_attempts = target * 500;
     let mut attempts = 0usize;
 
@@ -248,10 +211,4 @@ fn pick_shape(profile: ObstacleProfile) -> Shape {
             _     => Shape::Scatter,
         },
     }
-}
-
-// ── Free tile count ───────────────────────────────────────────────────────────
-
-pub fn count_free_tiles(tiles: &[Tile]) -> usize {
-    tiles.iter().filter(|&&t| t == Tile::Free).count()
 }

@@ -63,3 +63,10 @@ runs/
 ## Config
 
 Configs live in `configs/`. Override anything on the CLI with `key=value` or swap a whole group with `ppo=aggressive`. To see the full resolved config for a run check `runs/outputs/`.
+
+
+## Build Rust extension
+
+```bash
+maturin develop --release --features python
+```

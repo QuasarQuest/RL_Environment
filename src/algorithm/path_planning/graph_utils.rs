@@ -1,7 +1,7 @@
 // src/algorithm/path_planning/graph_utils.rs
 
 use crate::agent::action::Dir;
-use crate::agent::components::GridPos;
+use crate::world::coords::GridPos;
 
 // ── Cost constants ────────────────────────────────────────────────────────────
 // Cardinal moves cost 10, diagonals cost 14 (~10*sqrt(2)).

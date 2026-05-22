@@ -18,12 +18,12 @@ from gymnasium.wrappers import TimeLimit
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import (
     DummyVecEnv,
-    SubprocVecEnv,
     VecEnv,
     VecNormalize,
 )
 
 from env.atb_env import AtbEnv
+from env.batch_vec_env import BatchVecEnv
 from env.wrappers import ClipRewardWrapper, RewardScaleWrapper
 from training.config import EnvConfig
 
@@ -67,15 +67,22 @@ def build_vec_env(cfg: EnvConfig, *, eval_mode: bool = False) -> VecEnv:
         When True, uses a single ``DummyVecEnv`` and sets ``VecNormalize``
         to inference mode — no running-stat updates, no reward normalisation.
     """
-    # Eval always runs as a single env — no point spinning up n_envs workers
-    # just to measure deterministic rollouts.
     n = 1 if eval_mode else cfg.n_envs
-    thunks = [make_single_env(cfg, rank=i) for i in range(n)]
 
-    if n == 1:
+    if n == 1 or eval_mode:
+        # Single env: DummyVecEnv for eval and single-env debug runs.
+        thunks = [make_single_env(cfg, rank=i) for i in range(n)]
         vec_env: VecEnv = DummyVecEnv(thunks)
     else:
-        vec_env = SubprocVecEnv(thunks, start_method="spawn")
+        # Batch env: Rayon-parallel, replaces SubprocVecEnv for training.
+        # Reward clipping/scaling are handled inside BatchVecEnv so
+        # VecNormalize sees the same scale as the single-env path.
+        vec_env = BatchVecEnv(
+            n,
+            cfg.config_path,
+            clip_reward=cfg.clip_reward_max if cfg.clip_reward else None,
+            reward_scale=cfg.reward_scale,
+        )
 
     if cfg.normalize_obs or cfg.normalize_reward:
         vec_env = VecNormalize(

@@ -1,78 +1,74 @@
 // src/rl/pyo3.rs
 //
-// PyO3 bindings — exposes RlEnv as `PyRlEnv` to Python.
+// PyO3 bindings — exposes PyBatchEnv to Python.
 //
 // Python usage:
 //
 //   import atb
-//   env = atb.PyRlEnv("assets/world/config.ron")
-//
-//   c, h, w = atb.PyRlEnv.obs_shape()       # (5, 25, 25) for the CNN obs
-//   obs_flat = env.reset()                  # list[float], len == c*h*w
-//   obs      = np.asarray(obs_flat).reshape(c, h, w)
-//
-//   obs, reward, done = env.step(4)         # action int 0..ACTION_SIZE
-//
-// The env returns a flat list rather than a 3D structure because the PyO3
-// boundary is much cleaner for Vec<f32>. The Python side reshapes it.
-// CHW ordering (channel-major) matches PyTorch's default tensor layout.
-//
-// Thread safety:
-//   PyRlEnv is not Send (Bevy App contains raw pointers). It must stay on
-//   the thread that created it. For parallel training, spawn separate
-//   Python processes each owning one PyRlEnv — do not share across threads.
+//   env = atb.PyBatchEnv(64, "assets/world/config.ron")
+//   obs_list = env.reset_all()                    # list[list[float]]
+//   obs_list, rews, dones = env.step_batch(actions)
 
 use pyo3::prelude::*;
-use super::env::{RlEnv, ACTION_SIZE, OBS_DIM, OBS_SHAPE};
+use super::batch_env::BatchEnv;
+use super::action::ACTION_SIZE;
+use super::obs::{OBS_DIM, OBS_SHAPE};
 
-// ── PyRlEnv ───────────────────────────────────────────────────────────────────
+// ── PyBatchEnv ────────────────────────────────────────────────────────────────
 
-/// Headless Bevy RL environment. One instance = one episode stream.
-#[pyclass(unsendable)]
-pub struct PyRlEnv {
-    inner: RlEnv,
+/// Rayon-parallel batch environment. Replaces SubprocVecEnv.
+#[pyclass]
+pub struct PyBatchEnv {
+    inner: BatchEnv,
 }
 
 #[pymethods]
-impl PyRlEnv {
-    /// Construct and initialise a headless simulation.
-    ///
-    /// Args:
-    ///   config_path (str): path to the RON world config file.
-    ///     Resolved by walking up from CWD, so a relative path like
-    ///     "assets/world/config.ron" works from any project subdirectory.
+impl PyBatchEnv {
     #[new]
-    pub fn new(config_path: String) -> Self {
-        Self { inner: RlEnv::new(config_path) }
+    pub fn new(n_envs: usize, config_path: String) -> Self {
+        Self { inner: BatchEnv::new(n_envs, config_path) }
     }
 
-    /// Reset to a fresh episode. Returns the initial observation as a flat
-    /// list of floats. Caller should reshape to obs_shape().
-    pub fn reset(&mut self) -> Vec<f32> {
-        self.inner.reset()
+    pub fn n_envs(&self) -> usize { self.inner.n_envs() }
+
+    pub fn reset_all(&mut self) -> Vec<Vec<f32>> {
+        self.inner.reset_all()
     }
 
-    /// Step the simulation by one tick.
-    ///
-    /// Args:
-    ///   action (int): discrete action index, 0 ≤ action < ACTION_SIZE
-    ///
-    /// Returns:
-    ///   tuple[list[float], float, bool] — (obs_flat, reward, done)
-    pub fn step(&mut self, action: u32) -> (Vec<f32>, f32, bool) {
-        self.inner.step(action)
+    pub fn reset_env(&mut self, i: usize) -> Vec<f32> {
+        self.inner.reset_env(i)
     }
 
-    /// Total floats in one observation (== C * H * W).
+    /// Step all envs. Returns (obs, rewards, dones).
+    pub fn step_batch(&mut self, actions: Vec<u32>) -> (Vec<Vec<f32>>, Vec<f32>, Vec<bool>) {
+        self.inner.step_batch(&actions)
+    }
+
+    /// Step all envs and auto-reset any that finished.
+    pub fn step_batch_auto_reset(
+        &mut self,
+        actions: Vec<u32>,
+    ) -> (Vec<Vec<f32>>, Vec<f32>, Vec<bool>) {
+        let (mut obs, rews, dones) = self.inner.step_batch(&actions);
+        for (i, &done) in dones.iter().enumerate() {
+            if done { obs[i] = self.inner.reset_env(i); }
+        }
+        (obs, rews, dones)
+    }
+
+    // ── Viewer state queries ──────────────────────────────────────────────────
+
+    pub fn grid_size(&self) -> (usize, usize)                   { self.inner.grid_size() }
+    pub fn get_tiles(&self, i: usize) -> Vec<u8>                { self.inner.get_tiles(i) }
+    pub fn get_agents(&self, i: usize) -> Vec<(i32, i32, u8, u8, u32)> { self.inner.get_agents(i) }
+    pub fn get_items(&self, i: usize) -> Vec<(i32, i32, u8)>   { self.inner.get_items(i) }
+    pub fn get_tick(&self, i: usize) -> u64                     { self.inner.get_tick(i) }
+    pub fn get_match_ticks(&self, i: usize) -> u64              { self.inner.get_match_ticks(i) }
+
     #[staticmethod]
     pub fn obs_dim() -> usize { OBS_DIM }
-
-    /// Observation tensor shape as (channels, height, width). Use this to
-    /// reshape the flat list returned by reset()/step() into a 3D array.
     #[staticmethod]
     pub fn obs_shape() -> (usize, usize, usize) { OBS_SHAPE }
-
-    /// Number of discrete actions.
     #[staticmethod]
     pub fn action_size() -> usize { ACTION_SIZE }
 }
@@ -81,6 +77,6 @@ impl PyRlEnv {
 
 #[pymodule]
 pub fn atb(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyRlEnv>()?;
+    m.add_class::<PyBatchEnv>()?;
     Ok(())
 }

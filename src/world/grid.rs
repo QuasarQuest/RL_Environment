@@ -1,9 +1,8 @@
 // src/world/grid.rs
 
-use bevy::prelude::*;
 use super::tile::Tile;
 
-#[derive(Resource, Clone)]
+#[derive(Clone)]
 pub struct Grid {
     tiles:      Vec<Tile>,
     pub width:  usize,

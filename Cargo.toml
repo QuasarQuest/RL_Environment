@@ -8,16 +8,15 @@ name = "atb"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-bevy       = { version = "0.18.1", features = ["debug"] }
 rand       = "0.10.1"
 ron        = "0.12.1"
 serde      = { version = "1.0.228", features = ["derive"] }
 rustc-hash = "2.1.2"
 pyo3       = { version = "0.28.3", features = ["extension-module"], optional = true }
+rayon      = { version = "1", optional = true }
 
 [features]
-headless = []
-python   = ["headless", "dep:pyo3"]
+python = ["dep:pyo3", "dep:rayon"]
 
 # ── Build profiles ────────────────────────────────────────────────────────────
 

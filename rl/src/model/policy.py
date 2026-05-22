@@ -59,11 +59,12 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
 
     Design notes
     ------------
-    - No pooling: 25×25 is already small, max-pooling would discard signal.
-    - 3×3 convs with padding=1 preserve spatial size, so the model can in
-      principle reason about object position across all H×W cells.
-    - The final Linear collapses the spatial map to a flat feature vector
-      that PPO's policy/value heads can consume as usual.
+    - Last conv uses stride=2 to halve spatial resolution (25→13), shrinking
+      the flatten-then-Linear bottleneck ~4× without throwing away signal —
+      the downsampling is learned, unlike average/max pool.
+    - Earlier 3×3 convs with padding=1 preserve spatial size, so the model
+      can still reason about object position at full resolution before
+      compressing.
     - The conv depth (32→64→64) is intentionally modest. With 5 input
       channels and a 25×25 footprint, a deeper stack overfits the toy task.
     """
@@ -82,7 +83,7 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1, stride=2),
             nn.ReLU(),
             nn.Flatten(),
         )

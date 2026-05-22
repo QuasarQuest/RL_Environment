@@ -262,33 +262,3 @@ pub static ACTIONS: &[Action] = &[
     },
 ];
 
-pub fn obs_to_world_state(obs: &crate::agent::observation::Observation) -> WorldState {
-    use crate::item::ItemKind;
-    use crate::world::tile::Tile;
-
-    let mut bits = 0u64;
-    let gold = obs.gold_carried.0;
-    let max  = crate::config::AGENT_MAX_GOLD;
-
-    if gold > 0        { bits |= BIT_HAS_GOLD; }
-    if gold >= max     { bits |= BIT_INVENTORY_FULL; }
-    if gold >= max / 2 { bits |= BIT_INVENTORY_HALF; }
-
-    if matches!(obs.grid_tile(obs.pos), Some(Tile::Base(t)) if t == obs.team.0) {
-        bits |= BIT_ON_OWN_BASE;
-    }
-
-    let base_dist  = obs.nearest_own_base()
-        .map(|b| obs.pos.dist_sq(b)).unwrap_or(i32::MAX);
-    let gold_dist  = obs.nearest_item(ItemKind::Gold)
-        .map(|g| obs.pos.dist_sq(g)).unwrap_or(i32::MAX);
-    let enemy_dist = obs.nearest_enemy()
-        .map(|e| obs.pos.dist_sq(e.pos)).unwrap_or(i32::MAX);
-
-    if gold_dist  < NEAR_SQ             { bits |= BIT_GOLD_NEARBY; }
-    if enemy_dist < NEAR_SQ             { bits |= BIT_ENEMY_NEARBY; }
-    if base_dist  < gold_dist           { bits |= BIT_BASE_CLOSER; }
-    if obs.hearts.0 < LOW_HEALTH_THRESH { bits |= BIT_LOW_HEALTH; }
-
-    WorldState(bits)
-}

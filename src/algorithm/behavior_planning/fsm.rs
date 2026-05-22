@@ -30,7 +30,7 @@ impl<S: FsmState> Fsm<S> {
         let from = self.state.name();
         let to   = next.name();
         if from != to {
-            bevy::log::trace!("FSM: {} → {}", from, to);
+            let _ = (from, to); // transition logged externally if needed
         }
         self.state = next;
     }

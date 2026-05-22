@@ -8,7 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use crate::agent::action::Dir;
-use crate::agent::components::GridPos;
+use crate::world::coords::GridPos;
 
 use super::graph_utils::{CARDINAL, DIAGONAL, octile};
 
