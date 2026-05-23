@@ -1,10 +1,30 @@
 # @package ppo
 # Default PPO hyperparameters.
 # These are the single source of truth — do not duplicate in code.
+#
+# n_steps / batch_size tuning notes (XPS 9500, GTX 1650 Ti, 50W TDP)
+# -------------------------------------------------------------------
+# Target: GPU utilisation 85-95%, no power throttling.
+#
+# Formula:
+#   rollout_buffer = n_envs × n_steps          (samples per update)
+#   minibatches    = rollout_buffer / batch_size
+#
+# With n_envs=48, n_steps=512, batch_size=8192:
+#   rollout_buffer = 24.576 samples
+#   minibatches    = 3 per update  → GPU well-saturated, less throttling
+#   updates/1M     = 1.000.000 / 24.576 ≈ 41 updates
+#
+# Previous values (n_steps=1024, batch_size=4096, n_envs=48):
+#   rollout_buffer = 49.152 — good data volume but only 12 minibatches
+#   GPU was at 99% / 50W and throttling core clock to 1365 MHz
+#
+# Previous values (n_steps=1024, batch_size=4096, n_envs=16):
+#   rollout_buffer = 16.384 — too small, only 4 minibatches, GPU underused
 
-n_steps: 1024
-batch_size: 1024
-n_epochs: 15
+n_steps: 512
+batch_size: 8192
+n_epochs: 8
 gamma: 0.99
 gae_lambda: 0.95
 
@@ -12,11 +32,11 @@ learning_rate: 1e-4
 learning_rate_final: 1e-5
 
 clip_range: 0.2
-clip_range_final: 0.2       # constant — set different value to enable schedule
+clip_range_final: 0.2
 
 ent_coef: 0.05
-ent_coef_final: 0.001       # aggressive decay → exploitation
+ent_coef_final: 0.001
 
 vf_coef: 0.5
 max_grad_norm: 0.5
-target_kl: 0.02             # abort epoch early if KL divergence exceeds this
+target_kl: 0.02

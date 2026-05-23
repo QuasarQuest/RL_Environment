@@ -1,0 +1,19 @@
+[package]
+name    = "algorithm_test_bed"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name       = "atb"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rand       = "0.10.1"
+ron        = "0.12.1"
+serde      = { version = "1.0.228", features = ["derive"] }
+rustc-hash = "2.1.2"
+pyo3       = { version = "0.28.3", features = ["extension-module"], optional = true }
+rayon      = { version = "1", optional = true }
+
+[features]
+python = ["dep:pyo3", "dep:rayon"]

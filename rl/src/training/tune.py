@@ -19,8 +19,8 @@ import typer
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from rich.console import Console
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
@@ -96,9 +96,6 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
     def objective(trial: optuna.Trial) -> float:
         params = _sample_ppo(trial, tune_cfg)
 
-        # Build a fresh PpoConfig with sampled values. Fields not sampled
-        # (vf_coef, max_grad_norm, n_steps) use the defaults from the YAML.
-        # For tuning we build a minimal PpoConfig directly.
         ppo_cfg = PpoConfig(
             n_steps=512,
             batch_size=params["batch_size"],
@@ -106,7 +103,7 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
             gamma=params["gamma"],
             gae_lambda=params["gae_lambda"],
             learning_rate=params["learning_rate"],
-            learning_rate_final=params["learning_rate"],   # no schedule during tuning
+            learning_rate_final=params["learning_rate"],
             clip_range=params["clip_range"],
             clip_range_final=params["clip_range"],
             ent_coef=params["ent_coef"],
@@ -147,7 +144,9 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
         try:
             callbacks = [_PruneCallback(trial)] if tune_cfg.pruning else []
             model.learn(tune_cfg.n_timesteps, callback=callbacks)
-            mean_reward, _ = evaluate_policy(model, eval_env, n_eval_episodes=5, deterministic=True)
+            mean_reward, _ = evaluate_policy(
+                model, eval_env, n_eval_episodes=10, deterministic=True
+            )
         except optuna.TrialPruned:
             raise
         except Exception as exc:
@@ -168,18 +167,21 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
 
 @app.command()
 def tune(
-    stage: int = typer.Option(1, "--stage"),
-    n_trials: int = typer.Option(50, "--n-trials"),
-    n_timesteps: int = typer.Option(500_000, "--n-timesteps"),
-    n_envs: int = typer.Option(8, "--n-envs"),
-    study_name: str = typer.Option("atb_ppo", "--study-name"),
-    device: str = typer.Option("cpu", "--device"),
-    pruning: bool = typer.Option(True, "--pruning/--no-pruning"),
-    algo: str = typer.Option("ppo", "--algo"),
+        stage: int = typer.Option(1, "--stage"),
+        n_trials: int = typer.Option(50, "--n-trials"),
+        n_timesteps: int = typer.Option(500_000, "--n-timesteps"),
+        n_envs: int = typer.Option(8, "--n-envs"),
+        study_name: str = typer.Option("atb_ppo", "--study-name"),
+        device: str = typer.Option("cpu", "--device"),
+        pruning: bool = typer.Option(True, "--pruning/--no-pruning"),
+        algo: str = typer.Option("ppo", "--algo"),
 ) -> None:
     tune_cfg = TuneConfig(n_trials=n_trials, n_timesteps=n_timesteps, stage=stage, pruning=pruning)
 
-    # Minimal env config for tuning — reward normalisation on, obs normalisation off.
+    # FIX: normalize_obs=True to match stage1.yaml — tuning with normalize_obs=False
+    # produces hyperparameters that do not transfer to training where obs
+    # normalisation is active, because the value scale seen by the policy
+    # is fundamentally different between the two runs.
     env_cfg = EnvConfig(
         stage=stage,
         n_envs=n_envs,
@@ -187,11 +189,11 @@ def tune(
         clip_reward=True,
         clip_reward_max=10.0,
         reward_scale=1.0,
-        normalize_obs=False,
+        normalize_obs=True,
         normalize_reward=True,
     )
 
-    stats_dir = _RL_ROOT / "src" / "runs" / "stats"
+    stats_dir = _RL_ROOT / "runs" / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
     db_path = stats_dir / f"optuna_{study_name}.db"
 
@@ -208,7 +210,7 @@ def tune(
         study_name=study_name,
         storage=f"sqlite:///{db_path}",
         direction="maximize",
-        sampler=TPESampler(seed=42),  # type: ignore[arg-type]  # Optuna stub gap
+        sampler=TPESampler(seed=42),  # type: ignore[arg-type]
         pruner=pruner,
         load_if_exists=True,
     )
@@ -221,4 +223,3 @@ def tune(
 
 if __name__ == "__main__":
     app()
-    

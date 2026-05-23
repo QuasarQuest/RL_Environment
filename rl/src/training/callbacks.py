@@ -5,8 +5,13 @@ Three callbacks live here:
 * `CheckpointCallback` — periodic snapshots and "rolling-best" snapshots.
   The "best" is computed over a rolling window of episode rewards rather
   than a single rollout, which prevents a lucky episode from locking in a
-  bad model. For evaluation-based best selection, prefer SB3's stock
-  `EvalCallback` (wired up in `train.py`).
+  bad model. For evaluation-based best selection, prefer `EvalWithVecNorm`
+  (defined below), which also saves the VecNormalize stats alongside the
+  best model.
+* `EvalWithVecNorm` — drop-in replacement for SB3's EvalCallback that
+  saves vec_normalize stats every time a new eval-best model is written.
+  Without this, the best model checkpoint has no matching _vecnorm.pkl and
+  cannot be loaded correctly for deployment or resume.
 * `EpisodeStatsCallback` — pulls episode info from Monitor's `infos` and
   fans them out to TensorBoard and the HDF5 stats writer.
 * `EntropyCoefScheduleCallback` — actually updates `model.ent_coef`
@@ -26,7 +31,7 @@ from rich import box
 from rich.columns import Columns
 from rich.console import Console
 from rich.table import Table
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.logger import KVWriter
 from stable_baselines3.common.vec_env import VecNormalize
 
@@ -36,22 +41,28 @@ from monitoring.stats_writer import HDF5StatsWriter
 # ---------------------------------------------------------------------------
 # Checkpointing
 # ---------------------------------------------------------------------------
+
 class CheckpointCallback(BaseCallback):
     """Save model snapshots periodically and on rolling-best reward.
 
     The rolling window protects against false "new best" events from a
     single lucky episode. For rigorous best-model tracking use
-    `EvalCallback` instead.
+    `EvalWithVecNorm` instead.
+
+    FIX: save_freq is now compared against `num_timesteps` (total env steps)
+    rather than `n_calls` (number of _on_step invocations). With n_envs=48
+    one _on_step call = 48 steps, so the old n_calls check fired ~48x too
+    often relative to the configured timestep budget.
     """
 
     def __init__(
-        self,
-        save_freq: int,
-        models_dir: Path,
-        run_name: str,
-        vec_normalize: Optional[VecNormalize] = None,
-        rolling_window: int = 100,
-        verbose: int = 1,
+            self,
+            save_freq: int,
+            models_dir: Path,
+            run_name: str,
+            vec_normalize: Optional[VecNormalize] = None,
+            rolling_window: int = 100,
+            verbose: int = 1,
     ) -> None:
         super().__init__(verbose)
         self.save_freq = save_freq
@@ -60,15 +71,16 @@ class CheckpointCallback(BaseCallback):
         self.vec_normalize = vec_normalize
         self._recent_rewards: deque[float] = deque(maxlen=rolling_window)
         self._best_mean: float = -float("inf")
+        self._last_save_step: int = 0
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
     def _on_step(self) -> bool:
-        # Periodic snapshot.
-        if self.n_calls % self.save_freq == 0:
+        # FIX: compare against num_timesteps, not n_calls, so save_freq is
+        # independent of n_envs.
+        if self.num_timesteps - self._last_save_step >= self.save_freq:
             self._save(f"step_{self.num_timesteps}")
+            self._last_save_step = self.num_timesteps
 
-        # Track rolling reward. We need enough samples for "best" to be
-        # meaningful, so we gate on a full window.
         for info in self.locals.get("infos", []):
             if "episode" in info:
                 self._recent_rewards.append(float(info["episode"]["r"]))
@@ -94,8 +106,43 @@ class CheckpointCallback(BaseCallback):
 
 
 # ---------------------------------------------------------------------------
+# EvalCallback that also saves VecNormalize stats
+# ---------------------------------------------------------------------------
+
+class EvalWithVecNorm(EvalCallback):
+    """EvalCallback subclass that saves vec_normalize alongside eval-best.
+
+    SB3's stock EvalCallback writes `best_model.zip` whenever a new best
+    mean reward is found, but never saves the matching VecNormalize stats.
+    Loading that model later (for deployment or resume) silently uses
+    freshly-initialised normalisation stats, causing the policy to receive
+    incorrectly scaled observations.
+
+    This subclass overrides `_on_step` to call `vec_normalize.save()` every
+    time the parent would write a new best model, keeping the pkl in sync.
+    """
+
+    def __init__(
+            self,
+            *args,
+            vec_normalize: Optional[VecNormalize] = None,
+            **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._vec_normalize = vec_normalize
+
+    def _on_step(self) -> bool:
+        result = super()._on_step()
+        if self._vec_normalize is not None and self.best_model_save_path is not None:
+            vecnorm_path = self.best_model_save_path + "_vecnorm.pkl"
+            self._vec_normalize.save(vecnorm_path)
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Episode stats → TensorBoard + HDF5
 # ---------------------------------------------------------------------------
+
 class EpisodeStatsCallback(BaseCallback):
     """Record per-episode stats to TensorBoard and an HDF5 file."""
 
@@ -134,6 +181,7 @@ class EpisodeStatsCallback(BaseCallback):
 # ---------------------------------------------------------------------------
 # Entropy coefficient schedule
 # ---------------------------------------------------------------------------
+
 class EntropyCoefScheduleCallback(BaseCallback):
     """Drive `model.ent_coef` along a schedule.
 
@@ -144,10 +192,10 @@ class EntropyCoefScheduleCallback(BaseCallback):
     """
 
     def __init__(
-        self,
-        schedule: Callable[[float], float],
-        total_timesteps: int,
-        verbose: int = 0,
+            self,
+            schedule: Callable[[float], float],
+            total_timesteps: int,
+            verbose: int = 0,
     ) -> None:
         super().__init__(verbose)
         self._schedule = schedule
@@ -193,43 +241,36 @@ class _RichWriter(KVWriter):
         self._console = console
 
     def write(self, key_values: dict, key_excluded: dict, step: int = 0) -> None:
-        # Don't apply key_excluded — _RichWriter is neither "stdout" nor
-        # "tensorboard", so exclusions meant for those formats apply to them,
-        # not here.  time/iterations, time/time_elapsed, etc. are excluded from
-        # tensorboard in SB3 2.8+ and would otherwise all show as 0.
         kv = dict(key_values)
 
-        steps   = int(kv.get("time/total_timesteps", step))
-        itr     = int(kv.get("time/iterations", 0))
-        fps     = int(kv.get("time/fps", 0))
+        steps = int(kv.get("time/total_timesteps", step))
+        itr = int(kv.get("time/iterations", 0))
+        fps = int(kv.get("time/fps", 0))
         elapsed = int(kv.get("time/time_elapsed", 0))
 
         # elapsed == 0 means this dump came from EvalCallback, not the main
-        # training loop. EvalCallback flushes leftover train/* metrics from the
-        # previous iteration alongside its own eval/* keys — showing them here
-        # is misleading. SB3 already prints eval results to stdout, so we skip
-        # the entire write for eval dumps.
+        # training loop. Skip to avoid duplicating eval metrics in the table.
         if elapsed == 0 and itr == 0:
             return
 
         self._console.rule(style="dim")
 
         game_keys = [
-            ("ep_reward",  "game/episode_reward"),
-            ("ep_length",  "game/episode_length"),
-            ("score",      "game/score"),
-            ("win_rate",   "game/win_rate"),
+            ("ep_reward", "game/episode_reward"),
+            ("ep_length", "game/episode_length"),
+            ("score",     "game/score"),
+            ("win_rate",  "game/win_rate"),
         ]
         train_keys = [
-            ("loss",          "train/loss"),
-            ("value_loss",    "train/value_loss"),
-            ("policy_loss",   "train/policy_gradient_loss"),
-            ("entropy_loss",  "train/entropy_loss"),
-            ("approx_kl",     "train/approx_kl"),
-            ("clip_frac",     "train/clip_fraction"),
-            ("exp_variance",  "train/explained_variance"),
-            ("lr",            "train/learning_rate"),
-            ("ent_coef",      "train/ent_coef"),
+            ("loss",         "train/loss"),
+            ("value_loss",   "train/value_loss"),
+            ("policy_loss",  "train/policy_gradient_loss"),
+            ("entropy_loss", "train/entropy_loss"),
+            ("approx_kl",    "train/approx_kl"),
+            ("clip_frac",    "train/clip_fraction"),
+            ("exp_variance", "train/explained_variance"),
+            ("lr",           "train/learning_rate"),
+            ("ent_coef",     "train/ent_coef"),
         ]
 
         time_rows = [
@@ -253,11 +294,7 @@ class _RichWriter(KVWriter):
 
 
 class RichLogCallback(BaseCallback):
-    """Injects _RichWriter into SB3's logger on training start.
-
-    Use with verbose=0 on the model so SB3 doesn't also add its own
-    HumanOutputFormat to stdout.
-    """
+    """Injects _RichWriter into SB3's logger on training start."""
 
     def __init__(self, console: Console) -> None:
         super().__init__()

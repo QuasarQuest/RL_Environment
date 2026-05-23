@@ -30,14 +30,13 @@ import time
 from pathlib import Path
 
 import hydra
+import torch.nn as nn
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
 from rich import box
 from rich.columns import Columns
 from rich.console import Console
 from rich.table import Table
-import torch.nn as nn
-from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
 
@@ -48,6 +47,7 @@ from training.callbacks import (
     CheckpointCallback,
     EntropyCoefScheduleCallback,
     EpisodeStatsCallback,
+    EvalWithVecNorm,
     RichLogCallback,
 )
 from training.config import EnvConfig, PpoConfig, TrainConfig, register_configs
@@ -81,7 +81,6 @@ def _seq_str(seq: nn.Sequential) -> str:
             parts.append(f"LN({m.normalized_shape[0]})")
         elif isinstance(m, nn.Flatten):
             parts.append("Flatten")
-        # activations omitted — they're noise at this level
     return " → ".join(parts)
 
 
@@ -101,24 +100,50 @@ def _print_arch(model) -> None:
     pi_mid = _seq_str(mlp.policy_net)
     vf_mid = _seq_str(mlp.value_net)
     pi_str = (f"{pi_mid} → " if pi_mid else "") + f"Linear(→{policy.action_net.out_features})"
-    vf_str = (f"{vf_mid} → " if vf_mid else "") + f"Linear(→1)"
+    vf_str = (f"{vf_mid} → " if vf_mid else "") + "Linear(→1)"
 
     console.print(f"  [dim]extractor[/dim]       : {extractor}")
     console.print(f"  [dim]pi[/dim]              : {pi_str}")
     console.print(f"  [dim]vf[/dim]              : {vf_str}")
 
 
-# Load secrets from .env before anything else.
-# WANDB_API_KEY, ATB_DEVICE, etc. are available via os.environ after this.
+def _sync_vecnorm_stats(
+        src: VecNormalize | None,
+        dst: VecNormalize | None,
+) -> None:
+    """Point dst's running stats at the same objects as src.
+
+    Both obs_rms and ret_rms are RunningMeanStd instances. Assigning the
+    reference (not a copy) means dst always reads the latest training stats
+    without any explicit sync call — eval always sees what the policy sees.
+
+    Called once after env construction and again after resume so the eval
+    env is never left with freshly-initialised (mean=0, var=1) statistics.
+    """
+    if src is None or dst is None:
+        return
+    dst.obs_rms = src.obs_rms
+    dst.ret_rms = src.ret_rms
+
+
+def _vecnorm_path_for(model_path: str) -> Path:
+    """Return the _vecnorm.pkl path that CheckpointCallback writes.
+
+    CheckpointCallback appends '_vecnorm.pkl' to the model stem, e.g.:
+        runs/models/run_s1_XYZ_step_100000_vecnorm.pkl
+    Path.with_suffix("") / "_vecnorm.pkl" would incorrectly create a
+    subdirectory, so we build the path with string concatenation instead.
+    """
+    stem = str(Path(model_path).with_suffix(""))
+    return Path(stem + "_vecnorm.pkl")
+
+
 load_dotenv()
 
 console = Console()
 
 _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
 
-# Expose rl/ as an env var so train.yaml can reference it in hydra.run.dir.
-# Must be set before Hydra reads the YAML, which happens after module-level
-# code runs — so this placement is correct.
 os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 
 
@@ -132,14 +157,11 @@ def _resolve_dirs(cfg: TrainConfig) -> tuple[Path, Path, Path]:
     return models, stats, tb
 
 
-# Register structured configs before Hydra initialises.
 register_configs()
 
 
 @hydra.main(config_path=str(_RL_ROOT / "configs"), config_name="train", version_base="1.3")
 def train(cfg: DictConfig) -> None:
-    # OmegaConf.to_container gives a plain dict; construct typed dataclasses
-    # explicitly so downstream code gets attribute access + the config_path property.
     raw: dict = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)  # type: ignore[assignment]
     t_cfg = TrainConfig(**raw["train"])
     p_cfg = PpoConfig(**raw["ppo"])
@@ -186,6 +208,13 @@ def train(cfg: DictConfig) -> None:
     vec_env = build_vec_env(e_cfg)
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
     eval_env = build_vec_env(e_cfg, eval_mode=True)
+    eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
+
+    # Share live running-stat references so the eval env always uses the same
+    # obs_rms/ret_rms objects as training. Without this, eval_env starts with
+    # freshly-initialised stats (mean=0, var=1) causing the agent to act
+    # randomly in eval — producing the flat -5.00 reward (pure tick penalty).
+    _sync_vecnorm_stats(vec_normalize, eval_normalize)
 
     # Schedules.
     lr_schedule = linear_schedule(p_cfg.learning_rate, p_cfg.learning_rate_final)
@@ -202,6 +231,20 @@ def train(cfg: DictConfig) -> None:
             device=t_cfg.device,
             tensorboard_log=str(tb_dir),
         )
+        # Restore VecNormalize stats from the checkpoint so the resumed run
+        # continues with the same normalisation the policy was trained on.
+        # FIX: use _vecnorm_path_for() — Path.with_suffix("") / "_vecnorm.pkl"
+        # creates a subdirectory path, not the flat file that _save() writes.
+        vn_path = _vecnorm_path_for(resume)
+        if vec_normalize is not None and vn_path.exists():
+            vec_normalize = VecNormalize.load(str(vn_path), vec_env)
+            console.print(f"  vecnorm  ← {vn_path}")
+        else:
+            if vec_normalize is not None:
+                console.print(f"  [yellow]vecnorm not found at {vn_path}, using fresh stats[/yellow]")
+        # Re-sync eval stats after potentially reloading vec_normalize.
+        eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
+        _sync_vecnorm_stats(vec_normalize, eval_normalize)
     else:
         model = algo_spec.constructor(
             policy=algo_spec.policy,
@@ -228,6 +271,8 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  parameters      : {n_params:,}")
     _print_arch(model)
 
+    eval_best_path = str(models_dir / f"{run_tag}_eval_best")
+
     callbacks = [
         CheckpointCallback(
             save_freq=t_cfg.checkpoint_freq,
@@ -241,14 +286,21 @@ def train(cfg: DictConfig) -> None:
             schedule=ent_schedule,
             total_timesteps=t_cfg.total_timesteps,
         ),
-        EvalCallback(
+        # FIX: EvalWithVecNorm saves vec_normalize alongside every eval-best
+        # model. SB3's stock EvalCallback only saves the model zip, leaving no
+        # matching _vecnorm.pkl — the best model cannot be loaded correctly
+        # for deployment or resume without the normalisation stats.
+        EvalWithVecNorm(
             eval_env=eval_env,
-            best_model_save_path=str(models_dir / f"{run_tag}_eval_best"),
+            best_model_save_path=eval_best_path,
             log_path=str(stats_dir / f"{run_tag}_eval"),
             eval_freq=max(t_cfg.eval_freq // max(e_cfg.n_envs, 1), 1),
+            # FIX: increased from 3 to 20 — with high episode variance
+            # (std ~9 in the previous run) 3 episodes give unreliable signal.
             n_eval_episodes=t_cfg.eval_episodes,
             deterministic=True,
             render=False,
+            vec_normalize=vec_normalize,
         ),
     ]
 
@@ -279,4 +331,3 @@ def train(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     train()  # type: ignore[call-arg]  # Hydra injects cfg at runtime
-

@@ -9,7 +9,7 @@
 
     // Short episodes — at 500 ticks with no enemies the agent has plenty
     // of time to find gold and return, but bad policies terminate quickly.
-    match_duration_ticks: 5000,
+    match_duration_ticks: 1000,
 
     // ── Game mode ─────────────────────────────────────────────────────────────
     game_mode: GoldRush,

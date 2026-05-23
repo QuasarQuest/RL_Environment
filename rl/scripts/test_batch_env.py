@@ -59,23 +59,28 @@ batch = atb.PyBatchEnv(N, config)
 assert batch.n_envs() == N
 ok(f"constructed {N} envs")
 
-obs_list = batch.reset_all()
-assert len(obs_list) == N, f"expected {N} obs, got {len(obs_list)}"
-for i, flat in enumerate(obs_list):
-    assert len(flat) == obs_dim, f"env {i}: flat len {len(flat)} != {obs_dim}"
-ok("reset_all returns correct shapes")
+obs_ba = batch.reset_all()
+assert isinstance(obs_ba, (bytes, bytearray)), f"expected bytes/bytearray, got {type(obs_ba)}"
+obs_arr = np.frombuffer(obs_ba, dtype=np.float32)
+assert obs_arr.shape == (N * obs_dim,), f"flat shape {obs_arr.shape} != ({N * obs_dim},)"
+obs_2d = obs_arr.reshape(N, obs_dim)
+ok(f"reset_all returns bytearray: shape={obs_2d.shape}")
 
 section("3. PyBatchEnv — step_batch")
 actions = [25] * N  # all Wait
-obs_list2, rews, dones = batch.step_batch(actions)
-assert len(obs_list2) == N and len(rews) == N and len(dones) == N
+obs_ba2, rews, dones = batch.step_batch(actions)
+assert isinstance(obs_ba2, (bytes, bytearray))
+assert np.frombuffer(obs_ba2, dtype=np.float32).shape == (N * obs_dim,)
+assert len(rews) == N and len(dones) == N
 assert all(r < 0.0 for r in rews), f"Wait should give only tick penalty, got {rews}"
 assert not any(dones), "should not be done after one step"
 ok(f"step_batch: rewards={[round(r,4) for r in rews[:3]]}...")
 
 section("4. PyBatchEnv — reset_env (individual)")
-flat = batch.reset_env(0)
-assert len(flat) == obs_dim
+env_ba = batch.reset_env(0)
+assert isinstance(env_ba, (bytes, bytearray))
+assert np.frombuffer(env_ba, dtype=np.float32).shape == (obs_dim,), \
+    f"reset_env shape {np.frombuffer(env_ba, dtype=np.float32).shape} != ({obs_dim},)"
 ok("reset_env(0) returns correct obs length")
 
 section("5. PyBatchEnv — step to episode end, check auto-reset via step_batch_auto_reset")

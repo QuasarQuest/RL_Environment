@@ -21,20 +21,32 @@ def _find_project_root() -> Path:
     raise RuntimeError(f"Cannot find project root starting from {here}")
 
 
-PROJECT_ROOT   = _find_project_root()
+PROJECT_ROOT = _find_project_root()
 DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config.ron")
+
+_OBS_DTYPE = np.float32
 
 
 class AtbEnv(gym.Env):
-    """Single-agent Gymnasium env backed by a 1-env PyBatchEnv."""
+    """Single-agent Gymnasium env backed by a 1-env PyBatchEnv.
+
+    Score tracking note
+    -------------------
+    `self._score` accumulates every positive reward, which includes both
+    PICKUP (0.5) and DEPOSIT (5.0) events. It is therefore an approximation
+    of the true Rust-side `agent.score` (deposit-only). A precise score
+    would require an additional `get_agents()` call per step, which is too
+    expensive for the training hot path. The approximation is acceptable for
+    logging; do not use it as a training signal.
+    """
 
     metadata = {"render_modes": []}
 
     def __init__(
-        self,
-        config_path: str = DEFAULT_CONFIG,
-        *,
-        agent_id: Optional[int] = None,
+            self,
+            config_path: str = DEFAULT_CONFIG,
+            *,
+            agent_id: Optional[int] = None,
     ) -> None:
         super().__init__()
         config_path = str(Path(config_path).expanduser().resolve())
@@ -42,30 +54,31 @@ class AtbEnv(gym.Env):
         import atb
         self._env = atb.PyBatchEnv(1, config_path)
 
-        obs_shape   = atb.PyBatchEnv.obs_shape()
+        obs_shape = atb.PyBatchEnv.obs_shape()
         action_size = atb.PyBatchEnv.action_size()
 
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=obs_shape, dtype=np.float32
+            low=0.0, high=1.0, shape=obs_shape, dtype=_OBS_DTYPE
         )
         self.action_space = spaces.Discrete(action_size)
         self._obs_shape = obs_shape
         self._episode_reward: float = 0.0
-        self._episode_length: int   = 0
-        self._score: float          = 0.0
+        self._episode_length: int = 0
+        self._score: float = 0.0
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
         self._episode_reward = 0.0
         self._episode_length = 0
-        self._score          = 0.0
-        obs_flat = self._env.reset_all()[0]
-        return np.asarray(obs_flat, dtype=np.float32).reshape(self._obs_shape), {}
+        self._score = 0.0
+        obs_ba = self._env.reset_all()
+        obs = np.frombuffer(obs_ba, dtype=_OBS_DTYPE).reshape(self._obs_shape).copy()
+        return obs, {}
 
     def step(self, action: int):
-        obs_list, rews, dones = self._env.step_batch([int(action)])
-        obs      = np.asarray(obs_list[0], dtype=np.float32).reshape(self._obs_shape)
-        reward   = float(rews[0])
+        obs_ba, rews, dones = self._env.step_batch([int(action)])
+        obs = np.frombuffer(obs_ba, dtype=_OBS_DTYPE).reshape(self._obs_shape).copy()
+        reward = float(rews[0])
         terminated = bool(dones[0])
 
         self._episode_reward += reward

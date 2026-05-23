@@ -67,18 +67,17 @@ def build_vec_env(cfg: EnvConfig, *, eval_mode: bool = False) -> VecEnv:
         When True, uses a single ``DummyVecEnv`` and sets ``VecNormalize``
         to inference mode — no running-stat updates, no reward normalisation.
     """
-    n = 1 if eval_mode else cfg.n_envs
-
-    if n == 1 or eval_mode:
-        # Single env: DummyVecEnv for eval and single-env debug runs.
-        thunks = [make_single_env(cfg, rank=i) for i in range(n)]
-        vec_env: VecEnv = DummyVecEnv(thunks)
+    # eval_mode always implies n=1; no need to read cfg.n_envs.
+    if eval_mode:
+        vec_env: VecEnv = DummyVecEnv([make_single_env(cfg, rank=0)])
+    elif cfg.n_envs == 1:
+        vec_env = DummyVecEnv([make_single_env(cfg, rank=0)])
     else:
         # Batch env: Rayon-parallel, replaces SubprocVecEnv for training.
         # Reward clipping/scaling are handled inside BatchVecEnv so
         # VecNormalize sees the same scale as the single-env path.
         vec_env = BatchVecEnv(
-            n,
+            cfg.n_envs,
             cfg.config_path,
             clip_reward=cfg.clip_reward_max if cfg.clip_reward else None,
             reward_scale=cfg.reward_scale,

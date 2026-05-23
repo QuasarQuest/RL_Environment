@@ -1,0 +1,27 @@
+# @package _global_
+# Fast iteration profile for environment and reward tuning.
+#
+# Target: ~2-3 min per run on XPS 9500 (GTX 1650 Ti).
+#
+# Eval is single-threaded (DummyVecEnv, 1 env) — Rayon only runs during
+# training rollouts. Keep eval_episodes low and eval_freq high to minimise
+# the single-threaded eval overhead relative to the parallel training time.
+#
+# Usage:
+#   atb-train +experiment=fast_iter
+#   atb-train +experiment=fast_iter ppo=aggressive
+#   atb-train +experiment=fast_iter ++env.stage=2
+
+defaults:
+  - override /ppo: default
+  - override /env: stage1
+
+train:
+  total_timesteps: 200_000
+  eval_freq:       100_000
+  eval_episodes:   3
+  checkpoint_freq: 200_000
+  run_name:        fast
+
+env:
+  max_episode_steps: 1000

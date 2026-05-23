@@ -1,0 +1,91 @@
+use bevy::prelude::*;
+use crate::sim_bridge::{SimBridge, AgentIndex, AgentMarker};
+use crate::style::{ThemeColor, UiRoot, SIZE_SM};
+use crate::viz::camera::MainCamera;
+use atb::config;
+
+#[derive(Component)] pub struct TooltipPanel;
+#[derive(Component)] pub struct TooltipName;
+#[derive(Component)] pub struct TooltipStats;
+
+pub fn spawn_tooltip(mut commands: Commands) {
+    let bg     = ThemeColor::TooltipBackground.resolve();
+    let border = ThemeColor::Border.resolve();
+    let dim    = ThemeColor::TextDim.resolve();
+
+    commands.spawn((
+        UiRoot,
+        TooltipPanel,
+        Node {
+            position_type:  PositionType::Absolute,
+            display:        Display::None,
+            flex_direction: FlexDirection::Column,
+            padding:        UiRect::all(Val::Px(10.0)),
+            row_gap:        Val::Px(3.0),
+            border:         UiRect::all(Val::Px(1.0)),
+            border_radius:  BorderRadius::all(Val::Px(8.0)),
+            min_width:      Val::Px(160.0),
+            ..default()
+        },
+        BackgroundColor(bg),
+        BorderColor::all(border),
+        ZIndex(150),
+    )).with_children(|p| {
+        p.spawn((Text::new("—"), TextFont { font_size: 13.0, ..default() }, TextColor(ThemeColor::SuccessText.resolve()), TooltipName));
+        p.spawn((Text::new(""), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim), TooltipStats));
+    });
+}
+
+pub fn update_tooltip(
+    bridge:    Res<SimBridge>,
+    windows:   Query<&Window>,
+    cam_q:     Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    agents_q:  Query<(&AgentIndex, &Transform), With<AgentMarker>>,
+    mut panel: Query<(&mut Node, &mut Visibility), With<TooltipPanel>>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<TooltipName>>,
+        Query<&mut Text, With<TooltipStats>>,
+    )>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Ok((camera, cam_tf)) = cam_q.single() else { return };
+    let Ok((mut panel_node, mut vis)) = panel.single_mut() else { return };
+
+    let Some(cursor_px) = window.cursor_position() else {
+        panel_node.display = Display::None;
+        *vis = Visibility::Hidden;
+        return;
+    };
+
+    let hit_radius_sq = (config::TILE_SIZE * 0.6).powi(2);
+    let world_cursor  = camera
+        .viewport_to_world_2d(cam_tf, cursor_px)
+        .unwrap_or(Vec2::ZERO);
+
+    let mut closest: Option<usize> = None;
+    let mut best_dist = f32::MAX;
+    for (idx, tf) in agents_q.iter() {
+        let d = world_cursor.distance_squared(tf.translation.truncate());
+        if d < hit_radius_sq && d < best_dist {
+            best_dist = d;
+            closest = Some(idx.0);
+        }
+    }
+
+    if let Some(idx) = closest {
+        if let Some(agent) = bridge.agents().get(idx) {
+            let label = format!("Agent {} ({})", idx, crate::team::Team(agent.team).name());
+            let info  = format!("HP:{}  Ammo:{}  Gold:{}  Score:{}", agent.hearts, agent.ammo, agent.gold_carried, agent.score);
+            for mut t in texts.p0().iter_mut() { *t = Text::new(&label); }
+            for mut t in texts.p1().iter_mut() { *t = Text::new(&info);  }
+            panel_node.display = Display::Flex;
+            panel_node.left    = Val::Px(cursor_px.x + 14.0);
+            panel_node.top     = Val::Px(cursor_px.y - 10.0);
+            *vis = Visibility::Visible;
+            return;
+        }
+    }
+
+    panel_node.display = Display::None;
+    *vis = Visibility::Hidden;
+}

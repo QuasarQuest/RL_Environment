@@ -26,8 +26,6 @@ MANIFEST
 # ── Virtual environments ───────────────────────────────────────────────────────
 .venv/
 venv/
-env/
-.env
 rl/.venv/
 
 # ── PyO3 / maturin ────────────────────────────────────────────────────────────
@@ -80,6 +78,4 @@ Thumbs.db
 desktop.ini
 
 # ── Secrets / local config ────────────────────────────────────────────────────
-.env.local
-.env.*.local
 secrets.toml
