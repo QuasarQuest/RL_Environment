@@ -5,7 +5,7 @@
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use crate::config::{AGENT_MAX_AMMO, AGENT_MAX_HEARTS};
+use crate::config::{AGENT_MAX_AMMO, AGENT_MAX_GOLD, AGENT_MAX_HEARTS};
 use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 use crate::rl::obs::{
@@ -34,9 +34,8 @@ pub fn build_obs_into(
 
     // ── Broadcast channels ────────────────────────────────────────────────────
 
-    if agent.gold_carried > 0 {
-        buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane].fill(1.0);
-    }
+    buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane]
+        .fill(agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
     buf[CH_HEALTH * plane..(CH_HEALTH + 1) * plane]
         .fill(agent.hearts as f32 / AGENT_MAX_HEARTS as f32);
     buf[CH_AMMO * plane..(CH_AMMO + 1) * plane]

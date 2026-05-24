@@ -30,6 +30,7 @@
 // Per-stage weights are passed in via `RewardConfig` (world/config.rs) so
 // the same function works for all stages without code changes.
 
+use crate::config::AGENT_MAX_GOLD;
 use crate::world::coords::GridPos;
 use crate::world::config::RewardConfig;
 use crate::entity::agent::AgentState;
@@ -50,7 +51,8 @@ fn approach_shaping(
     agent:          &AgentState,
     gold_positions: &[GridPos],
 ) -> f32 {
-    if agent.gold_carried == 0 {
+    if agent.gold_carried < AGENT_MAX_GOLD {
+        // Not yet full — guide toward the nearest gold.
         let d_before = match dist_to_nearest_gold(prev_pos, gold_positions) {
             Some(d) => d,
             None    => return 0.0,
@@ -61,6 +63,7 @@ fn approach_shaping(
         };
         cfg.approach * (d_before - d_after) as f32
     } else {
+        // Inventory full — guide toward base unambiguously.
         let d_before = manhattan(prev_pos, agent.base_pos);
         let d_after  = manhattan(agent.pos, agent.base_pos);
         cfg.approach * (d_before - d_after) as f32
