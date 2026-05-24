@@ -1,4 +1,4 @@
-// src/algorithm/behavior_planning/fsm.rs
+// src/algorithm/behavior/fsm.rs
 //
 // Generic deterministic FSM primitive.
 // Zero knowledge of agents, planners, or game logic.

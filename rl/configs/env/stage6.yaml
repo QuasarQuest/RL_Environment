@@ -1,0 +1,17 @@
+# @package env
+# Stage 6: full combat, self-play mode.
+# The sim uses BehaviorTree as placeholder; the training script loads a frozen
+# RL checkpoint as the opponent (see train_selfplay.py when implemented).
+
+stage: 6
+n_envs: 32
+
+seed: null
+max_episode_steps: null
+
+clip_reward: true
+clip_reward_max: 15.0      # higher cap — kill rewards can spike
+reward_scale: 1.0
+
+normalize_obs: true
+normalize_reward: true

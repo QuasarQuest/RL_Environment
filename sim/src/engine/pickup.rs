@@ -1,11 +1,10 @@
-// src/sim_core/items.rs
+// src/engine/pickup.rs
 //
-// Item pickup. Gold respawns mid-episode via SimCore::respawn_gold() when the
-// count drops below gold_respawn_min — see sim_core/mod.rs.
+// Item pickup logic — applied after movement each tick.
 
 use crate::config;
-use crate::item::ItemKind;
-use super::state::{AgentState, ItemState};
+use crate::entity::item::ItemKind;
+use crate::entity::{AgentState, ItemState};
 
 pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
     for agent_idx in 0..agents.len() {

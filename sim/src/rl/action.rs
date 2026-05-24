@@ -10,7 +10,7 @@
 //   24     Drop
 //   25     Wait
 
-use crate::agent::action::{Action, Dir};
+use crate::entity::agent::{Action, Dir};
 
 pub const ACTION_SIZE: usize = 26;
 

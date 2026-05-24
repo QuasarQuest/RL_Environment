@@ -1,4 +1,4 @@
-// src/algorithm/behavior_planning/goap.rs
+// src/algorithm/behavior/goap.rs
 
 #![allow(dead_code)]
 

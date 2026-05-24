@@ -1,7 +1,10 @@
 use bevy::prelude::*;
-use atb::sim_core::{SimCore, AgentState, ItemState};
+use atb::engine::{SimCore, AgentState, ItemState};
+use atb::engine::enemy::{EnemyPathCache, compute_action};
+use atb::world::config::EnemyKind;
 use atb::world::grid::Grid;
-use atb::item::ItemKind;
+use atb::entity::item::ItemKind;
+use atb::rl::action::action_to_int;
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::viz::events::RestartPending;
@@ -16,23 +19,23 @@ pub enum PolicyMode {
     #[default]
     Onnx,
     Random,
-    Cycling,
+    BehaviorTree,
 }
 
 impl PolicyMode {
     pub fn next(self) -> Self {
         match self {
-            Self::Onnx    => Self::Random,
-            Self::Random  => Self::Cycling,
-            Self::Cycling => Self::Onnx,
+            Self::Onnx         => Self::Random,
+            Self::Random       => Self::BehaviorTree,
+            Self::BehaviorTree => Self::Onnx,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Onnx    => "ONNX",
-            Self::Random  => "RANDOM",
-            Self::Cycling => "CYCLE",
+            Self::Onnx         => "ONNX",
+            Self::Random       => "RANDOM",
+            Self::BehaviorTree => "BT",
         }
     }
 }
@@ -48,17 +51,22 @@ pub struct SimBridge {
     pub episode_reward: f32,
     pub mode:           PolicyMode,
     policy:             Option<OnnxPolicy>,
+    bt_cache:           EnemyPathCache,
 }
 
 impl SimBridge {
     fn new() -> Self {
         let policy = match OnnxPolicy::load(ONNX_POLICY_PATH) {
             Ok(p)  => { info!("ONNX policy loaded"); Some(p) }
-            Err(e) => { warn!("No ONNX policy found ({e}), using cycling actions"); None }
+            Err(e) => { warn!("No ONNX policy found ({e}), using BT agent"); None }
         };
-        Self { sim: SimCore::new(CONFIG_PATH), game_over: false, policy,
-               last_action: 25, action_counts: [0; 26], episode_reward: 0.0,
-               mode: PolicyMode::Onnx }
+        let mode = if policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
+        Self {
+            sim: SimCore::new(CONFIG_PATH), game_over: false, policy,
+            last_action: 25, action_counts: [0; 26], episode_reward: 0.0,
+            mode,
+            bt_cache: EnemyPathCache::new(),
+        }
     }
 
     pub fn tick(&self) -> u64 { self.sim.tick }
@@ -154,9 +162,10 @@ pub fn step_sim(
 ) {
     if restart.0 {
         bridge.sim.reset();
-        bridge.game_over    = false;
-        bridge.last_action  = 25;
-        bridge.action_counts = [0; 26];
+        bridge.bt_cache       = EnemyPathCache::new();
+        bridge.game_over      = false;
+        bridge.last_action    = 25;
+        bridge.action_counts  = [0; 26];
         bridge.episode_reward = 0.0;
         restart.0 = false;
     }
@@ -171,15 +180,28 @@ pub fn step_sim(
                 if let Some(ref p) = bridge.policy {
                     p.act(&bridge.sim.obs_buf)
                 } else {
-                    (bridge.sim.tick % 8) as u32
+                    25 // Wait — no ONNX model loaded
                 }
             }
             PolicyMode::Random => {
-                // LCG step — gives different action every tick without an rng dep.
+                // LCG step — different action every tick, no rng dep.
                 let x = bridge.sim.tick.wrapping_mul(6364136223846793005).wrapping_add(1);
                 (x >> 38) as u32 % 26
             }
-            PolicyMode::Cycling => (bridge.sim.tick % 8) as u32,
+            PolicyMode::BehaviorTree => {
+                // Deref once to &mut SimBridge so the borrow checker sees
+                // `sim` and `bt_cache` as disjoint fields.
+                let b     = &mut *bridge;
+                let agent = b.sim.agents[0].clone();
+                let act   = compute_action(
+                    EnemyKind::BehaviorTree,
+                    &agent,
+                    &b.sim.items,
+                    &b.sim.grid,
+                    &mut b.bt_cache,
+                );
+                action_to_int(act)
+            }
         };
         bridge.last_action = action;
         bridge.action_counts[action as usize] += 1;

@@ -1,0 +1,15 @@
+# @package env
+# Stage 2: obstacles + speed-boost items. Same single-agent setup as s1.
+
+stage: 2
+n_envs: 48
+
+seed: null
+max_episode_steps: null
+
+clip_reward: true
+clip_reward_max: 10.0
+reward_scale: 1.0
+
+normalize_obs: true
+normalize_reward: true

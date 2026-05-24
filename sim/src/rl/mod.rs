@@ -1,6 +1,6 @@
-// src/rl.rs
 pub mod action;
 pub mod obs;
+pub mod reward;
 
 #[cfg(feature = "python")]
 pub mod env;

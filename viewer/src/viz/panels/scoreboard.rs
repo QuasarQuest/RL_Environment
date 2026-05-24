@@ -1,15 +1,17 @@
 use bevy::prelude::*;
 use bevy::color::Alpha;
-use atb::sim_core::AgentState;
+use atb::engine::AgentState;
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
-use crate::style::color::{team_color, SURFACE_HIGHLIGHT};
+use crate::style::color::{team_color, SURFACE_HIGHLIGHT, GREEN_400, RED_500};
 use crate::team::Team;
 use super::components::{
     TabScoreboard, TabScoreboardContent, ScoreboardRow,
     ScoreboardTeamScore,
     ScoreboardRowHp, ScoreboardRowAmmo, ScoreboardRowGold, ScoreboardRowScore,
 };
+
+const ORANGE_400: Color = Color::srgb(0.95, 0.60, 0.10);
 
 const F_AGENT: f32 = 14.0;
 const F_STAT:  f32 = 14.0;
@@ -58,10 +60,11 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             },
             BorderColor::all(border),
         )).with_children(|hdr| {
+            let gold_hdr = ThemeColor::AccentGold.resolve();
             col_label(hdr, "Agent",  W_AGENT, dim);
             col_label(hdr, "HP",     W_HP,    dim);
             col_label(hdr, "Ammo",   W_AMMO,  dim);
-            col_label(hdr, "Gold",   W_GOLD,  dim);
+            col_label(hdr, "Gold",   W_GOLD,  gold_hdr);
             col_label(hdr, "Score",  W_SCORE, dim);
         });
 
@@ -77,6 +80,15 @@ fn col_label(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: C
         TextColor(color),
         Node { min_width: Val::Px(width), ..default() },
     ));
+}
+
+fn hp_color(hearts: u8) -> Color {
+    match hearts {
+        0     => RED_500,
+        1     => RED_500,
+        2     => ORANGE_400,
+        _     => GREEN_400,
+    }
 }
 
 fn stat_cell<M: Component>(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color, marker: M) {
@@ -163,10 +175,12 @@ pub fn build_scoreboard_rows(
                         TextColor(team_color_val),
                         Node { min_width: Val::Px(W_AGENT), ..default() },
                     ));
-                    stat_cell(row, &format!("{}", agent.hearts), W_HP,    body, ScoreboardRowHp(agent_idx));
-                    stat_cell(row, &format!("{}", agent.ammo),   W_AMMO,  body, ScoreboardRowAmmo(agent_idx));
-                    stat_cell(row, &format!("{}", agent.gold_carried), W_GOLD, body, ScoreboardRowGold(agent_idx));
-                    stat_cell(row, &format!("{}", agent.score),  W_SCORE, body, ScoreboardRowScore(agent_idx));
+                    let gold_accent = ThemeColor::AccentGold.resolve();
+                    let gold_carry_color = if agent.gold_carried > 0 { gold_accent } else { body };
+                    stat_cell(row, &format!("{}", agent.hearts),       W_HP,    hp_color(agent.hearts), ScoreboardRowHp(agent_idx));
+                    stat_cell(row, &format!("{}", agent.ammo),         W_AMMO,  body,             ScoreboardRowAmmo(agent_idx));
+                    stat_cell(row, &format!("{}", agent.gold_carried), W_GOLD,  gold_carry_color, ScoreboardRowGold(agent_idx));
+                    stat_cell(row, &format!("{}", agent.score),        W_SCORE, body,             ScoreboardRowScore(agent_idx));
                 });
             }
         });
@@ -176,23 +190,32 @@ pub fn build_scoreboard_rows(
 pub fn refresh_scoreboard_stats(
     bridge: Res<SimBridge>,
     mut qs: ParamSet<(
-        Query<(&mut Text, &ScoreboardRowHp)>,
+        Query<(&mut Text, &mut TextColor, &ScoreboardRowHp)>,
         Query<(&mut Text, &ScoreboardRowAmmo)>,
-        Query<(&mut Text, &ScoreboardRowGold)>,
+        Query<(&mut Text, &mut TextColor, &ScoreboardRowGold)>,
         Query<(&mut Text, &ScoreboardRowScore)>,
         Query<(&mut Text, &ScoreboardTeamScore)>,
     )>,
 ) {
     if !bridge.is_changed() { return; }
     let agents = bridge.agents();
-    for (mut text, marker) in qs.p0().iter_mut() {
-        if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.hearts)); }
+    let gold_accent = ThemeColor::AccentGold.resolve();
+    for (mut text, mut color, marker) in qs.p0().iter_mut() {
+        if let Some(a) = agents.get(marker.0) {
+            *text  = Text::new(format!("{}", a.hearts));
+            *color = TextColor(hp_color(a.hearts));
+        }
     }
     for (mut text, marker) in qs.p1().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.ammo)); }
     }
-    for (mut text, marker) in qs.p2().iter_mut() {
-        if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.gold_carried)); }
+    for (mut text, mut color, marker) in qs.p2().iter_mut() {
+        if let Some(a) = agents.get(marker.0) {
+            *text  = Text::new(format!("{}", a.gold_carried));
+            *color = TextColor(if a.gold_carried > 0 { gold_accent } else {
+                ThemeColor::TextPrimary.resolve()
+            });
+        }
     }
     for (mut text, marker) in qs.p3().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.score)); }

@@ -3,7 +3,7 @@
 // Converts declarative WorldConfig into concrete tile coordinates and spawn
 // positions. All fraction → tile coord resolution happens here.
 
-use crate::item::ItemSpawnConfig;
+use crate::entity::item::ItemSpawnConfig;
 use super::config::{AgentConfig, ObstacleProfile, SpawnIntent, WorldConfig};
 use super::tile::Tile;
 

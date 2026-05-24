@@ -1,97 +1,38 @@
-// src/sim_core/obs.rs
+// src/rl/obs.rs
 //
-// Builds the CNN observation for the RL agent each tick.
-// Writes into a caller-supplied buffer — no per-step heap allocation.
-//
-// Channel layout: see rl/obs.rs for the authoritative definition.
+// Observation space constants — single source of truth for the CNN input layout.
+// build_obs_into lives in engine/obs.rs; Python consumers use these via pyo3.rs.
 
-use crate::config::{AGENT_MAX_AMMO, AGENT_MAX_HEARTS};
-use crate::item::ItemKind;
-use crate::rl::obs::{
-    CH_AMMO, CH_BASE, CH_CARRYING, CH_ENEMY, CH_GOLD,
-    CH_HEALTH, CH_ITEMS, CH_OBSTACLE, CH_OOB,
-    ITEM_AMMO, ITEM_HEALTH, ITEM_SPEED,
-    OBS_CROP_SIZE, OBS_TOTAL,
-};
-use crate::world::grid::Grid;
-use crate::world::tile::Tile;
-use super::state::{AgentState, ItemState};
+pub const OBS_CHANNELS: usize = 9;
 
-pub fn build_obs_into(
-    buf:    &mut [f32],
-    agent:  &AgentState,
-    items:  &[ItemState],
-    agents: &[AgentState],
-    grid:   &Grid,
-) {
-    debug_assert_eq!(buf.len(), OBS_TOTAL);
-    buf.fill(0.0);
+// ── Spatial channels (one pixel = one tile in the agent's crop view) ──────────
 
-    let centre = (OBS_CROP_SIZE / 2) as i32;
-    let (ax, ay) = (agent.pos.x, agent.pos.y);
-    let (gw, gh) = (grid.width as i32, grid.height as i32);
-    let plane   = OBS_CROP_SIZE * OBS_CROP_SIZE;
+pub const CH_OOB:      usize = 0; // out-of-bounds: tile is beyond grid edge
+pub const CH_BASE:     usize = 1; // own base tile
+pub const CH_GOLD:     usize = 2; // gold item
+pub const CH_OBSTACLE: usize = 3; // impassable wall
+pub const CH_ENEMY:    usize = 4; // enemy agent position
 
-    // ── Broadcast channels ────────────────────────────────────────────────────
+// Shared item channel — float-encoded by kind so a single channel covers all
+// consumable items. CNN learns distinct values per item type.
+pub const CH_ITEMS:    usize = 5;
 
-    if agent.gold_carried > 0 {
-        buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane].fill(1.0);
-    }
-    buf[CH_HEALTH * plane..(CH_HEALTH + 1) * plane]
-        .fill(agent.hearts as f32 / AGENT_MAX_HEARTS as f32);
-    buf[CH_AMMO * plane..(CH_AMMO + 1) * plane]
-        .fill(agent.ammo as f32 / AGENT_MAX_AMMO as f32);
+// ── Broadcast channels (filled uniformly — agent-level scalars) ───────────────
 
-    // ── Tile scan: OOB + base + obstacles ─────────────────────────────────────
+pub const CH_CARRYING: usize = 6; // 1.0 if carrying gold, 0.0 otherwise
+pub const CH_HEALTH:   usize = 7; // hearts / AGENT_MAX_HEARTS ∈ [0, 1]
+pub const CH_AMMO:     usize = 8; // ammo  / AGENT_MAX_AMMO   ∈ [0, 1]
 
-    for cy in 0..OBS_CROP_SIZE as i32 {
-        let wy = ay + cy - centre;
-        let row_oob = wy < 0 || wy >= gh;
-        for cx in 0..OBS_CROP_SIZE as i32 {
-            let wx = ax + cx - centre;
-            if row_oob || wx < 0 || wx >= gw {
-                buf[pixel(CH_OOB, cx, cy)] = 1.0;
-            } else {
-                // SAFETY: bounds checked above.
-                let tile = unsafe { grid.get_unchecked(wx, wy) };
-                match tile {
-                    Tile::Base(t) if t == agent.team => buf[pixel(CH_BASE,     cx, cy)] = 1.0,
-                    Tile::Obstacle                   => buf[pixel(CH_OBSTACLE, cx, cy)] = 1.0,
-                    _ => {}
-                }
-            }
-        }
-    }
+// ── CH_ITEMS encoding ─────────────────────────────────────────────────────────
 
-    // ── Items ─────────────────────────────────────────────────────────────────
+pub const ITEM_HEALTH: f32 = 1.0 / 3.0;
+pub const ITEM_AMMO:   f32 = 2.0 / 3.0;
+pub const ITEM_SPEED:  f32 = 1.0;
 
-    for item in items {
-        let cx = item.pos.x - ax + centre;
-        let cy = item.pos.y - ay + centre;
-        if cx < 0 || cx >= OBS_CROP_SIZE as i32 || cy < 0 || cy >= OBS_CROP_SIZE as i32 {
-            continue;
-        }
-        match item.kind {
-            ItemKind::Gold       => buf[pixel(CH_GOLD,  cx, cy)] = 1.0,
-            ItemKind::Health     => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_HEALTH,
-            ItemKind::Ammo       => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_AMMO,
-            ItemKind::SpeedBoost => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_SPEED,
-        }
-    }
+// ── Spatial dimensions ────────────────────────────────────────────────────────
 
-    // ── Enemies ───────────────────────────────────────────────────────────────
+pub const OBS_CROP_SIZE: usize = 25;
 
-    for other in agents {
-        if other.team == agent.team { continue; }
-        let cx = other.pos.x - ax + centre;
-        let cy = other.pos.y - ay + centre;
-        if cx >= 0 && cx < OBS_CROP_SIZE as i32 && cy >= 0 && cy < OBS_CROP_SIZE as i32 {
-            buf[pixel(CH_ENEMY, cx, cy)] = 1.0;
-        }
-    }
-}
-
-#[inline(always)]
-fn pixel(ch: usize, cx: i32, cy: i32) -> usize {
-    ch * OBS_CROP_SIZE * OBS_CROP_SIZE + cy as usize * OBS_CROP_SIZE + cx as usize
-}
+pub const OBS_DIM:   usize                  = OBS_CHANNELS * OBS_CROP_SIZE * OBS_CROP_SIZE;
+pub const OBS_TOTAL: usize                  = OBS_DIM;
+pub const OBS_SHAPE: (usize, usize, usize)  = (OBS_CHANNELS, OBS_CROP_SIZE, OBS_CROP_SIZE);

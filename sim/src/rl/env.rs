@@ -23,9 +23,9 @@
 // no false sharing, no synchronisation needed.
 
 use rayon::prelude::*;
-use crate::item::ItemKind;
+use crate::entity::item::ItemKind;
 use crate::rl::obs::OBS_TOTAL;
-use crate::sim_core::SimCore;
+use crate::engine::SimCore;
 use crate::world::tile::Tile;
 
 pub struct BatchEnv {

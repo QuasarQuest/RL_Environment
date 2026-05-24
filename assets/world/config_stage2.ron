@@ -1,0 +1,50 @@
+// assets/world/config_stage2.ron — Stage 2
+//
+// Obstacles + speed-boost items added.
+// Agent must navigate around walls while still prioritising gold.
+// Same 20×20 map; match extended to give more exploration time.
+
+(
+    width:  20,
+    height: 20,
+    match_duration_ticks: 1500,
+
+    bases: [
+        ( team: 0, corner: BottomLeft, margin: 0.05 ),
+    ],
+
+    agents: [
+        ( team: 0, spawn: NearBase, spawn_offset: 0.10 ),
+    ],
+
+    safe_zone_fraction: 0.03,
+
+    // Light scatter obstacles — corridors still plentiful, but direct
+    // paths are often blocked. Scatter avoids large un-navigable clusters.
+    obstacles: (
+        density:            0.06,
+        profile:            Scatter,
+        max_block_fraction: 0.10,
+        max_wall_fraction:  0.10,
+    ),
+
+    // Gold + speed boost. Speed boost lets the agent learn to pick up
+    // secondary items without them being in the critical path.
+    item_density: (
+        gold:        2.0,
+        health:      0.0,
+        ammo:        0.0,
+        speed_boost: 0.5,
+    ),
+
+    gold_carry_speed: 0.95,
+
+    reward: (
+        tick:          -0.0005,
+        pickup:         0.5,
+        deposit:        5.0,
+        approach:       0.05,
+        kill:           0.0,
+        death_penalty:  0.0,
+    ),
+)

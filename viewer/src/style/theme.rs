@@ -10,6 +10,7 @@ pub enum ThemeColor {
     TextDim,
     ButtonIdle,
     SuccessText,
+    AccentGold,
 }
 
 impl ThemeColor {
@@ -22,6 +23,7 @@ impl ThemeColor {
             Self::TextDim           => GRAY_400,
             Self::ButtonIdle        => GRAY_800,
             Self::SuccessText       => GREEN_400,
+            Self::AccentGold        => GOLD_500,
         }
     }
 }

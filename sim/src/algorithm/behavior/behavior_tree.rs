@@ -1,4 +1,4 @@
-// src/algorithm/behavior_planning/behavior_tree.rs
+// src/algorithm/behavior/behavior_tree.rs
 //
 // Generic synchronous behaviour tree kernel.
 // Parameterised over I (input) and O (output).

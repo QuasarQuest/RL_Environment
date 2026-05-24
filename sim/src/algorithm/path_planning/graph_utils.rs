@@ -1,6 +1,6 @@
 // src/algorithm/path_planning/graph_utils.rs
 
-use crate::agent::action::Dir;
+use crate::entity::agent::Dir;
 use crate::world::coords::GridPos;
 
 // ── Cost constants ────────────────────────────────────────────────────────────

@@ -1,11 +1,9 @@
-// src/sim_core/agent.rs
+// src/engine/physics.rs
 //
-// Agent systems: movement, speed buffs, deposit.
-// Mirrors the OnSimTick order from the old Bevy pipeline.
+// Agent movement, speed buffs, and deposit logic.
 
-use crate::agent::action::{Action, Dir};
+use crate::entity::agent::{Action, AgentState, Dir};
 use crate::world::{grid::Grid, tile::Tile};
-use super::state::AgentState;
 
 pub fn tick_speed_buffs(agents: &mut [AgentState]) {
     for a in agents {
@@ -29,26 +27,16 @@ fn apply_move(agents: &mut Vec<AgentState>, grid: &Grid, idx: usize, dir: Dir) {
     for _ in 0..moves {
         let next = agents[idx].pos.apply_delta(dx, dy);
         if !grid.is_walkable(next.x, next.y) { break; }
-        // Linear scan for occupancy — correct and fast for small agent counts.
-        // With a single agent the loop body never executes (zero iterations).
         if agents.iter().enumerate().any(|(i, a)| i != idx && a.pos == next) { break; }
         agents[idx].pos = next;
     }
 }
 
-/// Return how many tiles the agent moves this tick.
+/// How many tiles the agent moves this tick.
 ///
-/// Previously this used stochastic sub-tile movement (rand::random::<f32>())
-/// to model the slowdown from carrying gold. This made the agent
-/// non-deterministic even under a deterministic policy, which:
-///   - breaks reproducibility for debugging and eval
-///   - adds noise to the value function that is unrelated to policy quality
-///   - makes it harder to diagnose movement bugs
-///
-/// Replaced with a deterministic threshold: the agent moves at full speed
-/// when eff >= 0.5 (carrying up to ~1 gold at GOLD_CARRY_SPEED=0.9) and
-/// stands still below that. This preserves the design intent (gold slows
-/// movement) without injecting per-step randomness.
+/// Deterministic threshold model: carrying gold reduces effective speed via
+/// GOLD_CARRY_SPEED^n. Agent moves at full speed when eff >= 0.5, stands still
+/// below that. This preserves the design intent without per-step randomness.
 fn movement_tiles(a: &AgentState) -> u32 {
     if a.gold_carried == 0 {
         return if a.speed_buff > 0 { 2 } else { 1 };
@@ -76,7 +64,7 @@ pub fn try_deposit(agents: &mut Vec<AgentState>, grid: &Grid, idx: usize) {
     a.gold_carried  = 0;
 }
 
-/// Auto-deposit: runs every tick for any agent standing on its base.
+/// Auto-deposit — runs every tick for any agent standing on its base.
 pub fn auto_deposit(agents: &mut Vec<AgentState>, grid: &Grid) {
     for i in 0..agents.len() {
         let (pos, team, gold) = {

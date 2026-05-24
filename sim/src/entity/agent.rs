@@ -1,4 +1,4 @@
-// src/agent/action.rs
+use crate::world::coords::GridPos;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Dir { N, S, E, W, NE, NW, SE, SW }
@@ -22,16 +22,30 @@ impl Dir {
     }
 }
 
+/// Discrete action the RL policy outputs each tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Move one cell in the given direction.
     Move(Dir),
-    /// Drop all carried gold on own Base tile.
+    /// Drop all carried gold on own base tile.
     Drop,
-    /// Melee attack — adjacent tile, no ammo cost, always available.
+    /// Melee attack — adjacent tile, no ammo cost.
     Attack(Dir),
     /// Ranged attack — up to RANGED_RANGE tiles along Dir, costs 1 ammo.
     RangedAttack(Dir),
     /// Do nothing this tick.
     Wait,
+}
+
+#[derive(Clone)]
+pub struct AgentState {
+    pub pos:          GridPos,
+    pub team:         u8,
+    pub gold_carried: u8,
+    pub score:        u32,
+    pub hearts:       u8,
+    pub ammo:         u8,
+    pub speed_buff:   u8,
+    pub spawn_pos:    GridPos,
+    pub base_pos:     GridPos,
 }

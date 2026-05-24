@@ -1,3 +1,3 @@
 // src/algorithm/mod.rs
-pub mod behavior_planning;
+pub mod behavior;
 pub mod path_planning;

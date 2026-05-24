@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 use std::collections::HashSet;
-use crate::item::{ItemKind, ItemSpawnConfig};
+use crate::entity::item::{ItemKind, ItemSpawnConfig};
 use crate::config as global;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -73,7 +73,25 @@ pub struct AgentConfig {
     pub spawn: SpawnIntent,
     #[serde(default = "default_spawn_offset")]
     pub spawn_offset: f32,
+    /// For non-RL agents (team != 0): scripted behaviour used in stages 4+.
+    /// Ignored for team 0 (always RL-controlled).
+    #[serde(default)]
+    pub enemy_kind: EnemyKind,
     // strategy and planner fields in config.ron are ignored — handled by SimCore
+}
+
+// ── Enemy kind ────────────────────────────────────────────────────────────────
+
+/// Scripted behaviour for non-RL agents.  `None` means the agent stands still.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnemyKind {
+    #[default]
+    None,
+    /// Greedy direction: moves one step toward the nearest gold (or base),
+    /// no pathfinding — easy to trap against walls.
+    SimpleChaser,
+    /// A* pathfinding — finds optimal routes; acts as the hard enemy in s5+.
+    BehaviorTree,
 }
 
 // ── Obstacle generation ───────────────────────────────────────────────────────
@@ -151,6 +169,41 @@ impl ItemDensityConfig {
     }
 }
 
+// ── Reward config ─────────────────────────────────────────────────────────────
+
+/// Per-stage reward weights.  Serde defaults match the stage-1 constants in
+/// `rl/reward.rs` so omitting this section from a RON file is always safe.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RewardConfig {
+    #[serde(default = "default_reward_tick")]
+    pub tick: f32,
+    #[serde(default = "default_reward_pickup")]
+    pub pickup: f32,
+    #[serde(default = "default_reward_deposit")]
+    pub deposit: f32,
+    #[serde(default = "default_reward_approach")]
+    pub approach: f32,
+    /// Reward on killing an enemy agent.  0 in stages 1–5.
+    #[serde(default)]
+    pub kill: f32,
+    /// Negative reward on being killed.  0 in stages 1–5.
+    #[serde(default)]
+    pub death_penalty: f32,
+}
+
+impl Default for RewardConfig {
+    fn default() -> Self {
+        Self {
+            tick:          -0.0005,
+            pickup:         0.5,
+            deposit:        5.0,
+            approach:       0.05,
+            kill:           0.0,
+            death_penalty:  0.0,
+        }
+    }
+}
+
 // ── WorldConfig ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]
@@ -170,6 +223,8 @@ pub struct WorldConfig {
     pub item_density: ItemDensityConfig,
     #[serde(default = "default_gold_carry_speed")]
     pub gold_carry_speed: f32,
+    #[serde(default)]
+    pub reward: RewardConfig,
 }
 
 // ── Serde default fns ────────────────────────────────────────────────────────
@@ -182,6 +237,10 @@ fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
 fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
+fn default_reward_tick()        -> f32 { -0.0005 }
+fn default_reward_pickup()      -> f32 {  0.5 }
+fn default_reward_deposit()     -> f32 {  5.0 }
+fn default_reward_approach()    -> f32 {  0.05 }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 
