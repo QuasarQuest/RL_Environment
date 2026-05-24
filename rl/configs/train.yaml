@@ -22,14 +22,17 @@ train:
   eval_episodes: 10
   device: auto
 
-  # Output dirs (relative to rl/ root)
+  # Output dirs (relative to project root: algorithm_test_bed/)
   models_dir: runs/models
   stats_dir: runs/stats
   tensorboard_dir: runs/tensorboard
 
 hydra:
+  job:
+    env_set:
+      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
   run:
-    dir: runs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ../runs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: runs/outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ../runs/outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}

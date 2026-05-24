@@ -3,7 +3,7 @@ pub mod action;
 pub mod obs;
 
 #[cfg(feature = "python")]
-pub mod batch_env;
+pub mod env;
 #[cfg(feature = "python")]
 pub mod pyo3;
 

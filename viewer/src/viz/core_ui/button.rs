@@ -5,6 +5,7 @@ use crate::style::{ThemeColor, SIZE_XL};
 pub fn spawn_icon_button<M: Component>(
     parent: &mut ChildSpawnerCommands,
     icon:   &str,
+    font:   Handle<Font>,
     marker: M,
 ) {
     parent.spawn((
@@ -22,7 +23,7 @@ pub fn spawn_icon_button<M: Component>(
     )).with_children(|btn| {
         btn.spawn((
             Text::new(icon),
-            TextFont  { font_size: SIZE_XL, ..default() },
+            TextFont  { font_size: SIZE_XL, font, ..default() },
             TextColor(ThemeColor::TextPrimary.resolve()),
         ));
     });

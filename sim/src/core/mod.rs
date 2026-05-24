@@ -21,8 +21,6 @@
 
 pub mod agent;
 pub mod items;
-pub mod obs;
-pub mod reward;
 pub mod state;
 pub mod world_builder;
 
@@ -30,6 +28,7 @@ pub use state::{AgentState, ItemState};
 
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
+use rand::seq::SliceRandom;
 
 use crate::item::ItemKind;
 use crate::rl::action::int_to_action;
@@ -48,10 +47,13 @@ pub struct SimCore {
     prev_score:  u32,
     prev_pos:    GridPos,
 
-    // Pre-filtered gold positions — kept in sync with items on every pickup.
-    // Passed directly to obs::build_obs_into and reward::compute so neither
-    // hot path needs to iterate or filter the full items list.
+    // Pre-filtered gold positions — kept in sync with items on every pickup/respawn.
     gold_positions: Vec<GridPos>,
+
+    // Respawn gold when count falls below gold_respawn_min; refill to gold_respawn_target.
+    // Both are derived from the initial spawn count so density config drives everything.
+    gold_respawn_target: usize,
+    gold_respawn_min:    usize,
 
     // Per-env RNG for reproducible item spawns.
     rng: SmallRng,
@@ -86,8 +88,13 @@ impl SimCore {
             .map(|it| it.pos)
             .collect();
 
+        // Respawn targets derived from the initial placement count.
+        // Refill to initial count when gold drops to half that.
+        let gold_respawn_target = gold_positions.len();
+        let gold_respawn_min    = (gold_respawn_target / 2).max(1);
+
         let mut obs_buf = vec![0.0f32; OBS_TOTAL];
-        build_obs_into(&mut obs_buf, &snap.agents[0], &gold_positions, &snap.grid);
+        build_obs_into(&mut obs_buf, &snap.agents[0], &snap.items, &snap.agents, &snap.grid);
 
         let rng = match seed {
             Some(s) => SmallRng::seed_from_u64(s),
@@ -98,7 +105,7 @@ impl SimCore {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
-            gold_positions,
+            gold_positions, gold_respawn_target, gold_respawn_min,
             rng,
             obs_buf,
             grid_snapshot,
@@ -128,7 +135,7 @@ impl SimCore {
         self.prev_gold  = 0;
         self.prev_score = 0;
         self.prev_pos   = self.agents[0].pos;
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.gold_positions, &self.grid);
+        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.grid);
     }
 
     /// Step one tick. Returns (reward, done).
@@ -161,6 +168,10 @@ impl SimCore {
 
         agent::auto_deposit(&mut self.agents, &self.grid);
 
+        if self.gold_positions.len() < self.gold_respawn_min {
+            self.respawn_gold();
+        }
+
         let rew = reward::compute(
             &self.agents[0],
             self.prev_pos,
@@ -168,7 +179,7 @@ impl SimCore {
             self.prev_score,
             &self.gold_positions,
         );
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.gold_positions, &self.grid);
+        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.grid);
         (rew, done)
     }
 
@@ -184,4 +195,29 @@ impl SimCore {
     }
 
     pub fn match_ticks(&self) -> u64 { self.match_ticks }
+
+    /// Spawn gold on random free tiles until count reaches `gold_respawn_target`.
+    ///
+    /// Called when gold drops below `gold_respawn_min`. Tiles already occupied
+    /// by items or agents are excluded so new gold never overlaps existing state.
+    fn respawn_gold(&mut self) {
+        let needed = self.gold_respawn_target.saturating_sub(self.gold_positions.len());
+        if needed == 0 { return; }
+
+        let mut candidates: Vec<GridPos> = (0..self.grid.height as i32)
+            .flat_map(|y| (0..self.grid.width as i32).map(move |x| GridPos::new(x, y)))
+            .filter(|p| {
+                self.grid.get(p.x, p.y) == Some(Tile::Free)
+                    && !self.items.iter().any(|i| i.pos == *p)
+                    && !self.agents.iter().any(|a| a.pos == *p)
+            })
+            .collect();
+
+        candidates.shuffle(&mut self.rng);
+
+        for &pos in candidates.iter().take(needed) {
+            self.items.push(ItemState { pos, kind: ItemKind::Gold });
+            self.gold_positions.push(pos);
+        }
+    }
 }

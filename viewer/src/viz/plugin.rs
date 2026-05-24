@@ -8,11 +8,13 @@ use super::hud::{
     spawn_hud,
     update_tick_label, update_time_label, update_team_scores,
     handle_speed_buttons, handle_pause_button, sync_pause_visuals,
+    handle_policy_key, sync_policy_mode_label,
 };
 use super::panels::scoreboard::{
     spawn_tab_scoreboard, toggle_tab_scoreboard,
     build_scoreboard_rows, refresh_scoreboard_stats,
 };
+use super::panels::debug_overlay::{spawn_debug_overlay, toggle_debug_overlay, update_debug_overlay};
 use super::panels::help_overlay::{spawn_help_overlay, toggle_help_overlay};
 use super::panels::end_screen::{
     spawn_end_screen, show_end_screen,
@@ -41,6 +43,7 @@ impl Plugin for VizPlugin {
                 spawn_tab_scoreboard,
                 spawn_tooltip,
                 spawn_help_overlay,
+                spawn_debug_overlay,
                 spawn_end_screen,
             ))
             .configure_sets(Update, HudUpdate.after(SimSet))
@@ -60,7 +63,11 @@ impl Plugin for VizPlugin {
                 handle_speed_buttons,
                 handle_pause_button,
                 sync_pause_visuals,
+                handle_policy_key,
+                sync_policy_mode_label,
                 toggle_help_overlay,
+                toggle_debug_overlay,
+                update_debug_overlay,
             ))
             .add_systems(Update, (
                 show_end_screen,

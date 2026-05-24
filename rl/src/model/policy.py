@@ -12,6 +12,14 @@ Two feature extractors live here:
 
 `ATB_POLICY_KWARGS` is the canonical kwargs dict consumed by `train.py`.
 Today it points at the CNN extractor.
+
+Obs channel layout (6 channels as of the obstacle-channel change):
+  0  Out-of-bounds mask
+  1  Own base
+  2  Gold items
+  3  Obstacles          ← replaced useless self-at-centre constant
+  4  Carrying gold (broadcast plane)
+  5  Self at centre
 """
 from __future__ import annotations
 
@@ -65,8 +73,11 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
     - Earlier 3×3 convs with padding=1 preserve spatial size, so the model
       can still reason about object position at full resolution before
       compressing.
-    - The conv depth (32→64→64) is intentionally modest. With 5 input
+    - The conv depth (32→64→64) is intentionally modest. With 6 input
       channels and a 25×25 footprint, a deeper stack overfits the toy task.
+    - Input channels: 6 (OOB, base, gold, obstacles, carrying, self).
+      The flat_dim is computed with a dry run so changing OBS_CHANNELS or
+      OBS_CROP_SIZE in Rust never requires editing this file.
     """
 
     def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 128):
@@ -89,7 +100,7 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
         )
 
         # Compute the flat dim with a dry run instead of hard-coding it —
-        # if we change crop size later, this still works.
+        # if we change crop size or channel count later, this still works.
         with torch.no_grad():
             dummy = torch.zeros(1, c, h, w)
             flat_dim = self.conv(dummy).shape[1]

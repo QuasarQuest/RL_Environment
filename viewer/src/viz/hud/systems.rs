@@ -6,6 +6,7 @@ use super::components::{
     TickLabelMarker, TimeLabelMarker, TeamScoreMarker,
     SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton,
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
+    PolicyModeLabel,
 };
 
 pub fn update_tick_label(
@@ -46,6 +47,7 @@ fn format_speed(tps: f32) -> String {
 pub fn handle_speed_buttons(
     mut cfg:         ResMut<SimConfig>,
     mut timer:       ResMut<TickTimer>,
+    keys:            Res<ButtonInput<KeyCode>>,
     decrease_q:      Query<&Interaction, (Changed<Interaction>, With<SpeedDecreaseButton>)>,
     increase_q:      Query<&Interaction, (Changed<Interaction>, With<SpeedIncreaseButton>)>,
     reset_q:         Query<&Interaction, (Changed<Interaction>, With<SpeedResetButton>)>,
@@ -53,26 +55,26 @@ pub fn handle_speed_buttons(
 ) {
     let mut changed = false;
 
-    for interaction in decrease_q.iter() {
-        if *interaction == Interaction::Pressed {
-            let idx = cfg.speed_index();
-            cfg.ticks_per_second = cfg.available_speeds[idx.saturating_sub(1)];
-            changed = true;
-        }
+    let want_decrease = keys.just_pressed(KeyCode::ArrowDown)
+        || decrease_q.iter().any(|i| *i == Interaction::Pressed);
+    let want_increase = keys.just_pressed(KeyCode::ArrowUp)
+        || increase_q.iter().any(|i| *i == Interaction::Pressed);
+    let want_reset    = reset_q.iter().any(|i| *i == Interaction::Pressed);
+
+    if want_decrease {
+        let idx = cfg.speed_index();
+        cfg.ticks_per_second = cfg.available_speeds[idx.saturating_sub(1)];
+        changed = true;
     }
-    for interaction in increase_q.iter() {
-        if *interaction == Interaction::Pressed {
-            let idx = cfg.speed_index();
-            let max = cfg.available_speeds.len() - 1;
-            cfg.ticks_per_second = cfg.available_speeds[(idx + 1).min(max)];
-            changed = true;
-        }
+    if want_increase {
+        let idx = cfg.speed_index();
+        let max = cfg.available_speeds.len() - 1;
+        cfg.ticks_per_second = cfg.available_speeds[(idx + 1).min(max)];
+        changed = true;
     }
-    for interaction in reset_q.iter() {
-        if *interaction == Interaction::Pressed {
-            cfg.ticks_per_second = atb::config::DEFAULT_TICKS_PER_SECOND;
-            changed = true;
-        }
+    if want_reset {
+        cfg.ticks_per_second = atb::config::DEFAULT_TICKS_PER_SECOND;
+        changed = true;
     }
 
     if changed {
@@ -81,6 +83,26 @@ pub fn handle_speed_buttons(
         for mut text in speed_label.iter_mut() {
             *text = Text::new(&label);
         }
+    }
+}
+
+pub fn handle_policy_key(
+    keys:       Res<ButtonInput<KeyCode>>,
+    mut bridge: ResMut<SimBridge>,
+) {
+    if keys.just_pressed(KeyCode::KeyP) {
+        bridge.mode = bridge.mode.next();
+        info!("Policy mode → {:?}", bridge.mode);
+    }
+}
+
+pub fn sync_policy_mode_label(
+    bridge:    Res<SimBridge>,
+    mut query: Query<&mut Text, With<PolicyModeLabel>>,
+) {
+    if !bridge.is_changed() { return; }
+    for mut text in query.iter_mut() {
+        *text = Text::new(bridge.mode.label());
     }
 }
 

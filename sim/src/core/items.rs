@@ -1,7 +1,7 @@
 // src/sim_core/items.rs
 //
-// Item pickup. Items are placed at episode start and not respawned mid-episode
-// (the PI-controller spawner from the old Bevy pipeline is gone).
+// Item pickup. Gold respawns mid-episode via SimCore::respawn_gold() when the
+// count drops below gold_respawn_min — see sim_core/mod.rs.
 
 use crate::config;
 use crate::item::ItemKind;

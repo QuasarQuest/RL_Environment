@@ -7,9 +7,11 @@ pub struct HelpOverlay;
 const SHORTCUTS: &[(&str, &str)] = &[
     ("TAB",          "Hold — scoreboard"),
     ("H",            "Toggle this help"),
+    ("D",            "Toggle policy debug"),
+    ("P",            "Cycle policy  ONNX → RANDOM → CYCLE"),
     ("Space",        "Pause / Resume"),
-    ("F",            "Speed up"),
-    ("S",            "Speed down"),
+    ("↑",            "Speed up"),
+    ("↓",            "Speed down"),
     ("Scroll wheel", "Zoom in / out"),
     ("Middle mouse", "Pan camera"),
 ];

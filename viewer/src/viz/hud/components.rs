@@ -10,3 +10,5 @@ use bevy::prelude::*;
 #[derive(Component)] pub struct CurrentSpeedLabel;
 #[derive(Component)] pub struct PauseButtonMarker;
 #[derive(Component)] pub struct PauseButtonText;
+
+#[derive(Component)] pub struct PolicyModeLabel;

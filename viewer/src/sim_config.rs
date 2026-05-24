@@ -13,7 +13,7 @@ impl Default for SimConfig {
         Self {
             paused:           false,
             ticks_per_second: config::DEFAULT_TICKS_PER_SECOND,
-            available_speeds: vec![1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0],
+            available_speeds: vec![1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0, 1000.0, 2500.0, 5000.0],
         }
     }
 }

@@ -1,21 +1,20 @@
 use bevy::prelude::*;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_XL, TOOLBAR_H, FONT_ICON};
-use crate::style::color::{team_color, GOLD_500, GOLD_800};
+use crate::style::color::{GOLD_500, GOLD_800};
 use crate::viz::core_ui::button::spawn_icon_button;
 use crate::viz::core_ui::panel::spawn_button_group;
 use super::components::{
-    TickLabelMarker, TimeLabelMarker, TeamScoreMarker,
+    TickLabelMarker, TimeLabelMarker,
     SpeedDecreaseButton, SpeedIncreaseButton,
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
+    PolicyModeLabel,
 };
 
 pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let bg         = ThemeColor::Background.resolve();
-    let border     = ThemeColor::Border.resolve();
-    let dim        = ThemeColor::TextDim.resolve();
-    let red_color  = team_color(0);
-    let blue_color = team_color(1);
-    let icon_font  = asset_server.load(FONT_ICON);
+    let bg        = ThemeColor::Background.resolve();
+    let border    = ThemeColor::Border.resolve();
+    let dim       = ThemeColor::TextDim.resolve();
+    let icon_font = asset_server.load(FONT_ICON);
 
     commands.spawn((
         UiRoot,
@@ -37,54 +36,17 @@ pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
         ZIndex(100),
     )).with_children(|top_bar| {
 
-        // ── Left: scoreboard RED | tick | BLUE ───────────────────────────────
+        // ── Left: tick counter ────────────────────────────────────────────────
         top_bar.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items:    AlignItems::Stretch,
+            flex_direction:  FlexDirection::Column,
+            align_items:     AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            padding:         UiRect::horizontal(Val::Px(16.0)),
+            row_gap:         Val::Px(2.0),
             ..default()
         }).with_children(|left| {
-            // Team 0
-            left.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items:    AlignItems::Center,
-                column_gap:     Val::Px(8.0),
-                padding:        UiRect::horizontal(Val::Px(16.0)),
-                ..default()
-            }).with_children(|t0| {
-                t0.spawn((Text::new("RED"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(red_color.with_alpha(0.7))));
-                t0.spawn((Text::new("0"), TextFont { font_size: SIZE_XL, ..default() }, TextColor(red_color), TeamScoreMarker(0)));
-            });
-
-            // Separator
-            left.spawn((Node { width: Val::Px(1.0), margin: UiRect::vertical(Val::Px(10.0)), ..default() }, BackgroundColor(border)));
-
-            // Tick counter
-            left.spawn(Node {
-                flex_direction:  FlexDirection::Column,
-                align_items:     AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding:         UiRect::horizontal(Val::Px(16.0)),
-                row_gap:         Val::Px(2.0),
-                ..default()
-            }).with_children(|mid| {
-                mid.spawn((Text::new("0"), TextFont { font_size: SIZE_XL, ..default() }, TextColor(ThemeColor::TextPrimary.resolve()), TickLabelMarker));
-                mid.spawn((Text::new("0 / 0"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim), TimeLabelMarker));
-            });
-
-            // Separator
-            left.spawn((Node { width: Val::Px(1.0), margin: UiRect::vertical(Val::Px(10.0)), ..default() }, BackgroundColor(border)));
-
-            // Team 1
-            left.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items:    AlignItems::Center,
-                column_gap:     Val::Px(8.0),
-                padding:        UiRect::horizontal(Val::Px(16.0)),
-                ..default()
-            }).with_children(|t1| {
-                t1.spawn((Text::new("0"), TextFont { font_size: SIZE_XL, ..default() }, TextColor(blue_color), TeamScoreMarker(1)));
-                t1.spawn((Text::new("BLUE"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(blue_color.with_alpha(0.7))));
-            });
+            left.spawn((Text::new("0"), TextFont { font_size: SIZE_XL, ..default() }, TextColor(ThemeColor::TextPrimary.resolve()), TickLabelMarker));
+            left.spawn((Text::new("0 / 0"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim), TimeLabelMarker));
         });
 
         // ── Centre: speed + pause controls ───────────────────────────────────
@@ -96,14 +58,14 @@ pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
             ..default()
         }).with_children(|centre| {
             spawn_button_group(centre, |grp| {
-                spawn_icon_button(grp, "◀", SpeedDecreaseButton);
+                spawn_icon_button(grp, "◀", icon_font.clone(), SpeedDecreaseButton);
                 grp.spawn((
                     Text::new("10x"),
                     TextFont  { font_size: SIZE_MD, ..default() },
                     TextColor(dim),
                     CurrentSpeedLabel,
                 ));
-                spawn_icon_button(grp, "▶", SpeedIncreaseButton);
+                spawn_icon_button(grp, "▶", icon_font.clone(), SpeedIncreaseButton);
             });
 
             // Pause button
@@ -124,7 +86,7 @@ pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
             });
         });
 
-        // ── Right: help hint ─────────────────────────────────────────────────
+        // ── Right: mode indicator + help hints ───────────────────────────────
         top_bar.spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items:    AlignItems::Center,
@@ -132,6 +94,9 @@ pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
             padding:        UiRect::horizontal(Val::Px(8.0)),
             ..default()
         }).with_children(|right| {
+            right.spawn((Text::new("P"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim)));
+            right.spawn((Text::new("ONNX"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim.with_alpha(0.5)), PolicyModeLabel));
+            right.spawn((Node { width: Val::Px(1.0), height: Val::Px(16.0), ..default() }, BackgroundColor(border)));
             right.spawn((Text::new("TAB"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim)));
             right.spawn((Text::new("Scoreboard"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim.with_alpha(0.5))));
             right.spawn((Node { width: Val::Px(1.0), height: Val::Px(16.0), ..default() }, BackgroundColor(border)));

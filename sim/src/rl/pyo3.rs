@@ -8,6 +8,13 @@
 //   to get a zero-extra-copy numpy array. A single memcpy per step call
 //   instead of ~200K Python float object allocations.
 //
+// Reward/done protocol (updated):
+//   step_batch now returns (&[f32], &[bool]) slices into pre-allocated BatchEnv
+//   buffers — no Vec<(f32,bool)> intermediate allocation, no serial unzip.
+//   pyo3.rs converts those slices to Vec<f32>/Vec<bool> at the FFI boundary,
+//   which is unavoidable (Python needs owned data), but the Rust-side work is
+//   now fully parallel with no serial passes.
+//
 // Python usage:
 //
 //   import atb, numpy as np
@@ -20,7 +27,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 
-use super::batch_env::BatchEnv;
+use super::env::BatchEnv;
 use super::action::ACTION_SIZE;
 use super::obs::{OBS_DIM, OBS_SHAPE, OBS_TOTAL};
 
@@ -54,7 +61,7 @@ impl PyBatchEnv {
 
     // ── Reset ─────────────────────────────────────────────────────────────────
 
-    /// Reset all envs. Returns flat bytearray of shape [n_envs * OBS_TOTAL * 4 bytes].
+    /// Reset all envs in parallel. Returns flat bytearray [n_envs * OBS_TOTAL * 4 bytes].
     /// Python: np.frombuffer(ba, dtype=np.float32).reshape(n_envs, *obs_shape)
     pub fn reset_all<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyByteArray> {
         self.inner.reset_all();
@@ -70,44 +77,57 @@ impl PyBatchEnv {
 
     // ── Step ──────────────────────────────────────────────────────────────────
 
-    /// Step all envs. Returns (obs_bytearray, rewards, dones).
-    /// obs_bytearray: flat [n_envs * OBS_TOTAL * 4 bytes]; reshape to (n_envs, *obs_shape).
+    /// Step all envs in parallel. Returns (obs_bytearray, rewards, dones).
+    ///
+    /// obs_bytearray : flat [n_envs * OBS_TOTAL * 4 bytes]; reshape to (n_envs, *obs_shape).
+    /// rewards       : list[float] — copied from BatchEnv's pre-allocated reward buffer.
+    /// dones         : list[bool]  — copied from BatchEnv's pre-allocated done buffer.
+    ///
+    /// The Vec conversions here are unavoidable — Python needs owned data.
+    /// All Rust-side work (sim step, obs copy, reward/done write) is parallel;
+    /// the only serial work is the FFI boundary copy into Python objects.
     pub fn step_batch<'py>(
         &mut self,
         py: Python<'py>,
         actions: Vec<u32>,
     ) -> (Bound<'py, PyByteArray>, Vec<f32>, Vec<bool>) {
         let (rews, dones) = self.inner.step_batch(&actions);
-        let obs = Self::slice_to_bytearray(py, &self.inner.obs_flat);
+        let rews  = rews.to_vec();
+        let dones = dones.to_vec();
+        let obs   = Self::slice_to_bytearray(py, &self.inner.obs_flat);
         (obs, rews, dones)
     }
 
     /// Step all envs and auto-reset any that finished.
+    /// Useful for the viewer — training uses step_batch + manual reset_env instead.
     pub fn step_batch_auto_reset<'py>(
         &mut self,
         py: Python<'py>,
         actions: Vec<u32>,
     ) -> (Bound<'py, PyByteArray>, Vec<f32>, Vec<bool>) {
         let (rews, dones) = self.inner.step_batch(&actions);
-        for (i, &done) in dones.iter().enumerate() {
+        // Clone before reset_env borrows self.inner mutably.
+        let rews_out:  Vec<f32>  = rews.to_vec();
+        let dones_out: Vec<bool> = dones.to_vec();
+        for (i, &done) in dones_out.iter().enumerate() {
             if done { self.inner.reset_env(i); }
         }
         let obs = Self::slice_to_bytearray(py, &self.inner.obs_flat);
-        (obs, rews, dones)
+        (obs, rews_out, dones_out)
     }
 
     // ── Viewer state queries ──────────────────────────────────────────────────
 
-    pub fn grid_size(&self) -> (usize, usize)                         { self.inner.grid_size() }
-    pub fn get_tiles(&self, i: usize) -> Vec<u8>                      { self.inner.get_tiles(i) }
+    pub fn grid_size(&self) -> (usize, usize)                           { self.inner.grid_size() }
+    pub fn get_tiles(&self, i: usize) -> Vec<u8>                        { self.inner.get_tiles(i) }
     pub fn get_agents(&self, i: usize) -> Vec<(i32, i32, u8, u8, u32)> { self.inner.get_agents(i) }
-    pub fn get_items(&self, i: usize) -> Vec<(i32, i32, u8)>          { self.inner.get_items(i) }
-    pub fn get_tick(&self, i: usize) -> u64                            { self.inner.get_tick(i) }
-    pub fn get_match_ticks(&self, i: usize) -> u64                     { self.inner.get_match_ticks(i) }
+    pub fn get_items(&self, i: usize) -> Vec<(i32, i32, u8)>            { self.inner.get_items(i) }
+    pub fn get_tick(&self, i: usize) -> u64                              { self.inner.get_tick(i) }
+    pub fn get_match_ticks(&self, i: usize) -> u64                       { self.inner.get_match_ticks(i) }
 
-    #[staticmethod] pub fn obs_dim()   -> usize                  { OBS_DIM }
-    #[staticmethod] pub fn obs_shape() -> (usize, usize, usize)  { OBS_SHAPE }
-    #[staticmethod] pub fn action_size() -> usize                { ACTION_SIZE }
+    #[staticmethod] pub fn obs_dim()     -> usize                  { OBS_DIM }
+    #[staticmethod] pub fn obs_shape()   -> (usize, usize, usize)  { OBS_SHAPE }
+    #[staticmethod] pub fn action_size() -> usize                  { ACTION_SIZE }
 }
 
 // ── Module registration ───────────────────────────────────────────────────────

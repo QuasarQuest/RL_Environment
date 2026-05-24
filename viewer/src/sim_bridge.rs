@@ -2,25 +2,63 @@ use bevy::prelude::*;
 use atb::sim_core::{SimCore, AgentState, ItemState};
 use atb::world::grid::Grid;
 use atb::item::ItemKind;
+use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::viz::events::RestartPending;
 
 const CONFIG_PATH: &str = "assets/world/config.ron";
+const ONNX_POLICY_PATH: &str = crate::ONNX_POLICY_PATH;
+
+// ── Policy mode ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolicyMode {
+    #[default]
+    Onnx,
+    Random,
+    Cycling,
+}
+
+impl PolicyMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Onnx    => Self::Random,
+            Self::Random  => Self::Cycling,
+            Self::Cycling => Self::Onnx,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Onnx    => "ONNX",
+            Self::Random  => "RANDOM",
+            Self::Cycling => "CYCLE",
+        }
+    }
+}
 
 // ── Resource ──────────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
 pub struct SimBridge {
-    pub sim:      SimCore,
-    pub game_over: bool,
+    pub sim:            SimCore,
+    pub game_over:      bool,
+    pub last_action:    u32,
+    pub action_counts:  [u32; 26],
+    pub episode_reward: f32,
+    pub mode:           PolicyMode,
+    policy:             Option<OnnxPolicy>,
 }
 
 impl SimBridge {
     fn new() -> Self {
-        Self {
-            sim:      SimCore::new(CONFIG_PATH),
-            game_over: false,
-        }
+        let policy = match OnnxPolicy::load(ONNX_POLICY_PATH) {
+            Ok(p)  => { info!("ONNX policy loaded"); Some(p) }
+            Err(e) => { warn!("No ONNX policy found ({e}), using cycling actions"); None }
+        };
+        Self { sim: SimCore::new(CONFIG_PATH), game_over: false, policy,
+               last_action: 25, action_counts: [0; 26], episode_reward: 0.0,
+               mode: PolicyMode::Onnx }
     }
 
     pub fn tick(&self) -> u64 { self.sim.tick }
@@ -116,17 +154,40 @@ pub fn step_sim(
 ) {
     if restart.0 {
         bridge.sim.reset();
-        bridge.game_over = false;
+        bridge.game_over    = false;
+        bridge.last_action  = 25;
+        bridge.action_counts = [0; 26];
+        bridge.episode_reward = 0.0;
         restart.0 = false;
     }
 
     if cfg.paused || bridge.game_over { return; }
 
     timer.0.tick(time.delta());
-    if timer.0.just_finished() {
-        let (_rew, done) = bridge.sim.step(25); // Wait action; ONNX will replace this
+    let steps = timer.0.times_finished_this_tick();
+    for _ in 0..steps {
+        let action = match bridge.mode {
+            PolicyMode::Onnx => {
+                if let Some(ref p) = bridge.policy {
+                    p.act(&bridge.sim.obs_buf)
+                } else {
+                    (bridge.sim.tick % 8) as u32
+                }
+            }
+            PolicyMode::Random => {
+                // LCG step — gives different action every tick without an rng dep.
+                let x = bridge.sim.tick.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (x >> 38) as u32 % 26
+            }
+            PolicyMode::Cycling => (bridge.sim.tick % 8) as u32,
+        };
+        bridge.last_action = action;
+        bridge.action_counts[action as usize] += 1;
+        let (rew, done) = bridge.sim.step(action);
+        bridge.episode_reward += rew;
         if done {
             bridge.game_over = true;
+            break;
         }
     }
 }

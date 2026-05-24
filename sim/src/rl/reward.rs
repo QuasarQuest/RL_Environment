@@ -18,9 +18,23 @@
 //   negative → agent moved away      → negative shaping
 //   zero     → agent didn't move     → no shaping
 //
-// Scale is kept small (APPROACH = 0.01) so shaping never dominates the
-// sparse DEPOSIT signal. Satisfies potential-based shaping:
+// APPROACH increased from 0.01 → 0.05:
+//   With 26 actions and only 8 being Move, the expected approach signal per
+//   step under a random policy was tiny (~0.01 * 1 * 8/26 ≈ 0.003).  That's
+//   barely above the tick penalty noise, giving the policy almost no gradient
+//   to climb early in training.  0.05 gives a clearer signal (0.015 expected)
+//   while still satisfying potential-based shaping and not dominating DEPOSIT.
+//
+// TICK softened from -0.001 → -0.0005:
+//   The old tick penalty was large enough relative to approach that standing
+//   still (reward = -0.001) was as bad as moving away (reward ≈ -0.001-0.01).
+//   Softening separates the two signals so the policy can distinguish "did
+//   nothing" from "actively moved away".
+//
+// Scale check (still potential-based):
 //   F = γ·Φ(s') − Φ(s) with Φ(s) = −APPROACH · dist
+//   Max approach reward per step = APPROACH * max_speed = 0.05 * 2 = 0.10
+//   DEPOSIT = 5.0, so approach shaping is at most 2% of a deposit — safe.
 //
 // Target selection
 // ----------------
@@ -34,8 +48,8 @@ use super::state::AgentState;
 
 pub const PICKUP:   f32 =  0.5;
 pub const DEPOSIT:  f32 =  5.0;
-pub const TICK:     f32 = -0.001;
-pub const APPROACH: f32 =  0.01;
+pub const TICK:     f32 = -0.0005;
+pub const APPROACH: f32 =  0.05;
 
 /// Manhattan distance between two grid positions.
 #[inline]

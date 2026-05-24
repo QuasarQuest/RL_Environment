@@ -174,28 +174,30 @@ pub fn build_scoreboard_rows(
 }
 
 pub fn refresh_scoreboard_stats(
-    bridge:     Res<SimBridge>,
-    mut hp_q:   Query<(&mut Text, &ScoreboardRowHp)>,
-    mut ammo_q: Query<(&mut Text, &ScoreboardRowAmmo)>,
-    mut gold_q: Query<(&mut Text, &ScoreboardRowGold)>,
-    mut sc_q:   Query<(&mut Text, &ScoreboardRowScore)>,
-    mut team_q: Query<(&mut Text, &ScoreboardTeamScore)>,
+    bridge: Res<SimBridge>,
+    mut qs: ParamSet<(
+        Query<(&mut Text, &ScoreboardRowHp)>,
+        Query<(&mut Text, &ScoreboardRowAmmo)>,
+        Query<(&mut Text, &ScoreboardRowGold)>,
+        Query<(&mut Text, &ScoreboardRowScore)>,
+        Query<(&mut Text, &ScoreboardTeamScore)>,
+    )>,
 ) {
     if !bridge.is_changed() { return; }
     let agents = bridge.agents();
-    for (mut text, marker) in hp_q.iter_mut() {
+    for (mut text, marker) in qs.p0().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.hearts)); }
     }
-    for (mut text, marker) in ammo_q.iter_mut() {
+    for (mut text, marker) in qs.p1().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.ammo)); }
     }
-    for (mut text, marker) in gold_q.iter_mut() {
+    for (mut text, marker) in qs.p2().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.gold_carried)); }
     }
-    for (mut text, marker) in sc_q.iter_mut() {
+    for (mut text, marker) in qs.p3().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(format!("{}", a.score)); }
     }
-    for (mut text, marker) in team_q.iter_mut() {
+    for (mut text, marker) in qs.p4().iter_mut() {
         *text = Text::new(bridge.team_score(marker.0).to_string());
     }
 }

@@ -41,6 +41,7 @@ from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
+from model.export import export_to_onnx
 from model.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.callbacks import (
@@ -138,17 +139,31 @@ def _vecnorm_path_for(model_path: str) -> Path:
     return Path(stem + "_vecnorm.pkl")
 
 
+def _resolve_resume(model_path: str) -> tuple[str, Path]:
+    """Return (sb3_load_path, vecnorm_path) for a resume checkpoint.
+
+    eval_best is a directory containing best_model.zip written by EvalCallback;
+    vecnorm is saved as a sibling file at {dir}_vecnorm.pkl by EvalWithVecNorm.
+    All other checkpoints (final, step_N, best_rolling) are bare zip paths.
+    """
+    p = Path(model_path)
+    if p.is_dir():
+        return str(p / "best_model"), Path(str(p) + "_vecnorm.pkl")
+    return model_path, _vecnorm_path_for(model_path)
+
+
 load_dotenv()
 
 console = Console()
 
-_RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
+_RL_ROOT       = Path(__file__).resolve().parent.parent.parent  # rl/
+_WORKSPACE_ROOT = _RL_ROOT.parent                                 # algorithm_test_bed/
 
 os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 
 
 def _resolve_dirs(cfg: TrainConfig) -> tuple[Path, Path, Path]:
-    base = _RL_ROOT
+    base = _WORKSPACE_ROOT
     models = base / cfg.models_dir
     stats = base / cfg.stats_dir
     tb = base / cfg.tensorboard_dir
@@ -224,18 +239,14 @@ def train(cfg: DictConfig) -> None:
     resume: str | None = getattr(t_cfg, "resume", None)
 
     if resume:
+        resume_path, vn_path = _resolve_resume(resume)
         console.print(f"Resuming from {resume}")
         model = algo_spec.cls.load(
-            resume,
+            resume_path,
             env=vec_env,
             device=t_cfg.device,
             tensorboard_log=str(tb_dir),
         )
-        # Restore VecNormalize stats from the checkpoint so the resumed run
-        # continues with the same normalisation the policy was trained on.
-        # FIX: use _vecnorm_path_for() — Path.with_suffix("") / "_vecnorm.pkl"
-        # creates a subdirectory path, not the flat file that _save() writes.
-        vn_path = _vecnorm_path_for(resume)
         if vec_normalize is not None and vn_path.exists():
             vec_normalize = VecNormalize.load(str(vn_path), vec_env)
             console.print(f"  vecnorm  ← {vn_path}")
@@ -327,6 +338,14 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  model  → {final}.zip")
     console.print(f"  stats  → {stats_dir / run_tag}.h5")
     console.print(f"  tb     → tensorboard --logdir {tb_dir}")
+
+    onnx_path = models_dir / "policy.onnx"
+    vn_path = _vecnorm_path_for(str(final))
+    try:
+        export_to_onnx(model.policy, onnx_path, vecnorm_path=vn_path if vn_path.exists() else None)
+        console.print(f"  policy → {onnx_path}")
+    except Exception as exc:
+        console.print(f"  [yellow]ONNX export failed: {exc}[/yellow]")
 
 
 if __name__ == "__main__":
