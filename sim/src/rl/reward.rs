@@ -78,9 +78,11 @@ pub fn compute(
     prev_gold:      u8,
     prev_score:     u32,
     gold_positions: &[GridPos],
+    wall_hit:       bool,
 ) -> f32 {
     cfg.tick
         + cfg.pickup  * agent.gold_carried.saturating_sub(prev_gold) as f32
         + cfg.deposit * agent.score.saturating_sub(prev_score)       as f32
         + approach_shaping(cfg, prev_pos, agent, gold_positions)
+        + if wall_hit { cfg.wall_hit } else { 0.0 }
 }

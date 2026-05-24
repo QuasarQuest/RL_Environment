@@ -8,10 +8,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("TAB",          "Hold — scoreboard"),
     ("H",            "Toggle this help"),
     ("D",            "Toggle policy debug"),
-    ("P",            "Cycle policy  ONNX → RANDOM → BT"),
+    ("P",            "Cycle policy  ONNX > RANDOM > BT"),
     ("Space",        "Pause / Resume"),
-    ("↑",            "Speed up"),
-    ("↓",            "Speed down"),
+    ("Up",           "Speed up"),
+    ("Down",         "Speed down"),
     ("Scroll wheel", "Zoom in / out"),
     ("Middle mouse", "Pan camera"),
 ];

@@ -3,7 +3,7 @@
 // Observation space constants — single source of truth for the CNN input layout.
 // build_obs_into lives in engine/obs.rs; Python consumers use these via pyo3.rs.
 
-pub const OBS_CHANNELS: usize = 9;
+pub const OBS_CHANNELS: usize = 11;
 
 // ── Spatial channels (one pixel = one tile in the agent's crop view) ──────────
 
@@ -19,9 +19,17 @@ pub const CH_ITEMS:    usize = 5;
 
 // ── Broadcast channels (filled uniformly — agent-level scalars) ───────────────
 
-pub const CH_CARRYING: usize = 6; // 1.0 if carrying gold, 0.0 otherwise
+pub const CH_CARRYING: usize = 6; // gold_carried / AGENT_MAX_GOLD ∈ [0, 1]
 pub const CH_HEALTH:   usize = 7; // hearts / AGENT_MAX_HEARTS ∈ [0, 1]
 pub const CH_AMMO:     usize = 8; // ammo  / AGENT_MAX_AMMO   ∈ [0, 1]
+
+// ── Broadcast channels (navigation — global, works on any map size) ───────────
+
+// Signed direction from agent to current goal (nearest gold when not full,
+// own base when full), normalised by map dimensions → roughly ∈ [-1, 1].
+// Allows navigation even when the goal is outside the local crop window.
+pub const CH_GOAL_DX:  usize = 9;
+pub const CH_GOAL_DY:  usize = 10;
 
 // ── CH_ITEMS encoding ─────────────────────────────────────────────────────────
 

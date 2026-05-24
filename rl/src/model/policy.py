@@ -73,10 +73,11 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
     - Earlier 3×3 convs with padding=1 preserve spatial size, so the model
       can still reason about object position at full resolution before
       compressing.
-    - The conv depth (32→64→64) is intentionally modest. With 6 input
-      channels and a 25×25 footprint, a deeper stack overfits the toy task.
-    - Input channels: 6 (OOB, base, gold, obstacles, carrying, self).
-      The flat_dim is computed with a dry run so changing OBS_CHANNELS or
+    - The conv depth (32→64→64) is intentionally modest; a deeper stack
+      overfits the grid task without adding meaningful capacity.
+    - Input channels: 9 (OOB, base, gold, obstacle, enemy, items,
+      carrying-fraction, health, ammo) — defined in sim/src/rl/obs.rs.
+      flat_dim is computed via a dry run so changing OBS_CHANNELS or
       OBS_CROP_SIZE in Rust never requires editing this file.
     """
 
@@ -137,7 +138,6 @@ ATB_CNN_POLICY_KWARGS = dict(
 
 # Canonical kwargs consumed by train.py. Swap the RHS to switch back to MLP.
 ATB_POLICY_KWARGS = ATB_CNN_POLICY_KWARGS
-
 
 # Re-exported for callers that want the policy class directly.
 AtbPolicy = ActorCriticPolicy

@@ -25,6 +25,7 @@ pub use crate::entity::{AgentState, ItemState};
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 
+use crate::entity::agent::Action;
 use crate::entity::item::ItemKind;
 use crate::rl::action::int_to_action;
 use crate::rl::obs::OBS_TOTAL;
@@ -108,7 +109,7 @@ impl SimCore {
             .collect();
 
         let mut obs_buf = vec![0.0f32; OBS_TOTAL];
-        build_obs_into(&mut obs_buf, &snap.agents[0], &snap.items, &snap.agents, &snap.grid);
+        build_obs_into(&mut obs_buf, &snap.agents[0], &snap.items, &snap.agents, &gold_positions, &snap.grid);
 
         let rng = match seed {
             Some(s) => SmallRng::seed_from_u64(s),
@@ -153,7 +154,7 @@ impl SimCore {
         self.prev_gold  = 0;
         self.prev_score = 0;
         self.prev_pos   = self.agents[0].pos;
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.grid);
+        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.gold_positions, &self.grid);
     }
 
     pub fn step(&mut self, action: u32) -> (f32, bool) {
@@ -165,7 +166,9 @@ impl SimCore {
         let done = self.tick >= self.match_ticks;
 
         physics::tick_speed_buffs(&mut self.agents);
-        physics::apply_action(&mut self.agents, &self.grid, 0, int_to_action(action));
+        let agent_action = int_to_action(action);
+        physics::apply_action(&mut self.agents, &self.grid, 0, agent_action);
+        let wall_hit = matches!(agent_action, Action::Move(_)) && self.agents[0].pos == self.prev_pos;
 
         // Run scripted enemies (agents 1+).
         for idx in 1..self.agents.len() {
@@ -194,8 +197,9 @@ impl SimCore {
             self.prev_gold,
             self.prev_score,
             &self.gold_positions,
+            wall_hit,
         );
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.grid);
+        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.gold_positions, &self.grid);
         (rew, done)
     }
 

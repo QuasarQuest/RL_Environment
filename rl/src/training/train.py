@@ -340,10 +340,12 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  tb     → tensorboard --logdir {tb_dir}")
 
     onnx_path = models_dir / "policy.onnx"
-    vn_path = _vecnorm_path_for(str(final))
+    best_vn_path = Path(eval_best_path + "_vecnorm.pkl")
     try:
-        export_to_onnx(model.policy, onnx_path, vecnorm_path=vn_path if vn_path.exists() else None)
-        console.print(f"  policy → {onnx_path}")
+        from stable_baselines3 import PPO as _PPO
+        best_policy = _PPO.load(str(Path(eval_best_path) / "best_model")).policy
+        export_to_onnx(best_policy, onnx_path, vecnorm_path=best_vn_path if best_vn_path.exists() else None)
+        console.print(f"  policy → {onnx_path}  (eval best)")
     except Exception as exc:
         console.print(f"  [yellow]ONNX export failed: {exc}[/yellow]")
 

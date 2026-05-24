@@ -12,6 +12,7 @@
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::cmp::Reverse;
 
+use crate::config::AGENT_MAX_GOLD;
 use crate::entity::agent::{AgentState, Action, Dir};
 use crate::entity::item::{ItemKind, ItemState};
 use crate::world::coords::GridPos;
@@ -152,9 +153,9 @@ pub fn compute_action(
     }
 }
 
-/// Shared goal selection: fetch gold when empty, return to base when carrying.
+/// Shared goal selection: fetch gold until full, then return to base.
 fn select_goal(agent: &AgentState, items: &[ItemState]) -> Option<GridPos> {
-    if agent.gold_carried == 0 {
+    if agent.gold_carried < AGENT_MAX_GOLD {
         nearest_gold(agent.pos, items)
     } else {
         Some(agent.base_pos)

@@ -183,6 +183,9 @@ pub struct RewardConfig {
     pub deposit: f32,
     #[serde(default = "default_reward_approach")]
     pub approach: f32,
+    /// Small penalty when a Move action is blocked by a wall (no position change).
+    #[serde(default)]
+    pub wall_hit: f32,
     /// Reward on killing an enemy agent.  0 in stages 1–5.
     #[serde(default)]
     pub kill: f32,
@@ -205,6 +208,7 @@ impl Default for RewardConfig {
             pickup:        Self::DEFAULT_PICKUP,
             deposit:       Self::DEFAULT_DEPOSIT,
             approach:      Self::DEFAULT_APPROACH,
+            wall_hit:      0.0,
             kill:          0.0,
             death_penalty: 0.0,
         }

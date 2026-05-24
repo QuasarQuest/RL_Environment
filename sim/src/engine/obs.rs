@@ -9,20 +9,22 @@ use crate::config::{AGENT_MAX_AMMO, AGENT_MAX_GOLD, AGENT_MAX_HEARTS};
 use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 use crate::rl::obs::{
-    CH_AMMO, CH_BASE, CH_CARRYING, CH_ENEMY, CH_GOLD,
+    CH_AMMO, CH_BASE, CH_CARRYING, CH_ENEMY, CH_GOAL_DX, CH_GOAL_DY, CH_GOLD,
     CH_HEALTH, CH_ITEMS, CH_OBSTACLE, CH_OOB,
     ITEM_AMMO, ITEM_HEALTH, ITEM_SPEED,
     OBS_CROP_SIZE, OBS_TOTAL,
 };
+use crate::world::coords::GridPos;
 use crate::world::grid::Grid;
 use crate::world::tile::Tile;
 
 pub fn build_obs_into(
-    buf:    &mut [f32],
-    agent:  &AgentState,
-    items:  &[ItemState],
-    agents: &[AgentState],
-    grid:   &Grid,
+    buf:            &mut [f32],
+    agent:          &AgentState,
+    items:          &[ItemState],
+    agents:         &[AgentState],
+    gold_positions: &[GridPos],
+    grid:           &Grid,
 ) {
     debug_assert_eq!(buf.len(), OBS_TOTAL);
     buf.fill(0.0);
@@ -40,6 +42,22 @@ pub fn build_obs_into(
         .fill(agent.hearts as f32 / AGENT_MAX_HEARTS as f32);
     buf[CH_AMMO * plane..(CH_AMMO + 1) * plane]
         .fill(agent.ammo as f32 / AGENT_MAX_AMMO as f32);
+
+    // ── Goal direction (works at any map size) ────────────────────────────────
+
+    let goal: Option<GridPos> = if agent.gold_carried < AGENT_MAX_GOLD {
+        gold_positions.iter()
+            .min_by_key(|&&g| (g.x - ax).abs() + (g.y - ay).abs())
+            .copied()
+    } else {
+        Some(agent.base_pos)
+    };
+    if let Some(t) = goal {
+        let dx = (t.x - ax) as f32 / grid.width  as f32;
+        let dy = (t.y - ay) as f32 / grid.height as f32;
+        buf[CH_GOAL_DX * plane..(CH_GOAL_DX + 1) * plane].fill(dx);
+        buf[CH_GOAL_DY * plane..(CH_GOAL_DY + 1) * plane].fill(dy);
+    }
 
     // ── Tile scan: OOB + base + obstacles ─────────────────────────────────────
 
