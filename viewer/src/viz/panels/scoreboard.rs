@@ -3,15 +3,13 @@ use bevy::color::Alpha;
 use atb::engine::AgentState;
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
-use crate::style::color::{team_color, SURFACE_HIGHLIGHT, GREEN_400, RED_500};
+use crate::style::color::{team_color, SURFACE_HIGHLIGHT, GREEN_400, ORANGE_400, RED_500};
 use crate::team::Team;
 use super::components::{
     TabScoreboard, TabScoreboardContent, ScoreboardRow,
     ScoreboardTeamScore,
     ScoreboardRowHp, ScoreboardRowAmmo, ScoreboardRowGold, ScoreboardRowScore,
 };
-
-const ORANGE_400: Color = Color::srgb(0.95, 0.60, 0.10);
 
 const F_AGENT: f32 = 14.0;
 const F_STAT:  f32 = 14.0;

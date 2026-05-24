@@ -1,8 +1,9 @@
 use bevy::prelude::*;
+use atb::rl::action::ACTION_SIZE;
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
 
-const ACTION_NAMES: [&str; 26] = [
+const ACTION_NAMES: [&str; ACTION_SIZE] = [
     "Move N", "Move S", "Move E", "Move W", "Move NE", "Move NW", "Move SE", "Move SW",
     "Atk N",  "Atk S",  "Atk E",  "Atk W",  "Atk NE",  "Atk NW",  "Atk SE",  "Atk SW",
     "Rng N",  "Rng S",  "Rng E",  "Rng W",  "Rng NE",  "Rng NW",  "Rng SE",  "Rng SW",

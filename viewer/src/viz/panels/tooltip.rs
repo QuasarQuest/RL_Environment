@@ -4,6 +4,12 @@ use crate::style::{ThemeColor, UiRoot, SIZE_SM};
 use crate::viz::camera::MainCamera;
 use atb::config;
 
+/// Fraction of TILE_SIZE used as the hover hit radius.
+const HIT_RADIUS_FACTOR: f32 = 0.6;
+/// Pixel offset of the tooltip panel relative to the cursor position.
+const TOOLTIP_OFFSET_X: f32 = 14.0;
+const TOOLTIP_OFFSET_Y: f32 = -10.0;
+
 #[derive(Component)] pub struct TooltipPanel;
 #[derive(Component)] pub struct TooltipName;
 #[derive(Component)] pub struct TooltipStats;
@@ -57,7 +63,7 @@ pub fn update_tooltip(
         return;
     };
 
-    let hit_radius_sq = (config::TILE_SIZE * 0.6).powi(2);
+    let hit_radius_sq = (config::TILE_SIZE * HIT_RADIUS_FACTOR).powi(2);
     let world_cursor  = camera
         .viewport_to_world_2d(cam_tf, cursor_px)
         .unwrap_or(Vec2::ZERO);
@@ -79,8 +85,8 @@ pub fn update_tooltip(
             for mut t in texts.p0().iter_mut() { *t = Text::new(&label); }
             for mut t in texts.p1().iter_mut() { *t = Text::new(&info);  }
             panel_node.display = Display::Flex;
-            panel_node.left    = Val::Px(cursor_px.x + 14.0);
-            panel_node.top     = Val::Px(cursor_px.y - 10.0);
+            panel_node.left    = Val::Px(cursor_px.x + TOOLTIP_OFFSET_X);
+            panel_node.top     = Val::Px(cursor_px.y + TOOLTIP_OFFSET_Y);
             *vis = Visibility::Visible;
             return;
         }

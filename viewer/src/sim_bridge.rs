@@ -4,7 +4,7 @@ use atb::engine::enemy::{EnemyPathCache, compute_action};
 use atb::world::config::EnemyKind;
 use atb::world::grid::Grid;
 use atb::entity::item::ItemKind;
-use atb::rl::action::action_to_int;
+use atb::rl::action::{action_to_int, ACTION_SIZE, ACTION_WAIT};
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::viz::events::RestartPending;
@@ -47,7 +47,7 @@ pub struct SimBridge {
     pub sim:            SimCore,
     pub game_over:      bool,
     pub last_action:    u32,
-    pub action_counts:  [u32; 26],
+    pub action_counts:  [u32; ACTION_SIZE],
     pub episode_reward: f32,
     pub mode:           PolicyMode,
     policy:             Option<OnnxPolicy>,
@@ -63,7 +63,7 @@ impl SimBridge {
         let mode = if policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
         Self {
             sim: SimCore::new(CONFIG_PATH), game_over: false, policy,
-            last_action: 25, action_counts: [0; 26], episode_reward: 0.0,
+            last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
             bt_cache: EnemyPathCache::new(),
         }
@@ -164,8 +164,8 @@ pub fn step_sim(
         bridge.sim.reset();
         bridge.bt_cache       = EnemyPathCache::new();
         bridge.game_over      = false;
-        bridge.last_action    = 25;
-        bridge.action_counts  = [0; 26];
+        bridge.last_action    = ACTION_WAIT;
+        bridge.action_counts  = [0; ACTION_SIZE];
         bridge.episode_reward = 0.0;
         restart.0 = false;
     }
@@ -180,13 +180,13 @@ pub fn step_sim(
                 if let Some(ref p) = bridge.policy {
                     p.act(&bridge.sim.obs_buf)
                 } else {
-                    25 // Wait — no ONNX model loaded
+                    ACTION_WAIT
                 }
             }
             PolicyMode::Random => {
                 // LCG step — different action every tick, no rng dep.
                 let x = bridge.sim.tick.wrapping_mul(6364136223846793005).wrapping_add(1);
-                (x >> 38) as u32 % 26
+                (x >> 38) as u32 % ACTION_SIZE as u32
             }
             PolicyMode::BehaviorTree => {
                 // Deref once to &mut SimBridge so the borrow checker sees

@@ -201,8 +201,18 @@ pub const BIT_ENEMY_NEARBY:   u64 = 1 << 5;
 pub const BIT_BASE_CLOSER:    u64 = 1 << 6;
 pub const BIT_LOW_HEALTH:     u64 = 1 << 7;
 
-const NEAR_SQ:           i32 = 10 * 10;
+/// Tiles-squared threshold for "nearby" detection (10-tile radius).
+const NEAR_SQ: i32 = 10 * 10;
+
+/// Hearts at or below this value triggers the low-health world bit.
 const LOW_HEALTH_THRESH: u8 = 1;
+
+/// Navigation actions cost more than instant actions — reflects expected steps.
+const COST_NAVIGATE: u32 = 4;
+/// Instant single-tile actions (pickup, deposit, flee step).
+const COST_INSTANT: u32 = 1;
+/// Wait is always available but heavily penalised so the planner prefers any action.
+const COST_WAIT: u32 = 20;
 
 pub const ACT_NAVIGATE_TO_GOLD: &str = "navigate_to_gold";
 pub const ACT_COLLECT_GOLD:     &str = "collect_gold";
@@ -218,7 +228,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    0,
         effect_mask:  BIT_GOLD_NEARBY,
         effect_value: BIT_GOLD_NEARBY,
-        cost: 4,
+        cost: COST_NAVIGATE,
     },
     Action {
         name:         ACT_COLLECT_GOLD,
@@ -226,7 +236,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    BIT_GOLD_NEARBY,
         effect_mask:  BIT_HAS_GOLD | BIT_INVENTORY_HALF | BIT_GOLD_NEARBY,
         effect_value: BIT_HAS_GOLD | BIT_INVENTORY_HALF,
-        cost: 1,
+        cost: COST_INSTANT,
     },
     Action {
         name:         ACT_NAVIGATE_TO_BASE,
@@ -234,7 +244,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    BIT_HAS_GOLD,
         effect_mask:  BIT_ON_OWN_BASE,
         effect_value: BIT_ON_OWN_BASE,
-        cost: 4,
+        cost: COST_NAVIGATE,
     },
     Action {
         name:         ACT_DROP_GOLD,
@@ -242,7 +252,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    BIT_ON_OWN_BASE | BIT_HAS_GOLD,
         effect_mask:  BIT_HAS_GOLD | BIT_INVENTORY_FULL | BIT_INVENTORY_HALF | BIT_ON_OWN_BASE,
         effect_value: 0,
-        cost: 1,
+        cost: COST_INSTANT,
     },
     Action {
         name:         ACT_FLEE,
@@ -250,7 +260,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    BIT_ENEMY_NEARBY | BIT_LOW_HEALTH,
         effect_mask:  BIT_ENEMY_NEARBY,
         effect_value: 0,
-        cost: 1,
+        cost: COST_INSTANT,
     },
     Action {
         name:         ACT_WAIT,
@@ -258,7 +268,7 @@ pub static ACTIONS: &[Action] = &[
         pre_value:    0,
         effect_mask:  0,
         effect_value: 0,
-        cost: 20,
+        cost: COST_WAIT,
     },
 ];
 

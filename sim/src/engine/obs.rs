@@ -68,9 +68,7 @@ pub fn build_obs_into(
     for item in items {
         let cx = item.pos.x - ax + centre;
         let cy = item.pos.y - ay + centre;
-        if cx < 0 || cx >= OBS_CROP_SIZE as i32 || cy < 0 || cy >= OBS_CROP_SIZE as i32 {
-            continue;
-        }
+        if !in_crop(cx, cy) { continue; }
         match item.kind {
             ItemKind::Gold       => buf[pixel(CH_GOLD,  cx, cy)] = 1.0,
             ItemKind::Health     => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_HEALTH,
@@ -85,10 +83,16 @@ pub fn build_obs_into(
         if other.team == agent.team { continue; }
         let cx = other.pos.x - ax + centre;
         let cy = other.pos.y - ay + centre;
-        if cx >= 0 && cx < OBS_CROP_SIZE as i32 && cy >= 0 && cy < OBS_CROP_SIZE as i32 {
+        if in_crop(cx, cy) {
             buf[pixel(CH_ENEMY, cx, cy)] = 1.0;
         }
     }
+}
+
+#[inline(always)]
+fn in_crop(cx: i32, cy: i32) -> bool {
+    let size = OBS_CROP_SIZE as i32;
+    cx >= 0 && cx < size && cy >= 0 && cy < size
 }
 
 #[inline(always)]

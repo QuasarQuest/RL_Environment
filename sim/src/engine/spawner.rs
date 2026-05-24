@@ -18,6 +18,10 @@ use crate::entity::agent::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
 use crate::world::{coords::GridPos, grid::Grid, tile::Tile};
 
+/// Per-tick probability a single missing slot fires. Geometric distribution
+/// keeps spawn timing unpredictable so the agent cannot time arrivals.
+pub const DEFAULT_SPAWN_PROB: f32 = 0.02;
+
 pub struct SpawnBudget {
     pub kind:       ItemKind,
     pub spawn_prob: f32,

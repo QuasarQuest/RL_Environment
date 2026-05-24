@@ -3,6 +3,9 @@ use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_LG, SIZE_XL};
 use crate::viz::events::RestartPending;
 
+const MODAL_W: f32 = 400.0;
+const MODAL_H: f32 = 320.0;
+
 #[derive(Component)] pub struct EndScreen;
 #[derive(Component)] pub struct WinnerLabel;
 #[derive(Component)] pub struct QuitButton;
@@ -21,10 +24,10 @@ pub fn spawn_end_screen(mut commands: Commands) {
             position_type:  PositionType::Absolute,
             left:           Val::Percent(50.0),
             top:            Val::Percent(50.0),
-            margin:         UiRect { left: Val::Px(-200.0), top: Val::Px(-160.0), ..default() },
+            margin:         UiRect { left: Val::Px(-MODAL_W / 2.0), top: Val::Px(-MODAL_H / 2.0), ..default() },
             flex_direction: FlexDirection::Column,
             align_items:    AlignItems::Center,
-            min_width:      Val::Px(400.0),
+            min_width:      Val::Px(MODAL_W),
             padding:        UiRect::all(Val::Px(36.0)),
             row_gap:        Val::Px(16.0),
             border:         UiRect::all(Val::Px(1.0)),

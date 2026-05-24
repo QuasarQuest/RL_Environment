@@ -1,11 +1,6 @@
 use tract_onnx::prelude::*;
-
-// Must match atb::rl::obs constants exactly.
-// If OBS_CHANNELS changes in sim/src/rl/obs.rs, update here too.
-const OBS_CHANNELS: usize = 9;   // 6 spatial + 3 broadcast (carrying, health, ammo)
-const OBS_SIZE:     usize = 25;
-pub const OBS_TOTAL: usize = OBS_CHANNELS * OBS_SIZE * OBS_SIZE; // 5625
-const ACTION_WAIT:  u32   = 25;
+use atb::rl::obs::{OBS_CHANNELS, OBS_CROP_SIZE as OBS_SIZE, OBS_TOTAL};
+use atb::rl::action::ACTION_WAIT;
 
 type Model = RunnableModel<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 

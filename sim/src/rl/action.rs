@@ -13,6 +13,8 @@
 use crate::entity::agent::{Action, Dir};
 
 pub const ACTION_SIZE: usize = 26;
+/// Integer index of the Wait action — safe fallback when no better action is available.
+pub const ACTION_WAIT: u32 = 25;
 
 /// Convert a neural net output integer to a sim Action.
 /// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.

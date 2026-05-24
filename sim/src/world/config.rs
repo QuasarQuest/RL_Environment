@@ -191,15 +191,22 @@ pub struct RewardConfig {
     pub death_penalty: f32,
 }
 
+impl RewardConfig {
+    pub const DEFAULT_TICK:     f32 = -0.0005;
+    pub const DEFAULT_PICKUP:   f32 =  0.5;
+    pub const DEFAULT_DEPOSIT:  f32 =  5.0;
+    pub const DEFAULT_APPROACH: f32 =  0.05;
+}
+
 impl Default for RewardConfig {
     fn default() -> Self {
         Self {
-            tick:          -0.0005,
-            pickup:         0.5,
-            deposit:        5.0,
-            approach:       0.05,
-            kill:           0.0,
-            death_penalty:  0.0,
+            tick:          Self::DEFAULT_TICK,
+            pickup:        Self::DEFAULT_PICKUP,
+            deposit:       Self::DEFAULT_DEPOSIT,
+            approach:      Self::DEFAULT_APPROACH,
+            kill:          0.0,
+            death_penalty: 0.0,
         }
     }
 }
@@ -237,10 +244,10 @@ fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
 fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
-fn default_reward_tick()        -> f32 { -0.0005 }
-fn default_reward_pickup()      -> f32 {  0.5 }
-fn default_reward_deposit()     -> f32 {  5.0 }
-fn default_reward_approach()    -> f32 {  0.05 }
+fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
+fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
+fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
+fn default_reward_approach()    -> f32 { RewardConfig::DEFAULT_APPROACH }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 

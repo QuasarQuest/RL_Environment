@@ -128,7 +128,11 @@ pub struct EnemyPathCache {
 }
 
 impl EnemyPathCache {
-    pub fn new() -> Self { Self { path: VecDeque::new(), cached_goal: None } }
+    pub fn new() -> Self { Self::default() }
+}
+
+impl Default for EnemyPathCache {
+    fn default() -> Self { Self { path: VecDeque::new(), cached_goal: None } }
 }
 
 // ── Public interface ──────────────────────────────────────────────────────────
@@ -148,18 +152,22 @@ pub fn compute_action(
     }
 }
 
-fn chaser_action(agent: &AgentState, items: &[ItemState], grid: &Grid) -> Action {
-    let target = if agent.gold_carried == 0 {
-        match nearest_gold(agent.pos, items) {
-            Some(g) => g,
-            None    => return Action::Wait,
-        }
+/// Shared goal selection: fetch gold when empty, return to base when carrying.
+fn select_goal(agent: &AgentState, items: &[ItemState]) -> Option<GridPos> {
+    if agent.gold_carried == 0 {
+        nearest_gold(agent.pos, items)
     } else {
-        agent.base_pos
-    };
-    greedy_move(agent.pos, target, grid)
-        .map(Action::Move)
-        .unwrap_or(Action::Wait)
+        Some(agent.base_pos)
+    }
+}
+
+fn chaser_action(agent: &AgentState, items: &[ItemState], grid: &Grid) -> Action {
+    match select_goal(agent, items) {
+        Some(target) => greedy_move(agent.pos, target, grid)
+            .map(Action::Move)
+            .unwrap_or(Action::Wait),
+        None => Action::Wait,
+    }
 }
 
 fn bt_action(
@@ -168,13 +176,9 @@ fn bt_action(
     grid:  &Grid,
     cache: &mut EnemyPathCache,
 ) -> Action {
-    let goal = if agent.gold_carried == 0 {
-        match nearest_gold(agent.pos, items) {
-            Some(g) => g,
-            None    => return Action::Wait,
-        }
-    } else {
-        agent.base_pos
+    let goal = match select_goal(agent, items) {
+        Some(g) => g,
+        None    => return Action::Wait,
     };
 
     // Recompute path when goal changes or path is consumed.

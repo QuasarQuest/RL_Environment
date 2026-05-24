@@ -32,7 +32,7 @@ use crate::rl::reward;
 use crate::world::{config::{EnemyKind, WorldConfig}, coords::GridPos, grid::Grid, tile::Tile};
 use self::enemy::{compute_action, EnemyPathCache};
 use self::obs::build_obs_into;
-use self::spawner::{SpawnBudget, tick_spawns};
+use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
 
 pub struct SimCore {
     pub grid:    Grid,
@@ -89,7 +89,7 @@ impl SimCore {
 
         let spawn_budgets = vec![SpawnBudget {
             kind:       ItemKind::Gold,
-            spawn_prob: 0.02,
+            spawn_prob: DEFAULT_SPAWN_PROB,
             target:     gold_positions.len(),
         }];
 
@@ -148,7 +148,7 @@ impl SimCore {
         if let Some(b) = self.spawn_budgets.iter_mut().find(|b| b.kind == ItemKind::Gold) {
             b.target = self.gold_positions.len();
         }
-        for cache in &mut self.enemy_caches { *cache = EnemyPathCache::new(); }
+        for cache in &mut self.enemy_caches { *cache = EnemyPathCache::default(); }
         self.tick       = 0;
         self.prev_gold  = 0;
         self.prev_score = 0;
