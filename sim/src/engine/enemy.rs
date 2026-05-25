@@ -99,15 +99,27 @@ fn greedy_move(from: GridPos, to: GridPos, grid: &Grid) -> Option<Dir> {
 fn astar(grid: &Grid, start: GridPos, goal: GridPos) -> VecDeque<GridPos> {
     if start == goal { return VecDeque::new(); }
 
-    // Open set: (f-cost, g-cost, position)
-    let mut open: BinaryHeap<(Reverse<i32>, i32, GridPos)> = BinaryHeap::new();
-    let mut came_from: HashMap<GridPos, GridPos>            = HashMap::new();
-    let mut g_score:   HashMap<GridPos, i32>                = HashMap::new();
+    // Cross-product tie-breaking: for a candidate node N, compute the signed
+    // area of the triangle (start, goal, N).  Nodes that lie exactly on the
+    // start→goal line score 0; nodes that deviate score higher.  Storing
+    // Reverse(cross) as the second sort key breaks ties toward the straight
+    // line, preventing the "right-hook" artifact that appears when GridPos
+    // lexicographic ordering is used as the sole tiebreaker.
+    let sdx = start.x - goal.x;
+    let sdy = start.y - goal.y;
+    let cross = |n: GridPos| -> i32 {
+        ((n.x - goal.x) * sdy - sdx * (n.y - goal.y)).abs()
+    };
+
+    // Open set: (Reverse<f>, Reverse<cross>, g, position)
+    let mut open: BinaryHeap<(Reverse<i32>, Reverse<i32>, i32, GridPos)> = BinaryHeap::new();
+    let mut came_from: HashMap<GridPos, GridPos> = HashMap::new();
+    let mut g_score:   HashMap<GridPos, i32>     = HashMap::new();
 
     g_score.insert(start, 0);
-    open.push((Reverse(chebyshev(start, goal)), 0, start));
+    open.push((Reverse(chebyshev(start, goal)), Reverse(cross(start)), 0, start));
 
-    while let Some((_, g, current)) = open.pop() {
+    while let Some((_, _, g, current)) = open.pop() {
         if current == goal {
             let mut path = VecDeque::new();
             let mut cur = current;
@@ -136,7 +148,8 @@ fn astar(grid: &Grid, start: GridPos, goal: GridPos) -> VecDeque<GridPos> {
             if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
                 g_score.insert(neighbor, tentative_g);
                 came_from.insert(neighbor, current);
-                open.push((Reverse(tentative_g + chebyshev(neighbor, goal)), tentative_g, neighbor));
+                let f = tentative_g + chebyshev(neighbor, goal);
+                open.push((Reverse(f), Reverse(cross(neighbor)), tentative_g, neighbor));
             }
         }
     }
