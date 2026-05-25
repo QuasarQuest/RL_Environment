@@ -33,17 +33,17 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
 
-OBS_CHANNELS  = 13
-OBS_CROP_H    = 25
-OBS_CROP_W    = 25
-OBS_CROP_DIM  = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8125
+OBS_CHANNELS = 13
+OBS_CROP_H = 25
+OBS_CROP_W = 25
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8125
 
 MM_CHANNELS = 3
-MM_H        = 7
-MM_W        = 7
-MM_DIM      = MM_CHANNELS * MM_H * MM_W                  # 147
+MM_H = 7
+MM_W = 7
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 147
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM                        # 8272
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM  # 8272
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
@@ -132,6 +132,6 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         crop = obs[:, :OBS_CROP_DIM].reshape(-1, OBS_CHANNELS, OBS_CROP_H, OBS_CROP_W)
-        mm   = obs[:, OBS_CROP_DIM:].reshape(-1, MM_CHANNELS, MM_H, MM_W)
+        mm = obs[:, OBS_CROP_DIM:].reshape(-1, MM_CHANNELS, MM_H, MM_W)
         return self.fusion(torch.cat([self.crop_head(self.crop_cnn(crop)),
                                       self.mm_head(self.mm_cnn(mm))], dim=1))

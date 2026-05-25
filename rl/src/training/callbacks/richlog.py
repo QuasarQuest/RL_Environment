@@ -17,7 +17,7 @@ def _fmt(v: object) -> str:
     return str(v)
 
 
-def _kv_table(title: str, rows: list[tuple[str, str]]) -> Table:
+def kv_table(title: str, rows: list[tuple[str, str]]) -> Table:
     t = Table(title=title, box=box.SIMPLE, show_header=False,
               title_style="bold cyan", padding=(0, 1))
     t.add_column(style="dim", no_wrap=True)
@@ -51,35 +51,35 @@ class _RichWriter(KVWriter):
         game_keys = [
             ("ep_reward", "game/episode_reward"),
             ("ep_length", "game/episode_length"),
-            ("score",     "game/score"),
-            ("win_rate",  "game/win_rate"),
+            ("score", "game/score"),
+            ("win_rate", "game/win_rate"),
         ]
         train_keys = [
-            ("loss",         "train/loss"),
-            ("value_loss",   "train/value_loss"),
-            ("policy_loss",  "train/policy_gradient_loss"),
+            ("loss", "train/loss"),
+            ("value_loss", "train/value_loss"),
+            ("policy_loss", "train/policy_gradient_loss"),
             ("entropy_loss", "train/entropy_loss"),
-            ("approx_kl",   "train/approx_kl"),
-            ("clip_frac",   "train/clip_fraction"),
+            ("approx_kl", "train/approx_kl"),
+            ("clip_frac", "train/clip_fraction"),
             ("exp_variance", "train/explained_variance"),
-            ("lr",           "train/learning_rate"),
-            ("ent_coef",    "train/ent_coef"),
+            ("lr", "train/learning_rate"),
+            ("ent_coef", "train/ent_coef"),
         ]
 
         time_rows = [
-            ("step",    f"{steps:,}"),
-            ("iter",    str(itr)),
-            ("fps",     f"{fps:,}"),
+            ("step", f"{steps:,}"),
+            ("iter", str(itr)),
+            ("fps", f"{fps:,}"),
             ("elapsed", f"{elapsed}s"),
         ]
-        game_rows  = [(lbl, _fmt(kv[key])) for lbl, key in game_keys  if key in kv]
+        game_rows = [(lbl, _fmt(kv[key])) for lbl, key in game_keys if key in kv]
         train_rows = [(lbl, _fmt(kv[key])) for lbl, key in train_keys if key in kv]
 
-        tables = [_kv_table("time", time_rows)]
+        tables = [kv_table("time", time_rows)]
         if game_rows:
-            tables.append(_kv_table("game", game_rows))
+            tables.append(kv_table("game", game_rows))
         if train_rows:
-            tables.append(_kv_table("train", train_rows))
+            tables.append(kv_table("train", train_rows))
         self._console.print(Columns(tables, equal=False, expand=False))
 
     def close(self) -> None:

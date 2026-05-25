@@ -13,6 +13,7 @@ const TOOLTIP_OFFSET_Y: f32 = -10.0;
 #[derive(Component)] pub struct TooltipPanel;
 #[derive(Component)] pub struct TooltipName;
 #[derive(Component)] pub struct TooltipStats;
+#[derive(Component)] pub struct TooltipExtra;
 
 pub fn spawn_tooltip(mut commands: Commands) {
     let bg     = ThemeColor::TooltipBackground.resolve();
@@ -39,6 +40,7 @@ pub fn spawn_tooltip(mut commands: Commands) {
     )).with_children(|p| {
         p.spawn((Text::new("—"), TextFont { font_size: 13.0, ..default() }, TextColor(ThemeColor::SuccessText.resolve()), TooltipName));
         p.spawn((Text::new(""), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim), TooltipStats));
+        p.spawn((Text::new(""), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim), TooltipExtra));
     });
 }
 
@@ -51,6 +53,7 @@ pub fn update_tooltip(
     mut texts: ParamSet<(
         Query<&mut Text, With<TooltipName>>,
         Query<&mut Text, With<TooltipStats>>,
+        Query<&mut Text, With<TooltipExtra>>,
     )>,
 ) {
     let Ok(window) = windows.single() else { return };
@@ -80,10 +83,36 @@ pub fn update_tooltip(
 
     if let Some(idx) = closest {
         if let Some(agent) = bridge.agents().get(idx) {
-            let label = format!("Agent {} ({})", idx, crate::team::Team(agent.team).name());
-            let info  = format!("HP:{}  Ammo:{}  Gold:{}  Score:{}", agent.hearts, agent.ammo, agent.gold_carried, agent.score);
+            let label = format!("Agent {} — {}", idx, crate::team::Team(agent.team).name());
+
+            // Hearts as pips, ammo fraction, gold, score.
+            let hearts = "♥".repeat(agent.hearts as usize)
+                       + &"♡".repeat((config::AGENT_MAX_HEARTS - agent.hearts) as usize);
+            let stats = format!(
+                "{}  Ammo {}/{}  Gold {}/{}  Score {}",
+                hearts,
+                agent.ammo, config::AGENT_MAX_AMMO,
+                agent.gold_carried, config::AGENT_MAX_GOLD,
+                agent.score,
+            );
+
+            // Position + optional speed buff + policy mode for agent 0.
+            let speed_str = if agent.speed_buff > 0 {
+                format!("  ⚡Speed +{}", agent.speed_buff)
+            } else {
+                String::new()
+            };
+            let mode_str = if idx == 0 {
+                format!("  [{}]", bridge.mode.label())
+            } else {
+                String::new()
+            };
+            let extra = format!("({}, {}){}{}", agent.pos.x, agent.pos.y, speed_str, mode_str);
+
             for mut t in texts.p0().iter_mut() { *t = Text::new(&label); }
-            for mut t in texts.p1().iter_mut() { *t = Text::new(&info);  }
+            for mut t in texts.p1().iter_mut() { *t = Text::new(&stats); }
+            for mut t in texts.p2().iter_mut() { *t = Text::new(&extra); }
+
             panel_node.display = Display::Flex;
             panel_node.left    = Val::Px(cursor_px.x + TOOLTIP_OFFSET_X);
             panel_node.top     = Val::Px(cursor_px.y + TOOLTIP_OFFSET_Y);

@@ -41,8 +41,8 @@ class _PolicyWrapper(torch.nn.Module):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         features = self.policy.extract_features(obs, self.policy.pi_features_extractor)  # type: ignore[arg-type]
-        latent   = self.policy.mlp_extractor.forward_actor(features)                      # type: ignore[union-attr]
-        return self.policy.action_net(latent)                                             # type: ignore[return-value]
+        latent = self.policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
+        return self.policy.action_net(latent)  # type: ignore[return-value]
 
 
 class _NormPolicyWrapper(torch.nn.Module):
@@ -61,18 +61,18 @@ class _NormPolicyWrapper(torch.nn.Module):
         eps: float = 1e-8,
     ) -> None:
         super().__init__()
-        self.policy   = policy
+        self.policy = policy
         self.clip_obs = clip_obs
         std = np.sqrt(var + eps).astype(np.float32)
         self.register_buffer("obs_mean", torch.from_numpy(mean.astype(np.float32)))
-        self.register_buffer("obs_std",  torch.from_numpy(std))
+        self.register_buffer("obs_std", torch.from_numpy(std))
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         obs = (obs - self.obs_mean) / self.obs_std  # type: ignore[operator]
         obs = obs.clamp(-self.clip_obs, self.clip_obs)
         features = self.policy.extract_features(obs, self.policy.pi_features_extractor)  # type: ignore[arg-type]
-        latent   = self.policy.mlp_extractor.forward_actor(features)                      # type: ignore[union-attr]
-        return self.policy.action_net(latent)                                             # type: ignore[return-value]
+        latent = self.policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
+        return self.policy.action_net(latent)  # type: ignore[return-value]
 
 
 # ── Library function ──────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ def export_to_onnx(
         with open(vecnorm_path, "rb") as fh:
             vn = pickle.load(fh)
         mean = np.asarray(vn.obs_rms.mean, dtype=np.float32).reshape(obs_shape)
-        var  = np.asarray(vn.obs_rms.var,  dtype=np.float32).reshape(obs_shape)
+        var = np.asarray(vn.obs_rms.var, dtype=np.float32).reshape(obs_shape)
         wrapper: torch.nn.Module = _NormPolicyWrapper(policy, mean, var, clip_obs=float(vn.clip_obs))
         log.info("VecNormalize stats baked into ONNX graph from %s", vecnorm_path)
     else:
@@ -117,7 +117,7 @@ def export_to_onnx(
 
     onnx.checker.check_model(onnx.load(str(out_path)))
 
-    obs_np   = np.random.RandomState(0).randn(4, *obs_shape).astype(np.float32)
+    obs_np = np.random.RandomState(0).randn(4, *obs_shape).astype(np.float32)
     onnx_out = np.array(ort.InferenceSession(str(out_path)).run(["logits"], {"obs": obs_np})[0])
     with torch.no_grad():
         torch_out = wrapper(torch.from_numpy(obs_np)).numpy()
@@ -137,13 +137,12 @@ def export_to_onnx(
 
 @app.command()
 def export_onnx(
-    model_path:   Path          = typer.Option(...,           "--model"),
-    out_path:     Path          = typer.Option(...,           "--out"),
-    opset:        int           = typer.Option(17,            "--opset"),
-    tolerance:    float         = typer.Option(1e-5,          "--tolerance"),
-    vecnorm_path: Optional[Path] = typer.Option(None,         "--vecnorm"),
-    algo:         str           = typer.Option("maskable_ppo","--algo",
-                                               help="ppo or maskable_ppo"),
+    model_path: Path = typer.Option(..., "--model"),
+    out_path: Path = typer.Option(..., "--out"),
+    opset: int = typer.Option(17, "--opset"),
+    tolerance: float = typer.Option(1e-5, "--tolerance"),
+    vecnorm_path: Optional[Path] = typer.Option(None, "--vecnorm"),
+    algo: str = typer.Option("maskable_ppo", "--algo", help="ppo or maskable_ppo"),
 ) -> None:
     """Export a saved PPO / MaskablePPO policy to ONNX and validate."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")

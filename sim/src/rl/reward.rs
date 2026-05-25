@@ -8,22 +8,29 @@
 //   pickup       : reward on each gold pickup
 //   deposit      : large reward on depositing gold at base
 //
-// Approach shaping (potential-based)
-// ------------------------------------
-// Dense guidance proportional to the change in Manhattan distance to the
+// Approach shaping (potential-based, Ng et al. 1999)
+// ---------------------------------------------------
+// Dense guidance proportional to the change in Euclidean distance to the
 // nearest reachable target (gold when empty, own base when carrying).
 //
 //   Δdist = dist_before − dist_after
 //   positive → moved closer  → positive shaping
 //   negative → moved away    → negative shaping
 //
-// Scale check: max approach per step = approach * max_speed = 0.05 * 2 = 0.10
-// deposit = 5.0, so approach is ≤ 2% of a deposit — safe.
+// WHY EUCLIDEAN (not Manhattan):
+//   Manhattan treats Move NE as Δdist=2, but the agent only travels √2≈1.414
+//   tiles — a 41% overestimate. This gives diagonals an inflated reward signal
+//   that biases the policy toward zigzag paths for the wrong reason.
+//   Euclidean is physically correct: diagonal travel is rewarded proportionally
+//   to the actual distance covered.
+//
+// Scale check: max approach per step = approach × √2 ≈ 0.05 × 1.414 = 0.071
+// deposit = 5.0, so approach is ≤ 1.4% of a deposit — safe.
 //
 // Target selection
 // ----------------
-//   gold_carried == 0  →  nearest Gold item (Manhattan distance)
-//   gold_carried  > 0  →  own base tile (agent.base_pos)
+//   gold_carried < MAX  →  nearest Gold item (Euclidean distance)
+//   gold_carried == MAX →  own base tile (Euclidean distance)
 //
 // When no gold items remain the approach term is suppressed (0.0).
 //
@@ -35,14 +42,20 @@ use crate::world::coords::GridPos;
 use crate::world::config::RewardConfig;
 use crate::entity::agent::AgentState;
 
-/// Manhattan distance between two grid positions.
+/// Euclidean distance between two grid positions.
+/// Physically correct: diagonal movement covers √2 ≈ 1.414 tiles, not 2.
 #[inline]
-fn manhattan(a: GridPos, b: GridPos) -> i32 {
-    (a.x - b.x).abs() + (a.y - b.y).abs()
+fn euclidean(a: GridPos, b: GridPos) -> f32 {
+    let dx = (a.x - b.x) as f32;
+    let dy = (a.y - b.y) as f32;
+    (dx * dx + dy * dy).sqrt()
 }
 
-fn dist_to_nearest_gold(pos: GridPos, gold_positions: &[GridPos]) -> Option<i32> {
-    gold_positions.iter().map(|&g| manhattan(pos, g)).min()
+fn dist_to_nearest_gold(pos: GridPos, gold_positions: &[GridPos]) -> Option<f32> {
+    gold_positions
+        .iter()
+        .map(|&g| euclidean(pos, g))
+        .reduce(f32::min)
 }
 
 fn approach_shaping(
@@ -61,12 +74,12 @@ fn approach_shaping(
             Some(d) => d,
             None    => return 0.0,
         };
-        cfg.approach * (d_before - d_after) as f32
+        cfg.approach * (d_before - d_after)
     } else {
         // Inventory full — guide toward base unambiguously.
-        let d_before = manhattan(prev_pos, agent.base_pos);
-        let d_after  = manhattan(agent.pos, agent.base_pos);
-        cfg.approach * (d_before - d_after) as f32
+        let d_before = euclidean(prev_pos,  agent.base_pos);
+        let d_after  = euclidean(agent.pos, agent.base_pos);
+        cfg.approach * (d_before - d_after)
     }
 }
 

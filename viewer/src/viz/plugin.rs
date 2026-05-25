@@ -4,6 +4,10 @@ use super::camera::{spawn_camera, fit_camera_to_grid, init_pan_state, camera_con
 use super::grid_offset::compute_grid_offset;
 use super::renderer::tile_renderer::{spawn_tiles, sync_tile_colors};
 use super::renderer::agent_renderer::{sync_agent_transforms, sync_item_transforms};
+use super::renderer::debug_gizmos::{
+    DebugGizmoFlags, toggle_path_viz, toggle_range_viz,
+    draw_path_gizmo, draw_range_gizmos,
+};
 use super::hud::{
     spawn_hud,
     update_tick_label, update_time_label, update_team_scores,
@@ -31,6 +35,7 @@ pub struct VizPlugin;
 impl Plugin for VizPlugin {
     fn build(&self, app: &mut App) {
         app
+            .init_resource::<DebugGizmoFlags>()
             .add_systems(PreStartup, init_pan_state)
             .add_systems(Startup, (
                 spawn_camera,
@@ -68,6 +73,10 @@ impl Plugin for VizPlugin {
                 toggle_help_overlay,
                 toggle_debug_overlay,
                 update_debug_overlay,
+                toggle_path_viz,
+                toggle_range_viz,
+                draw_path_gizmo,
+                draw_range_gizmos,
             ))
             .add_systems(Update, (
                 show_end_screen,

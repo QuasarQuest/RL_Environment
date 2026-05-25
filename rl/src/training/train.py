@@ -52,7 +52,7 @@ from training.callbacks import (
     EpisodeStatsCallback,
     EvalWithVecNorm,
     RichLogCallback,
-    _kv_table,
+    kv_table,
 )
 from training.config import EnvConfig, PpoConfig, TrainConfig, register_configs
 from training.schedules import linear_schedule
@@ -194,28 +194,28 @@ def train(cfg: DictConfig) -> None:
 
     console.rule(f"[bold green]ATB Training — {run_tag}")
     console.print(Columns([
-        _kv_table("run", [
-            ("algo",      t_cfg.algo),
-            ("stage",     str(e_cfg.stage)),
+        kv_table("run", [
+            ("algo", t_cfg.algo),
+            ("stage", str(e_cfg.stage)),
             ("timesteps", f"{t_cfg.total_timesteps:,}"),
-            ("n_envs",    str(e_cfg.n_envs)),
-            ("device",    device),
-            ("seed",      str(e_cfg.seed)),
+            ("n_envs", str(e_cfg.n_envs)),
+            ("device", device),
+            ("seed", str(e_cfg.seed)),
         ]),
-        _kv_table("ppo", [
-            ("n_steps",   str(p_cfg.n_steps)),
-            ("batch",     str(p_cfg.batch_size)),
-            ("lr",        f"{p_cfg.learning_rate:.0e} → {p_cfg.learning_rate_final:.0e}"),
-            ("gamma",     str(p_cfg.gamma)),
-            ("ent_coef",  f"{p_cfg.ent_coef} → {p_cfg.ent_coef_final}"),
-            ("clip",      str(p_cfg.clip_range)),
+        kv_table("ppo", [
+            ("n_steps", str(p_cfg.n_steps)),
+            ("batch", str(p_cfg.batch_size)),
+            ("lr", f"{p_cfg.learning_rate:.0e} → {p_cfg.learning_rate_final:.0e}"),
+            ("gamma", str(p_cfg.gamma)),
+            ("ent_coef", f"{p_cfg.ent_coef} → {p_cfg.ent_coef_final}"),
+            ("clip", str(p_cfg.clip_range)),
             ("target_kl", str(p_cfg.target_kl)),
         ]),
-        _kv_table("env", [
+        kv_table("env", [
             ("norm_reward", "✓" if e_cfg.normalize_reward else "✗"),
             ("clip_reward", "✓" if e_cfg.clip_reward else "✗"),
-            ("clip_max",    str(e_cfg.clip_reward_max)),
-            ("max_steps",   str(e_cfg.max_episode_steps or "—")),
+            ("clip_max", str(e_cfg.clip_reward_max)),
+            ("max_steps", str(e_cfg.max_episode_steps or "—")),
         ]),
     ], equal=False, expand=False))
 
