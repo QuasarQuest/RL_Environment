@@ -24,10 +24,7 @@ from env.atb_env import PROJECT_ROOT
 
 def resolve_config_path(stage: int) -> str:
     """Return the absolute path to the Bevy world config for *stage*."""
-    if stage <= 1:
-        path = PROJECT_ROOT / "assets" / "world" / "config.ron"
-    else:
-        path = PROJECT_ROOT / "assets" / "world" / f"config_stage{stage}.ron"
+    path = PROJECT_ROOT / "assets" / "world" / f"config_stage{stage}.ron"
     if not path.exists():
         raise FileNotFoundError(f"World config not found for stage {stage}: {path}")
     return str(path)

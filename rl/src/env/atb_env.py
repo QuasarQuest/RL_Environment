@@ -33,13 +33,13 @@ from network.extractor import OBS_TOTAL as _OBS_TOTAL
 def _find_project_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "assets" / "world" / "config.ron").exists():
+        if (parent / "assets" / "world" / "config_stage1.ron").exists():
             return parent
     raise RuntimeError(f"Cannot find project root starting from {here}")
 
 
 PROJECT_ROOT = _find_project_root()
-DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config.ron")
+DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config_stage1.ron")
 
 _OBS_DTYPE = np.float32
 _OBS_FLAT_SHAPE = (_OBS_TOTAL,)

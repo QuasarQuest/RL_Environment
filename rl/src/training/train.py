@@ -212,6 +212,7 @@ def train(cfg: DictConfig) -> None:
             ("target_kl", str(p_cfg.target_kl)),
         ]),
         kv_table("env", [
+            ("config", Path(e_cfg.config_path).name),
             ("norm_reward", "✓" if e_cfg.normalize_reward else "✗"),
             ("clip_reward", "✓" if e_cfg.clip_reward else "✗"),
             ("clip_max", str(e_cfg.clip_reward_max)),

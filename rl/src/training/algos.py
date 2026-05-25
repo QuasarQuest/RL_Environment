@@ -120,7 +120,7 @@ def _make_maskable_spec() -> AlgoSpec:
 
 ALGOS: dict[str, AlgoSpec] = {
     "ppo": PPO_SPEC,
-    **{"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {},
+    **({"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {}),
 }
 
 
