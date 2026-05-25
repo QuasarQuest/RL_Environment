@@ -19,14 +19,11 @@
 
     safe_zone_fraction: 0.03,
 
-    // Light scatter obstacles — corridors still plentiful, but direct
-    // paths are often blocked. Scatter avoids large un-navigable clusters.
-    obstacles: (
-        density:            0.06,
-        profile:            Scatter,
-        max_block_fraction: 0.10,
-        max_wall_fraction:  0.10,
-    ),
+    // Light scatter only — corridors still plentiful, no walls or blocks.
+    obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.10, max_wall_fraction: 0.10 ),
+    obstacle_clusters: [
+        ( kind: Scatter, count: 15, size: (1, 1) ),
+    ],
 
     // Gold + speed boost. Speed boost lets the agent learn to pick up
     // secondary items without them being in the critical path.

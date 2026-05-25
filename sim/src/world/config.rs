@@ -109,6 +109,18 @@ impl Default for ObstacleProfile {
     fn default() -> Self { ObstacleProfile::Mixed }
 }
 
+/// Explicit cluster-based obstacle descriptor (old-style config).
+/// `size` is (width, height) for Block/Wall; ignored for Scatter.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ObstacleKind { Block, Wall, Scatter }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ObstacleCluster {
+    pub kind:  ObstacleKind,
+    pub count: usize,
+    pub size:  (usize, usize),
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ObstacleConfig {
     #[serde(default = "default_obstacle_density")]
@@ -230,6 +242,9 @@ pub struct WorldConfig {
     pub safe_zone_fraction: f32,
     #[serde(default)]
     pub obstacles: ObstacleConfig,
+    /// If non-empty, cluster-based placement is used instead of `obstacles`.
+    #[serde(default)]
+    pub obstacle_clusters: Vec<ObstacleCluster>,
     #[serde(default)]
     pub item_density: ItemDensityConfig,
     #[serde(default = "default_gold_carry_speed")]

@@ -102,6 +102,9 @@ pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
             right.spawn((Node { width: Val::Px(1.0), height: Val::Px(16.0), ..default() }, BackgroundColor(border)));
             right.spawn((Text::new("H"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim)));
             right.spawn((Text::new("Help"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim.with_alpha(0.5))));
+            right.spawn((Node { width: Val::Px(1.0), height: Val::Px(16.0), ..default() }, BackgroundColor(border)));
+            right.spawn((Text::new("L"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim)));
+            right.spawn((Text::new("Load"), TextFont { font_size: SIZE_SM, ..default() }, TextColor(dim.with_alpha(0.5))));
         });
     });
 }

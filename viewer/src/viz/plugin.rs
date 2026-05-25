@@ -20,6 +20,12 @@ use super::panels::scoreboard::{
 };
 use super::panels::debug_overlay::{spawn_debug_overlay, toggle_debug_overlay, update_debug_overlay};
 use super::panels::help_overlay::{spawn_help_overlay, toggle_help_overlay};
+use super::panels::load_menu::{
+    LoadMenuState,
+    spawn_load_menu, toggle_load_menu, sync_load_menu_visibility,
+    handle_entry_clicks, sync_entry_highlights,
+    handle_load_confirm, handle_load_cancel,
+};
 use super::panels::end_screen::{
     spawn_end_screen, show_end_screen,
     handle_quit_button, handle_restart_button,
@@ -36,6 +42,7 @@ impl Plugin for VizPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<DebugGizmoFlags>()
+            .init_resource::<LoadMenuState>()
             .add_systems(PreStartup, init_pan_state)
             .add_systems(Startup, (
                 spawn_camera,
@@ -50,6 +57,7 @@ impl Plugin for VizPlugin {
                 spawn_help_overlay,
                 spawn_debug_overlay,
                 spawn_end_screen,
+                spawn_load_menu,
             ))
             .configure_sets(Update, HudUpdate.after(SimSet))
             .add_systems(Update, (
@@ -77,6 +85,14 @@ impl Plugin for VizPlugin {
                 toggle_range_viz,
                 draw_path_gizmo,
                 draw_range_gizmos,
+            ))
+            .add_systems(Update, (
+                toggle_load_menu,
+                sync_load_menu_visibility,
+                handle_entry_clicks,
+                sync_entry_highlights,
+                handle_load_confirm,
+                handle_load_cancel,
             ))
             .add_systems(Update, (
                 show_end_screen,

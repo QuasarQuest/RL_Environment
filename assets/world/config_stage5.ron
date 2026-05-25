@@ -22,12 +22,15 @@
 
     safe_zone_fraction: 0.04,
 
-    obstacles: (
-        density:            0.10,
-        profile:            Mixed,
-        max_block_fraction: 0.12,
-        max_wall_fraction:  0.14,
-    ),
+    // Same as stage 4 but longer walls — harder to read the enemy's path.
+    obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.12, max_wall_fraction: 0.14 ),
+    obstacle_clusters: [
+        ( kind: Block,   count: 2, size: (2, 2) ),
+        ( kind: Block,   count: 3, size: (1, 2) ),
+        ( kind: Wall,    count: 5, size: (3, 1) ),
+        ( kind: Wall,    count: 3, size: (2, 1) ),
+        ( kind: Scatter, count: 20, size: (1, 1) ),
+    ],
 
     item_density: (
         gold:        2.0,

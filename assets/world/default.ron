@@ -1,0 +1,93 @@
+// assets/world/config.ron — Stage 1
+//
+// Open map, gold only, no obstacles, no enemies.
+// Used by the viewer and as the baseline training config.
+
+(
+    width:  25,
+    height: 25,
+
+    // Short episodes — at 500 ticks with no enemies the agent has plenty
+    // of time to find gold and return, but bad policies terminate quickly.
+    match_duration_ticks: 1000,
+
+    // ── Game mode ─────────────────────────────────────────────────────────────
+    game_mode: GoldRush,
+
+    // ── Simulation speed ──────────────────────────────────────────────────────
+    sim_speed:  10.0,
+    sim_speeds: [
+        1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0,
+        500.0, 1000.0, 2500.0, 5000.0, 10000.0
+    ],
+
+    // ── Bases ─────────────────────────────────────────────────────────────────
+    // Single base in the bottom-left corner. margin × short_side = 0.05 × 20 = 1 tile inset.
+    bases: [
+        ( team: 0, corner: BottomLeft, margin: 0.05 ),
+    ],
+
+    // ── Agents ────────────────────────────────────────────────────────────────
+    // Single agent, near base. strategy/planner are ignored under headless RL
+    // (the RlAgent marker bypasses strategy dispatch) but the fields are required.
+    agents: [
+        ( team: 0, strategy: BehaviorTree, planner: AStar, spawn: NearBase, spawn_offset: 0.10 ),
+    ],
+
+    // ── Safe zone ─────────────────────────────────────────────────────────────
+    // Small safe zone — agent rarely uses it without combat, but the CNN
+    // shouldn't see it as an obstacle either.
+    safe_zone_fraction: 0.03,
+
+    // ── Obstacles ─────────────────────────────────────────────────────────────
+    // Cluster-based layout — mirrors the old config.ron aesthetic.
+    // When obstacle_clusters is non-empty it takes priority over `obstacles`.
+    obstacles: (
+        density:            0.0,
+        profile:            None,
+        max_block_fraction: 0.12,
+        max_wall_fraction:  0.14,
+    ),
+    obstacle_clusters: [
+        ( kind: Block,   count: 2, size: (2, 2) ),
+        ( kind: Block,   count: 4, size: (1, 2) ),
+        ( kind: Wall,    count: 5, size: (4, 1) ),
+        ( kind: Wall,    count: 3, size: (2, 1) ),
+        ( kind: Scatter, count: 20, size: (1, 1) ),
+    ],
+
+    // ── Items ─────────────────────────────────────────────────────────────────
+    // Gold only. Density is per 100 free tiles. With 20×20 = 400 tiles and no
+    // obstacles, ~400 free tiles, so gold = 2.0 yields ~8 initial gold items
+    // and max_on_map = 16 (the (initial * 2) rule in ItemDensityConfig).
+    item_density: (
+        gold:        2.0,
+        health:      0.0,
+        ammo:        0.0,
+        speed_boost: 0.0,
+    ),
+
+    // ── Agent stats ───────────────────────────────────────────────────────────
+    respawn_ticks:    150,
+    gold_carry_speed: 0.95,
+
+    // ── Reward weights ────────────────────────────────────────────────────────
+    reward: (
+        tick:          -0.0005,
+        pickup:         0.5,
+        deposit:        5.0,
+        approach:       0.05,
+        wall_hit:      -0.01,
+        kill:           0.0,
+        death_penalty:  0.0,
+    ),
+
+    // ── Combat ────────────────────────────────────────────────────────────────
+    melee_range:           2,
+    ranged_range:          6,
+    kill_reward:           15,
+    melee_damage:          1,
+    ranged_damage:         1,
+    melee_cooldown_ticks:  4,
+    ranged_cooldown_ticks: 6,
+)

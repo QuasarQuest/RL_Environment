@@ -4,7 +4,7 @@
 // positions. All fraction → tile coord resolution happens here.
 
 use crate::entity::item::ItemSpawnConfig;
-use super::config::{AgentConfig, ObstacleProfile, SpawnIntent, WorldConfig};
+use super::config::{AgentConfig, ObstacleCluster, ObstacleKind, ObstacleProfile, SpawnIntent, WorldConfig};
 use super::tile::Tile;
 
 // ── Resolved types ────────────────────────────────────────────────────────────
@@ -88,6 +88,10 @@ fn resolve_spawn(cfg: &WorldConfig, agent: &AgentConfig, bases: &[ResolvedBase])
 // ── Obstacle generation ───────────────────────────────────────────────────────
 
 pub fn place_obstacles(tiles: &mut Vec<Tile>, cfg: &WorldConfig, layout: &ResolvedLayout) {
+    if !cfg.obstacle_clusters.is_empty() {
+        place_obstacle_clusters(tiles, cfg, layout, &cfg.obstacle_clusters.clone());
+        return;
+    }
     if matches!(cfg.obstacles.profile, ObstacleProfile::None) { return; }
 
     let w     = cfg.width  as i32;
@@ -191,6 +195,100 @@ pub fn place_obstacles(tiles: &mut Vec<Tile>, cfg: &WorldConfig, layout: &Resolv
                 let i = idx(x, y);
                 if tiles[i] == Tile::Free && !protected[i] {
                     tiles[i] = Tile::Obstacle;
+                }
+            }
+        }
+    }
+}
+
+// ── Cluster-based placement ───────────────────────────────────────────────────
+
+fn place_obstacle_clusters(
+    tiles:   &mut Vec<Tile>,
+    cfg:     &WorldConfig,
+    layout:  &ResolvedLayout,
+    clusters: &[ObstacleCluster],
+) {
+    let w = cfg.width  as i32;
+    let h = cfg.height as i32;
+    let total = (w * h) as usize;
+    let idx   = |x: i32, y: i32| -> usize { y as usize * cfg.width + x as usize };
+
+    let safe_radius = cfg.safe_zone_radius();
+    let mut protected = vec![false; total];
+    for base in &layout.bases {
+        for dy in -safe_radius..=safe_radius {
+            for dx in -safe_radius..=safe_radius {
+                let (px, py) = (base.x + dx, base.y + dy);
+                if px >= 0 && px < w && py >= 0 && py < h {
+                    protected[idx(px, py)] = true;
+                }
+            }
+        }
+    }
+    const SPAWN_CLEAR: i32 = 2;
+    for agent in &layout.agents {
+        for dy in -SPAWN_CLEAR..=SPAWN_CLEAR {
+            for dx in -SPAWN_CLEAR..=SPAWN_CLEAR {
+                let (px, py) = (agent.x + dx, agent.y + dy);
+                if px >= 0 && px < w && py >= 0 && py < h {
+                    protected[idx(px, py)] = true;
+                }
+            }
+        }
+    }
+
+    for cluster in clusters {
+        let (bw, bh) = (cluster.size.0 as i32, cluster.size.1 as i32);
+        let max_attempts = cluster.count * 200;
+        let mut placed   = 0;
+        let mut attempts = 0;
+
+        while placed < cluster.count && attempts < max_attempts {
+            attempts += 1;
+
+            match cluster.kind {
+                ObstacleKind::Block => {
+                    if w - bw < 2 || h - bh < 2 { continue; }
+                    let ox = rand::random_range(1..w - bw - 1);
+                    let oy = rand::random_range(1..h - bh - 1);
+                    let clear = (0..bh).all(|dy|
+                        (0..bw).all(|dx| {
+                            let i = idx(ox + dx, oy + dy);
+                            tiles[i] == Tile::Free && !protected[i]
+                        })
+                    );
+                    if clear {
+                        for dy in 0..bh { for dx in 0..bw { tiles[idx(ox + dx, oy + dy)] = Tile::Obstacle; } }
+                        placed += 1;
+                    }
+                }
+                ObstacleKind::Wall => {
+                    let horiz = rand::random_range(0..2) == 0;
+                    let (len, perp) = if horiz { (bw, bh) } else { (bh, bw) };
+                    if horiz && w - len < 2 { continue; }
+                    if !horiz && h - len < 2 { continue; }
+                    let ox = rand::random_range(1..w - len.max(perp));
+                    let oy = rand::random_range(1..h - len.max(perp));
+                    let clear = if horiz {
+                        (ox..ox + len).all(|x| { let i = idx(x, oy); tiles[i] == Tile::Free && !protected[i] })
+                    } else {
+                        (oy..oy + len).all(|y| { let i = idx(ox, y); tiles[i] == Tile::Free && !protected[i] })
+                    };
+                    if clear {
+                        if horiz { for x in ox..ox + len { tiles[idx(x, oy)] = Tile::Obstacle; } }
+                        else      { for y in oy..oy + len { tiles[idx(ox, y)] = Tile::Obstacle; } }
+                        placed += 1;
+                    }
+                }
+                ObstacleKind::Scatter => {
+                    let x = rand::random_range(1..w - 1);
+                    let y = rand::random_range(1..h - 1);
+                    let i = idx(x, y);
+                    if tiles[i] == Tile::Free && !protected[i] {
+                        tiles[i] = Tile::Obstacle;
+                        placed += 1;
+                    }
                 }
             }
         }

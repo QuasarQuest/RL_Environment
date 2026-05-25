@@ -12,8 +12,15 @@ use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::viz::events::RestartPending;
 
-const CONFIG_PATH: &str = "assets/world/config.ron";
-const ONNX_POLICY_PATH: &str = crate::ONNX_POLICY_PATH;
+pub const DEFAULT_CONFIG_PATH: &str = "assets/world/default.ron";
+const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
+
+#[derive(Resource, Default)]
+pub struct LoadRequest {
+    pub pending:     bool,
+    pub config_path: String,
+    pub policy_path: String,
+}
 
 // ── Policy mode ───────────────────────────────────────────────────────────────
 
@@ -71,14 +78,14 @@ fn normalize_path(raw: &str) -> std::path::PathBuf {
 
 impl SimBridge {
     fn new() -> Self {
-        let onnx_path = normalize_path(ONNX_POLICY_PATH);
+        let onnx_path = normalize_path(DEFAULT_ONNX_PATH);
         let policy = match OnnxPolicy::load(&onnx_path.to_string_lossy()) {
             Ok(p)  => { info!("ONNX policy loaded"); Some(p) }
             Err(e) => { warn!("No ONNX policy found ({e}), using BT agent"); None }
         };
         let mode = if policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
         Self {
-            sim: SimCore::new(CONFIG_PATH), game_over: false, policy,
+            sim: SimCore::new(DEFAULT_CONFIG_PATH), game_over: false, policy,
             last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
             bt_cache:   EnemyPathCache::new(),
@@ -133,15 +140,14 @@ impl Plugin for SimBridgePlugin {
             .init_resource::<SimConfig>()
             .init_resource::<TickTimer>()
             .init_resource::<RestartPending>()
+            .init_resource::<LoadRequest>()
             .add_systems(Startup, setup_sim)
+            .add_systems(Update, handle_load_request.before(crate::viz::SimSet))
             .add_systems(Update, step_sim.in_set(crate::viz::SimSet));
     }
 }
 
-fn setup_sim(mut commands: Commands) {
-    let bridge = SimBridge::new();
-
-    // Spawn one display entity per agent.
+fn spawn_sim_entities(commands: &mut Commands, bridge: &SimBridge) {
     for (i, agent) in bridge.sim.agents.iter().enumerate() {
         commands.spawn((
             AgentMarker,
@@ -154,8 +160,6 @@ fn setup_sim(mut commands: Commands) {
             Transform::from_xyz(0.0, 0.0, 1.0),
         ));
     }
-
-    // Spawn one display entity per item slot (items respawn, count stays fixed).
     for (i, item) in bridge.sim.items.iter().enumerate() {
         commands.spawn((
             ItemMarker,
@@ -168,8 +172,48 @@ fn setup_sim(mut commands: Commands) {
             Transform::from_xyz(0.0, 0.0, 0.5),
         ));
     }
+}
 
+fn setup_sim(mut commands: Commands) {
+    let bridge = SimBridge::new();
+    spawn_sim_entities(&mut commands, &bridge);
     commands.insert_resource(bridge);
+}
+
+pub fn handle_load_request(
+    mut req:      ResMut<LoadRequest>,
+    mut commands: Commands,
+    mut bridge:   ResMut<SimBridge>,
+    agent_q:      Query<Entity, With<AgentMarker>>,
+    item_q:       Query<Entity, With<ItemMarker>>,
+) {
+    if !req.pending { return; }
+    req.pending = false;
+
+    for e in agent_q.iter() { commands.entity(e).despawn(); }
+    for e in item_q.iter()  { commands.entity(e).despawn(); }
+
+    bridge.policy = if req.policy_path.is_empty() {
+        info!("No policy — falling back to BT");
+        None
+    } else {
+        let p = normalize_path(&req.policy_path);
+        match OnnxPolicy::load(&p.to_string_lossy()) {
+            Ok(p)  => { info!("Policy loaded: {}", req.policy_path); Some(p) }
+            Err(e) => { warn!("Policy load failed ({e}), falling back to BT"); None }
+        }
+    };
+
+    bridge.sim            = SimCore::new(&req.config_path);
+    bridge.game_over      = false;
+    bridge.last_action    = ACTION_WAIT;
+    bridge.action_counts  = [0; ACTION_SIZE];
+    bridge.episode_reward = 0.0;
+    bridge.bt_cache       = EnemyPathCache::new();
+    bridge.goap_cache     = EnemyPathCache::new();
+    bridge.mode = if bridge.policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
+
+    spawn_sim_entities(&mut commands, &bridge);
 }
 
 pub fn step_sim(

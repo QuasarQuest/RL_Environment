@@ -19,12 +19,13 @@
 
     safe_zone_fraction: 0.04,
 
-    obstacles: (
-        density:            0.10,
-        profile:            Mixed,
-        max_block_fraction: 0.12,
-        max_wall_fraction:  0.14,
-    ),
+    // Scatter + small blocks — routing must detour around solid objects.
+    obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.12, max_wall_fraction: 0.14 ),
+    obstacle_clusters: [
+        ( kind: Block,   count: 3, size: (2, 2) ),
+        ( kind: Block,   count: 4, size: (1, 2) ),
+        ( kind: Scatter, count: 15, size: (1, 1) ),
+    ],
 
     item_density: (
         gold:        2.0,
