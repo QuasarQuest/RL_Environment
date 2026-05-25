@@ -24,7 +24,7 @@ dependencies = [
 [project.scripts]
 atb-train   = "training.train:train"
 atb-tune    = "training.tune:app"
-atb-export  = "model.export:app"
+atb-export  = "network.export:app"
 atb-monitor = "monitoring.live_monitor:app"
 atb-plot    = "monitoring.plot_run:app"
 atb-stats   = "monitoring.stats_reader:app"

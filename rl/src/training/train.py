@@ -21,11 +21,13 @@ Usage
     atb-train --multirun ppo.learning_rate=1e-4,3e-4 ppo.target_kl=0.01,0.02
 
 # Resume from checkpoint:
-    atb-train +train.resume=runs/models/run_s1_XYZ_step_100000
+    atb-train +train.resume=runs/run_s1_XYZ/checkpoints/step_100000
+    atb-train +train.resume=runs/run_s1_XYZ/eval_best
 """
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -41,8 +43,8 @@ from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
-from model.export import export_to_onnx
-from model.policy import ATB_POLICY_KWARGS
+from network.export import export_to_onnx
+from network.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.callbacks import (
     CheckpointCallback,
@@ -50,24 +52,10 @@ from training.callbacks import (
     EpisodeStatsCallback,
     EvalWithVecNorm,
     RichLogCallback,
+    _kv_table,
 )
 from training.config import EnvConfig, PpoConfig, TrainConfig, register_configs
-
-
-def _kv_table(title: str, rows: list[tuple[str, str]]) -> Table:
-    t = Table(title=title, box=box.SIMPLE, show_header=False,
-              title_style="bold cyan", padding=(0, 1))
-    t.add_column(style="dim", no_wrap=True)
-    t.add_column(justify="right", no_wrap=True)
-    for k, v in rows:
-        t.add_row(k, v)
-    return t
-
-
-def linear_schedule(start: float, end: float):
-    if start == end:
-        return lambda _: float(start)
-    return lambda p: float(end + p * (start - end))
+from training.schedules import linear_schedule
 
 
 def _seq_str(seq: nn.Sequential) -> str:
@@ -90,12 +78,17 @@ def _print_arch(model) -> None:
     fe = policy.features_extractor
     obs = tuple(policy.observation_space.shape)
 
-    if hasattr(fe, "conv") and hasattr(fe, "head"):
-        extractor = f"CNN  obs={obs}  {_seq_str(fe.conv)} → {_seq_str(fe.head)}"
+    if hasattr(fe, "crop_cnn") and hasattr(fe, "mm_cnn"):
+        console.print(f"  [dim]extractor[/dim]       : AtbCnnExtractor  obs={obs}")
+        console.print(f"  [dim]  crop_cnn[/dim]      : {_seq_str(fe.crop_cnn)}")
+        console.print(f"  [dim]  crop_head[/dim]     : {_seq_str(fe.crop_head)}")
+        console.print(f"  [dim]  mm_cnn[/dim]        : {_seq_str(fe.mm_cnn)}")
+        console.print(f"  [dim]  mm_head[/dim]       : {_seq_str(fe.mm_head)}")
+        console.print(f"  [dim]  fusion[/dim]        : {_seq_str(fe.fusion)}")
     elif hasattr(fe, "net"):
-        extractor = f"MLP  obs={obs}  {_seq_str(fe.net)}"
+        console.print(f"  [dim]extractor[/dim]       : MLP  obs={obs}  {_seq_str(fe.net)}")
     else:
-        extractor = f"{type(fe).__name__}  obs={obs}"
+        console.print(f"  [dim]extractor[/dim]       : {type(fe).__name__}  obs={obs}")
 
     mlp = policy.mlp_extractor
     pi_mid = _seq_str(mlp.policy_net)
@@ -103,7 +96,6 @@ def _print_arch(model) -> None:
     pi_str = (f"{pi_mid} → " if pi_mid else "") + f"Linear(→{policy.action_net.out_features})"
     vf_str = (f"{vf_mid} → " if vf_mid else "") + "Linear(→1)"
 
-    console.print(f"  [dim]extractor[/dim]       : {extractor}")
     console.print(f"  [dim]pi[/dim]              : {pi_str}")
     console.print(f"  [dim]vf[/dim]              : {vf_str}")
 
@@ -131,7 +123,7 @@ def _vecnorm_path_for(model_path: str) -> Path:
     """Return the _vecnorm.pkl path that CheckpointCallback writes.
 
     CheckpointCallback appends '_vecnorm.pkl' to the model stem, e.g.:
-        runs/models/run_s1_XYZ_step_100000_vecnorm.pkl
+        runs/run_s1_XYZ/checkpoints/step_100000_vecnorm.pkl
     Path.with_suffix("") / "_vecnorm.pkl" would incorrectly create a
     subdirectory, so we build the path with string concatenation instead.
     """
@@ -144,7 +136,7 @@ def _resolve_resume(model_path: str) -> tuple[str, Path]:
 
     eval_best is a directory containing best_model.zip written by EvalCallback;
     vecnorm is saved as a sibling file at {dir}_vecnorm.pkl by EvalWithVecNorm.
-    All other checkpoints (final, step_N, best_rolling) are bare zip paths.
+    All other checkpoints (checkpoints/step_N, final) are bare zip paths.
     """
     p = Path(model_path)
     if p.is_dir():
@@ -156,20 +148,28 @@ load_dotenv()
 
 console = Console()
 
-_RL_ROOT       = Path(__file__).resolve().parent.parent.parent  # rl/
-_WORKSPACE_ROOT = _RL_ROOT.parent                                 # algorithm_test_bed/
+_RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
+_WORKSPACE_ROOT = _RL_ROOT.parent                         # algorithm_test_bed/
 
 os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 
 
-def _resolve_dirs(cfg: TrainConfig) -> tuple[Path, Path, Path]:
-    base = _WORKSPACE_ROOT
-    models = base / cfg.models_dir
-    stats = base / cfg.stats_dir
-    tb = base / cfg.tensorboard_dir
-    for d in (models, stats, tb):
-        d.mkdir(parents=True, exist_ok=True)
-    return models, stats, tb
+def _resolve_dirs(cfg: TrainConfig, run_tag: str) -> tuple[Path, Path]:
+    """Create and return (run_dir, ckpt_dir) for this run.
+
+    Layout inside run_dir:
+        checkpoints/   — step_N and best_rolling snapshots
+        eval_best/     — best model from EvalCallback (created by SB3)
+        tensorboard/   — TensorBoard event files (created by SB3)
+        stats.h5       — per-episode HDF5 stats
+        eval_log/      — EvalCallback's evaluations.npz (created by SB3)
+        final.zip      — model at end of training
+        policy.onnx    — ONNX export of eval-best policy
+    """
+    run_dir = _WORKSPACE_ROOT / cfg.output_dir / run_tag
+    ckpt_dir = run_dir / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir, ckpt_dir
 
 
 register_configs()
@@ -184,7 +184,7 @@ def train(cfg: DictConfig) -> None:
 
     algo_spec = get_algo(t_cfg.algo)
     run_tag = f"{t_cfg.run_name}_s{e_cfg.stage}_{int(time.time())}"
-    models_dir, stats_dir, tb_dir = _resolve_dirs(t_cfg)
+    run_dir, ckpt_dir = _resolve_dirs(t_cfg, run_tag)
     _dev = get_device(t_cfg.device)
     if _dev.type == "cuda" and _dev.index is None:
         import torch
@@ -245,7 +245,7 @@ def train(cfg: DictConfig) -> None:
             resume_path,
             env=vec_env,
             device=t_cfg.device,
-            tensorboard_log=str(tb_dir),
+            tensorboard_log=str(run_dir / "tensorboard"),
         )
         if vec_normalize is not None and vn_path.exists():
             vec_normalize = VecNormalize.load(str(vn_path), vec_env)
@@ -257,6 +257,10 @@ def train(cfg: DictConfig) -> None:
         eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
         _sync_vecnorm_stats(vec_normalize, eval_normalize)
     else:
+        policy_kwargs = {
+            **ATB_POLICY_KWARGS,
+            "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
+        }
         model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,
@@ -271,8 +275,8 @@ def train(cfg: DictConfig) -> None:
             vf_coef=p_cfg.vf_coef,
             max_grad_norm=p_cfg.max_grad_norm,
             target_kl=p_cfg.target_kl,
-            policy_kwargs=ATB_POLICY_KWARGS,
-            tensorboard_log=str(tb_dir),
+            policy_kwargs=policy_kwargs,
+            tensorboard_log=str(run_dir / "tensorboard"),
             verbose=0,
             seed=e_cfg.seed,
             device=t_cfg.device,
@@ -282,16 +286,15 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  parameters      : {n_params:,}")
     _print_arch(model)
 
-    eval_best_path = str(models_dir / f"{run_tag}_eval_best")
+    eval_best_path = str(run_dir / "eval_best")
 
     callbacks = [
         CheckpointCallback(
             save_freq=t_cfg.checkpoint_freq,
-            models_dir=models_dir,
-            run_name=run_tag,
+            ckpt_dir=ckpt_dir,
             vec_normalize=vec_normalize,
         ),
-        EpisodeStatsCallback(stats_path=stats_dir / f"{run_tag}.h5"),
+        EpisodeStatsCallback(stats_path=run_dir / "stats.h5"),
         RichLogCallback(console),
         EntropyCoefScheduleCallback(
             schedule=ent_schedule,
@@ -304,7 +307,7 @@ def train(cfg: DictConfig) -> None:
         EvalWithVecNorm(
             eval_env=eval_env,
             best_model_save_path=eval_best_path,
-            log_path=str(stats_dir / f"{run_tag}_eval"),
+            log_path=str(run_dir / "eval_log"),
             eval_freq=max(t_cfg.eval_freq // max(e_cfg.n_envs, 1), 1),
             # FIX: increased from 3 to 20 — with high episode variance
             # (std ~9 in the previous run) 3 episodes give unreliable signal.
@@ -330,22 +333,24 @@ def train(cfg: DictConfig) -> None:
     elapsed = time.time() - t0
     console.print(f"[bold green]Done in {elapsed / 3600:.2f}h[/bold green]")
 
-    final = models_dir / f"{run_tag}_final"
+    final = run_dir / "final"
     model.save(str(final))
     if vec_normalize is not None:
         vec_normalize.save(str(final) + "_vecnorm.pkl")
 
     console.print(f"  model  → {final}.zip")
-    console.print(f"  stats  → {stats_dir / run_tag}.h5")
-    console.print(f"  tb     → tensorboard --logdir {tb_dir}")
+    console.print(f"  stats  → {run_dir / 'stats.h5'}")
+    console.print(f"  tb     → tensorboard --logdir {run_dir / 'tensorboard'}")
 
-    onnx_path = models_dir / "policy.onnx"
+    onnx_path = run_dir / "policy.onnx"
     best_vn_path = Path(eval_best_path + "_vecnorm.pkl")
     try:
-        from stable_baselines3 import PPO as _PPO
-        best_policy = _PPO.load(str(Path(eval_best_path) / "best_model")).policy
+        best_policy = algo_spec.cls.load(str(Path(eval_best_path) / "best_model")).policy
         export_to_onnx(best_policy, onnx_path, vecnorm_path=best_vn_path if best_vn_path.exists() else None)
         console.print(f"  policy → {onnx_path}  (eval best)")
+        viewer_path = _WORKSPACE_ROOT / "assets" / "model" / "policy.onnx"
+        shutil.copy2(onnx_path, viewer_path)
+        console.print(f"  viewer → {viewer_path}  (copied)")
     except Exception as exc:
         console.print(f"  [yellow]ONNX export failed: {exc}[/yellow]")
 

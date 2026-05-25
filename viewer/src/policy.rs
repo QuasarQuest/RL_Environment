@@ -1,5 +1,5 @@
 use tract_onnx::prelude::*;
-use atb::rl::obs::{OBS_CHANNELS, OBS_CROP_SIZE as OBS_SIZE, OBS_TOTAL};
+use atb::rl::obs::OBS_TOTAL;
 use atb::rl::action::ACTION_WAIT;
 
 type Model = RunnableModel<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
@@ -12,7 +12,7 @@ impl OnnxPolicy {
     pub fn load(path: &str) -> TractResult<Self> {
         let model = tract_onnx::onnx()
             .model_for_path(path)?
-            .with_input_fact(0, f32::fact([1, OBS_CHANNELS, OBS_SIZE, OBS_SIZE]).into())?
+            .with_input_fact(0, f32::fact([1, OBS_TOTAL]).into())?
             .into_optimized()?
             .into_runnable()?;
         Ok(Self { model })
@@ -24,8 +24,8 @@ impl OnnxPolicy {
             "obs length mismatch: got {}, expected {OBS_TOTAL}", obs.len()
         );
 
-        let input: Tensor = match tract_ndarray::Array4::from_shape_vec(
-            [1, OBS_CHANNELS, OBS_SIZE, OBS_SIZE],
+        let input: Tensor = match tract_ndarray::Array2::from_shape_vec(
+            [1, OBS_TOTAL],
             obs.to_vec(),
         ) {
             Ok(a)  => a.into(),

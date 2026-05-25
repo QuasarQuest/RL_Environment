@@ -53,16 +53,22 @@ class PpoConfig:
     vf_coef: float = MISSING
     max_grad_norm: float = MISSING
     target_kl: float = MISSING
+    # pi/vf head depth — override per ppo config to match stage complexity.
+    # Stages 1-3: [64]  (lean, fast convergence, low overfitting risk)
+    # Stages 4-6: [128, 64]  (deeper for enemy/combat decisions)
+    net_arch_pi: list[int] = field(default_factory=lambda: [64])
+    net_arch_vf: list[int] = field(default_factory=lambda: [64])
 
 
 @dataclass
 class EnvConfig:
     stage: int = MISSING
     n_envs: int = MISSING
-    seed: Optional[int] = None          # moved here from TrainConfig
+    seed: Optional[int] = None
     max_episode_steps: Optional[int] = None
     clip_reward: bool = MISSING
     clip_reward_max: float = MISSING
+    clip_obs: float = 10.0              # VecNormalize obs clip — 10.0 is the SB3 default
     reward_scale: float = MISSING
     normalize_obs: bool = MISSING
     normalize_reward: bool = MISSING
@@ -80,9 +86,7 @@ class TrainConfig:
     checkpoint_freq: int = MISSING
     eval_freq: int = MISSING
     eval_episodes: int = MISSING
-    models_dir: str = MISSING
-    stats_dir: str = MISSING
-    tensorboard_dir: str = MISSING
+    output_dir: str = MISSING           # root dir; each run gets its own subfolder
     device: str = MISSING
     resume: Optional[str] = None        # optional resume path
 

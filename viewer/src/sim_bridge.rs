@@ -54,9 +54,18 @@ pub struct SimBridge {
     bt_cache:           EnemyPathCache,
 }
 
+fn normalize_path(raw: &str) -> std::path::PathBuf {
+    use std::path::{Component, Path, PathBuf};
+    Path::new(raw).components().fold(PathBuf::new(), |mut acc, c| {
+        if c == Component::ParentDir { acc.pop(); } else { acc.push(c); }
+        acc
+    })
+}
+
 impl SimBridge {
     fn new() -> Self {
-        let policy = match OnnxPolicy::load(ONNX_POLICY_PATH) {
+        let onnx_path = normalize_path(ONNX_POLICY_PATH);
+        let policy = match OnnxPolicy::load(&onnx_path.to_string_lossy()) {
             Ok(p)  => { info!("ONNX policy loaded"); Some(p) }
             Err(e) => { warn!("No ONNX policy found ({e}), using BT agent"); None }
         };
@@ -184,8 +193,10 @@ pub fn step_sim(
                 }
             }
             PolicyMode::Random => {
-                // LCG step — different action every tick, no rng dep.
-                let x = bridge.sim.tick.wrapping_mul(6364136223846793005).wrapping_add(1);
+                // PCG-style LCG — different action every tick, no rng dependency.
+                // Multiplier from Knuth vol.2 (MMIX LCG), shift discards low-quality low bits.
+                const LCG_MUL: u64 = 6364136223846793005;
+                let x = bridge.sim.tick.wrapping_mul(LCG_MUL).wrapping_add(1);
                 (x >> 38) as u32 % ACTION_SIZE as u32
             }
             PolicyMode::BehaviorTree => {
@@ -215,10 +226,11 @@ pub fn step_sim(
 }
 
 fn item_color(kind: ItemKind) -> Color {
+    use crate::style::color::{ITEM_AMMO, ITEM_GOLD, ITEM_HEALTH, ITEM_SPEED};
     match kind {
-        ItemKind::Gold       => Color::srgb(0.95, 0.78, 0.20),
-        ItemKind::Health     => Color::srgb(0.90, 0.30, 0.30),
-        ItemKind::Ammo       => Color::srgb(0.30, 0.60, 0.95),
-        ItemKind::SpeedBoost => Color::srgb(0.30, 0.90, 0.50),
+        ItemKind::Gold       => ITEM_GOLD,
+        ItemKind::Health     => ITEM_HEALTH,
+        ItemKind::Ammo       => ITEM_AMMO,
+        ItemKind::SpeedBoost => ITEM_SPEED,
     }
 }

@@ -10,7 +10,7 @@ mod viz;
 use atb::config;
 
 const ASSET_PATH:       &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets");
-const ONNX_POLICY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../runs/models/policy.onnx");
+const ONNX_POLICY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/model/policy.onnx");
 
 fn main() {
     App::new()

@@ -24,15 +24,10 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
-from model.policy import ATB_POLICY_KWARGS
+from network.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.config import EnvConfig, PpoConfig, TuneConfig
-
-
-def linear_schedule(start: float, end: float):
-    if start == end:
-        return lambda _: float(start)
-    return lambda p: float(end + p * (start - end))
+from training.schedules import linear_schedule
 
 
 console = Console()

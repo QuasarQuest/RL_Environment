@@ -1,42 +1,80 @@
+# configs/ppo/default.yaml
 # @package ppo
-# Default PPO hyperparameters.
-# These are the single source of truth — do not duplicate in code.
 #
-# n_steps / batch_size tuning notes (XPS 9500, GTX 1650 Ti, 50W TDP)
-# -------------------------------------------------------------------
-# Target: GPU utilisation 85-95%, no power throttling.
+# PPO Hyperparameter — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=8272
 #
-# Formula:
-#   rollout_buffer = n_envs × n_steps          (samples per update)
-#   minibatches    = rollout_buffer / batch_size
-#
-# With n_envs=48, n_steps=512, batch_size=8192:
-#   rollout_buffer = 24.576 samples
-#   minibatches    = 3 per update  → GPU well-saturated, less throttling
-#   updates/1M     = 1.000.000 / 24.576 ≈ 41 updates
-#
-# Previous values (n_steps=1024, batch_size=4096, n_envs=48):
-#   rollout_buffer = 49.152 — good data volume but only 12 minibatches
-#   GPU was at 99% / 50W and throttling core clock to 1365 MHz
-#
-# Previous values (n_steps=1024, batch_size=4096, n_envs=16):
-#   rollout_buffer = 16.384 — too small, only 4 minibatches, GPU underused
+# VRAM-Budget:
+#   Rollout buffer : 48 envs × 512 steps × 8272 floats × 4 bytes ≈ 810 MB
+#   Policy + Adam  : ~30 MB
+#   Aktivierungen  : ~200 MB
+#   ───────────────────────────────────────────────────────────────
+#   Gesamt         : ~1.0 GB  ✓
 
-n_steps: 512
-batch_size: 4096
-n_epochs: 6
-gamma: 0.99
+# ── Rollout ───────────────────────────────────────────────────────────────────
+# n_steps: Schritte pro Env pro Update. 512 statt SB3-Default 2048 —
+#          mit 48 Envs würde 2048 den VRAM sprengen.
+#          Effektive Batch-Größe = n_envs × n_steps = 48 × 512 = 24 576 Transitions.
+n_steps:   512
+
+# ── Optimierung ───────────────────────────────────────────────────────────────
+# batch_size: Minibatch-Größe für SGD. Muss n_envs × n_steps teilen.
+#             256 = 24 576 / 96 → 96 Minibatches pro Update-Zyklus.
+batch_size: 2048
+
+# n_epochs: Wie oft der gesammelte Rollout-Buffer pro Update durchlaufen wird.
+#           10 ist der PPO-Standard; bei Instabilität auf 4–6 reduzieren.
+n_epochs:   10
+
+# ── Discount & Advantage ──────────────────────────────────────────────────────
+# gamma: Discount-Faktor. 0.99 = Agent denkt ~100 Steps voraus.
+#        Für kürzere Episoden (Stage 1–3) auch 0.95 möglich.
+gamma:      0.99
+
+# gae_lambda: GAE-Tradeoff Bias↔Varianz.
+#             1.0 = Monte-Carlo (hohe Varianz), 0.0 = TD(0) (hoher Bias).
+#             0.95 ist der PPO-Standardwert.
 gae_lambda: 0.95
 
-learning_rate: 1e-4
-learning_rate_final: 1e-5
+# ── Clipping ──────────────────────────────────────────────────────────────────
+# clip_range: PPO Trust-Region Clipping. 0.2 = Policy darf sich pro Update
+#             maximal um 20% ändern. Stabil für diskrete Action-Spaces.
+clip_range:       0.2
+clip_range_final: 0.2   # kein Decay — bei Bedarf auf 0.1 am Ende setzen
 
-clip_range: 0.2
-clip_range_final: 0.2
+# ── Entropy ───────────────────────────────────────────────────────────────────
+# ent_coef: Gewicht des Entropy-Bonus. Verhindert premature collapse auf
+#           wenige Aktionen (z.B. nur Move/Wait statt Attack).
+#           0.01 ist kritisch bei 26 Actions — ohne Decay lernt der Agent
+#           auch in Stage 4+ noch zu explorieren.
+ent_coef:       0.01
+ent_coef_final: 0.001   # linear decay → weniger Exploration am Ende
 
-ent_coef: 0.05
-ent_coef_final: 0.01
-
+# ── Value Function ────────────────────────────────────────────────────────────
+# vf_coef: Gewicht des Value-Loss relativ zum Policy-Loss.
+#          0.5 = Standard; erhöhen wenn Value-Funktion nicht konvergiert.
 vf_coef: 0.5
+
+# ── Gradient ──────────────────────────────────────────────────────────────────
+# max_grad_norm: Gradient Clipping. Verhindert explodierende Gradienten
+#                bei großen Policy-Änderungen (z.B. nach Stage-Wechsel).
 max_grad_norm: 0.5
+
+# ── Learning Rate ─────────────────────────────────────────────────────────────
+# Linearer Decay von learning_rate → learning_rate_final über total_timesteps.
+# 3e-4 ist der Adam-Standardwert; 1e-4 am Ende für feinere Konvergenz.
+learning_rate:       3.0e-4
+learning_rate_final: 1.0e-4
+
+# ── Early Stop ────────────────────────────────────────────────────────────────
+# target_kl: Update wird abgebrochen wenn KL-Divergenz diesen Wert überschreitet.
+#            Verhindert zu große Policy-Sprünge. 0.02 = PPO-Standard.
+#            Bei instabilem Training auf 0.01 reduzieren.
 target_kl: 0.02
+
+# ── Network Architecture ──────────────────────────────────────────────────────
+# pi/vf head nach dem Feature-Extractor.
+# Stage 1-3: [64]       — schlank, schnelle Konvergenz, niedrig Overfitting-Risiko
+# Stage 4-6: [128, 64]  — tiefer für Kampf/Gegner-Entscheidungen
+# Override via CLI: ppo.net_arch_pi=[128,64] ppo.net_arch_vf=[128,64]
+net_arch_pi: [64]
+net_arch_vf: [64]

@@ -5,19 +5,24 @@ config dataclass. `train.py` and `tune.py` resolve algorithms by name so
 adding SAC/DQN later is a matter of populating this file, not editing the
 training loop.
 
-Today only PPO is wired up because the env exposes a Discrete action space
-without a continuous variant. SAC/TD3 are listed as TODOs to make the
-intent explicit.
+Algorithms
+----------
+ppo          : Standard PPO — no action masking.
+maskable_ppo : PPO with per-step action masking (sb3-contrib).
+               Requires the env to expose an `action_masks()` method.
+               Use this for all stages — masks are stage-aware and fall back
+               to all-valid in stage 6, so there is no downside to always
+               using it.
 
 Policy choice
 -------------
-`policy="CnnPolicy"` is paired with `ATB_CNN_POLICY_KWARGS` (and its
-`normalize_images=False` flag) in policy.py. Switching back to the legacy
-flat-vector pipeline requires:
-  - here:        policy="MlpPolicy"
+Both PPO variants use "MlpPolicy" here because our observation space is flat
+(8272,) and AtbCnnExtractor handles the CNN internally. SB3 routes "MlpPolicy"
+through the custom features_extractor_class in ATB_POLICY_KWARGS.
+
+Switching back to the legacy flat-vector pipeline:
   - policy.py:   ATB_POLICY_KWARGS = ATB_MLP_POLICY_KWARGS
-  - env.rs:      import obs::build_obs / reward::compute_reward
-  - atb_env.py:  swap observation_space back to Box(shape=(obs_dim,))
+  - atb_env.py / batch_vec_env.py: revert obs shape
 """
 from __future__ import annotations
 
@@ -29,13 +34,16 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 
+try:
+    from sb3_contrib import MaskablePPO
+    _MASKABLE_AVAILABLE = True
+except ImportError:
+    _MASKABLE_AVAILABLE = False
+    MaskablePPO = None  # type: ignore[assignment,misc]
+
 
 # ---------------------------------------------------------------------------
 # Protocol — the constructor surface that train.py actually calls.
-#
-# Every algorithm we might add (PPO, SAC, DQN …) accepts at least these
-# kwargs. The Protocol lets the type checker validate call sites without
-# forcing AlgoSpec.cls to be typed as a concrete class.
 # ---------------------------------------------------------------------------
 
 @runtime_checkable
@@ -53,7 +61,7 @@ class SB3AlgoConstructor(Protocol):
         verbose: int = 0,
         seed: int | None = None,
         device: th.device | str = "auto",
-        **kwargs: Any,           # algorithm-specific params (n_steps, etc.)
+        **kwargs: Any,
     ) -> BaseAlgorithm: ...
 
 
@@ -61,51 +69,75 @@ class SB3AlgoConstructor(Protocol):
 class AlgoSpec:
     """Static description of an RL algorithm."""
 
-    name: str
-    cls: Type[BaseAlgorithm]
-    policy: str
-    supports_discrete: bool
+    name:                str
+    cls:                 Type[BaseAlgorithm]
+    policy:              str
+    supports_discrete:   bool
     supports_continuous: bool
 
     @property
     def constructor(self) -> SB3AlgoConstructor:
-        """
-        Return ``cls`` cast to ``SB3AlgoConstructor``.
-
-        Use this at call sites that pass algorithm-specific kwargs (e.g.
-        ``n_steps``, ``clip_range``) so the type checker validates the
-        shared surface while ``**kwargs`` absorbs the algo-specific ones
-        without spurious "Unexpected argument" warnings.
-        """
         return self.cls  # type: ignore[return-value]
 
 
-# --------------------------------------------------------------------------
-# PPO — the only algorithm currently supported. On-policy, works with the
-# discrete action space exposed by AtbEnv.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PPO — standard, no masking.
+# ---------------------------------------------------------------------------
+
 PPO_SPEC = AlgoSpec(
     name="ppo",
     cls=PPO,
-    policy="CnnPolicy",
+    policy="MlpPolicy",   # flat obs → AtbCnnExtractor handles CNN internally
     supports_discrete=True,
     supports_continuous=True,
 )
 
+# ---------------------------------------------------------------------------
+# MaskablePPO — action masking via sb3-contrib.
+#
+# Install: pip install sb3-contrib
+#
+# The env must implement action_masks() returning np.ndarray[bool] of shape
+# (action_size,) for AtbEnv / (n_envs, action_size) for BatchVecEnv.
+# Stage-aware masks are defined in env/action_masks.py.
+# ---------------------------------------------------------------------------
+
+
+def _make_maskable_spec() -> AlgoSpec:
+    if not _MASKABLE_AVAILABLE or MaskablePPO is None:
+        raise ImportError(
+            "MaskablePPO requires sb3-contrib. Install with:\n"
+            "  pip install sb3-contrib"
+        )
+    return AlgoSpec(
+        name="maskable_ppo",
+        cls=MaskablePPO,
+        policy="MlpPolicy",
+        supports_discrete=True,
+        supports_continuous=False,
+    )
+
 
 ALGOS: dict[str, AlgoSpec] = {
     "ppo": PPO_SPEC,
-    # "sac": ...   # requires continuous action space on the Rust side
-    # "dqn": ...   # straightforward to add once we have an eval baseline
+    **( {"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {} ),
 }
 
 
 def get_algo(name: str) -> AlgoSpec:
     """Look up an algorithm spec by name with a helpful error message."""
     try:
-        return ALGOS[name.lower()]
+        spec = ALGOS[name.lower()]
     except KeyError as exc:
         available = ", ".join(sorted(ALGOS))
         raise ValueError(
             f"Unknown algorithm '{name}'. Available: {available}"
         ) from exc
+
+    # Guard: if maskable_ppo was requested but sb3-contrib is missing, raise now.
+    if name.lower() == "maskable_ppo" and not _MASKABLE_AVAILABLE:
+        raise ImportError(
+            "MaskablePPO requires sb3-contrib. Install with:\n"
+            "  pip install sb3-contrib"
+        )
+    return spec

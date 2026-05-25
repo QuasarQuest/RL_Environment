@@ -48,7 +48,7 @@ def _read_hdf5(path: Path) -> pd.DataFrame | None:
         if "timestep" in df.columns:
             df = df.sort_values("timestep").reset_index(drop=True)
         return df
-    except Exception:  # noqa: BLE001  # noinspection PyBroadException — file may be mid-write
+    except (OSError, RuntimeError, ValueError):
         return None
 
 

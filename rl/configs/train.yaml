@@ -11,8 +11,8 @@ defaults:
 
 train:
   run_name: run
-  algo: ppo
-  total_timesteps: 1_000_000
+  algo: maskable_ppo
+  total_timesteps: 1_500_000
   checkpoint_freq: 50_000
   eval_freq: 250_000
   # FIX: increased from 3 to 20 — with high episode variance (std ~9 in
@@ -22,15 +22,14 @@ train:
   eval_episodes: 10
   device: auto
 
-  # Output dirs (relative to project root: algorithm_test_bed/)
-  models_dir: runs/models
-  stats_dir: runs/stats
-  tensorboard_dir: runs/tensorboard
+  # Root output dir (relative to project root). Each run gets its own subfolder:
+  #   runs/<run_tag>/checkpoints/, eval_best/, tensorboard/, stats.h5, policy.onnx
+  output_dir: runs
 
 hydra:
   job:
     env_set:
-      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True,max_split_size_mb:128,garbage_collection_threshold:0.7,roundup_power2_divisions:16"
   run:
     dir: ../runs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:

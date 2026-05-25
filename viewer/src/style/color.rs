@@ -27,3 +27,10 @@ pub const TEAM_COLORS: &[Color] = &[
 pub fn team_color(team_id: u8) -> Color {
     TEAM_COLORS.get(team_id as usize).copied().unwrap_or(GRAY_400)
 }
+
+// ── Item sprite colors ────────────────────────────────────────────────────────
+
+pub const ITEM_GOLD:   Color = GOLD_500;
+pub const ITEM_HEALTH: Color = Color::srgb(0.90, 0.30, 0.30);
+pub const ITEM_AMMO:   Color = Color::srgb(0.30, 0.60, 0.95);
+pub const ITEM_SPEED:  Color = Color::srgb(0.30, 0.90, 0.50);

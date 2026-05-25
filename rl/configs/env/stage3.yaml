@@ -8,7 +8,7 @@ seed: null
 max_episode_steps: null
 
 clip_reward: true
-clip_reward_max: 30.0
+clip_reward_max: 70.0
 reward_scale: 1.0
 
 normalize_obs: true
