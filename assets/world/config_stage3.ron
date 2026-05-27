@@ -5,9 +5,9 @@
 // The agent must learn to weigh item utility against route cost.
 
 (
-    width:  25,
-    height: 25,
-    match_duration_ticks: 2000,
+    width:  50,
+    height: 50,
+    match_duration_ticks: 4000,
 
     bases: [
         ( team: 0, corner: BottomLeft, margin: 0.05 ),

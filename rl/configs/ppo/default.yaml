@@ -78,3 +78,8 @@ target_kl: 0.02
 # Override via CLI: ppo.net_arch_pi=[128,64] ppo.net_arch_vf=[128,64]
 net_arch_pi: [64]
 net_arch_vf: [64]
+
+# ── LSTM (recurrent_ppo only) ──────────────────────────────────────────────────
+# Ignored when algo=ppo or algo=maskable_ppo.
+lstm_hidden_size: 256
+n_lstm_layers: 1

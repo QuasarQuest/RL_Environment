@@ -41,6 +41,13 @@ except ImportError:
     _MASKABLE_AVAILABLE = False
     MaskablePPO = None  # type: ignore[assignment,misc]
 
+try:
+    from sb3_contrib import RecurrentPPO
+    _RECURRENT_AVAILABLE = True
+except ImportError:
+    _RECURRENT_AVAILABLE = False
+    RecurrentPPO = None  # type: ignore[assignment,misc]
+
 
 # ---------------------------------------------------------------------------
 # Protocol — the constructor surface that train.py actually calls.
@@ -118,9 +125,25 @@ def _make_maskable_spec() -> AlgoSpec:
     )
 
 
+def _make_recurrent_spec() -> AlgoSpec:
+    if not _RECURRENT_AVAILABLE or RecurrentPPO is None:
+        raise ImportError(
+            "RecurrentPPO requires sb3-contrib. Install with:\n"
+            "  pip install sb3-contrib"
+        )
+    return AlgoSpec(
+        name="recurrent_ppo",
+        cls=RecurrentPPO,
+        policy="MlpLstmPolicy",   # flat obs + LSTM; custom extractor injected via policy_kwargs
+        supports_discrete=True,
+        supports_continuous=False,
+    )
+
+
 ALGOS: dict[str, AlgoSpec] = {
     "ppo": PPO_SPEC,
-    **({"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {}),
+    **({"maskable_ppo":  _make_maskable_spec()}  if _MASKABLE_AVAILABLE else {}),
+    **({"recurrent_ppo": _make_recurrent_spec()} if _RECURRENT_AVAILABLE else {}),
 }
 
 

@@ -1,90 +1,52 @@
 // src/rl/action.rs
 //
-// Maps discrete integer actions (0..25) to the sim's Action enum.
-// This is the action space the neural net outputs.
+// High-level action space for the RL agent.
+// The agent picks a navigation goal or a direct action; A* handles movement.
 //
 // Layout:
-//   0..7   Move       (N, S, E, W, NE, NW, SE, SW)
-//   8..15  Attack     (N, S, E, W, NE, NW, SE, SW)
-//   16..23 RangedAttack (N, S, E, W, NE, NW, SE, SW)
-//   24     Drop
-//   25     Wait
+//   0..3   NavigateToCluster(0..3)  — top-4 gold clusters by density, largest first
+//   4      NavigateToBase           — return to base and deposit
+//   5      NavigateToHealth         — nearest health pickup
+//   6      NavigateToAmmo           — nearest ammo pickup
+//   7      NavigateToEnemy          — nearest enemy (for hunting / interception)
+//   8      MeleeAttack              — auto-target lowest-HP enemy in melee range
+//   9      RangedAttack             — auto-target lowest-HP enemy in ranged range
+//   10     Wait
 
-use crate::entity::agent::{Action, Dir};
+pub const ACTION_SIZE: usize = 11;
+pub const ACTION_WAIT: u32   = 10;
+pub const CLUSTER_K:   usize = 4;
 
-pub const ACTION_SIZE: usize = 26;
-/// Integer index of the Wait action — safe fallback when no better action is available.
-pub const ACTION_WAIT: u32 = 25;
-
-/// Convert a neural net output integer to a sim Action.
-/// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.
-pub fn int_to_action(action: u32) -> Action {
-    match action {
-        0  => Action::Move(Dir::N),
-        1  => Action::Move(Dir::S),
-        2  => Action::Move(Dir::E),
-        3  => Action::Move(Dir::W),
-        4  => Action::Move(Dir::NE),
-        5  => Action::Move(Dir::NW),
-        6  => Action::Move(Dir::SE),
-        7  => Action::Move(Dir::SW),
-
-        8  => Action::Attack(Dir::N),
-        9  => Action::Attack(Dir::S),
-        10 => Action::Attack(Dir::E),
-        11 => Action::Attack(Dir::W),
-        12 => Action::Attack(Dir::NE),
-        13 => Action::Attack(Dir::NW),
-        14 => Action::Attack(Dir::SE),
-        15 => Action::Attack(Dir::SW),
-
-        16 => Action::RangedAttack(Dir::N),
-        17 => Action::RangedAttack(Dir::S),
-        18 => Action::RangedAttack(Dir::E),
-        19 => Action::RangedAttack(Dir::W),
-        20 => Action::RangedAttack(Dir::NE),
-        21 => Action::RangedAttack(Dir::NW),
-        22 => Action::RangedAttack(Dir::SE),
-        23 => Action::RangedAttack(Dir::SW),
-
-        24 => Action::Drop,
-        25 => Action::Wait,
-
-        _ => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
-    }
+/// High-level action the RL policy selects each tick.
+/// Navigation goals are resolved to a concrete GridPos target and executed via A*.
+/// Direct actions (attack, wait) are applied immediately without pathfinding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RlAction {
+    NavigateToCluster(u8),
+    NavigateToBase,
+    NavigateToHealth,
+    NavigateToAmmo,
+    NavigateToEnemy,
+    MeleeAttack,
+    RangedAttack,
+    Wait,
 }
 
-/// Convert a sim Action back to an integer — useful for logging/debugging.
-pub fn action_to_int(action: Action) -> u32 {
+/// Convert a neural-net output integer to an RlAction.
+/// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.
+pub fn int_to_rl_action(action: u32) -> RlAction {
     match action {
-        Action::Move(Dir::N)  => 0,
-        Action::Move(Dir::S)  => 1,
-        Action::Move(Dir::E)  => 2,
-        Action::Move(Dir::W)  => 3,
-        Action::Move(Dir::NE) => 4,
-        Action::Move(Dir::NW) => 5,
-        Action::Move(Dir::SE) => 6,
-        Action::Move(Dir::SW) => 7,
-
-        Action::Attack(Dir::N)  => 8,
-        Action::Attack(Dir::S)  => 9,
-        Action::Attack(Dir::E)  => 10,
-        Action::Attack(Dir::W)  => 11,
-        Action::Attack(Dir::NE) => 12,
-        Action::Attack(Dir::NW) => 13,
-        Action::Attack(Dir::SE) => 14,
-        Action::Attack(Dir::SW) => 15,
-
-        Action::RangedAttack(Dir::N)  => 16,
-        Action::RangedAttack(Dir::S)  => 17,
-        Action::RangedAttack(Dir::E)  => 18,
-        Action::RangedAttack(Dir::W)  => 19,
-        Action::RangedAttack(Dir::NE) => 20,
-        Action::RangedAttack(Dir::NW) => 21,
-        Action::RangedAttack(Dir::SE) => 22,
-        Action::RangedAttack(Dir::SW) => 23,
-
-        Action::Drop => 24,
-        Action::Wait => 25,
+        0  => RlAction::NavigateToCluster(0),
+        1  => RlAction::NavigateToCluster(1),
+        2  => RlAction::NavigateToCluster(2),
+        3  => RlAction::NavigateToCluster(3),
+        4  => RlAction::NavigateToBase,
+        5  => RlAction::NavigateToHealth,
+        6  => RlAction::NavigateToAmmo,
+        7  => RlAction::NavigateToEnemy,
+        8  => RlAction::MeleeAttack,
+        9  => RlAction::RangedAttack,
+        10 => RlAction::Wait,
+        _  => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
     }
 }

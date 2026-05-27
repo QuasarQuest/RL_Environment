@@ -5,17 +5,12 @@ This class exists so the factory's eval path and DummyVecEnv work correctly.
 
 Observation layout
 ------------------
-Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (8272,):
-  [0    : 8125)  main egocentric crop  — (13, 25, 25) logically
-  [8125 : 8272)  minimap               — ( 3,  7,  7) logically
+Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (9629,):
+  [0       : 8750)   main egocentric crop  — (14, 25, 25)
+  [8750    : 9617)   minimap               — ( 3, 17, 17)
+  [9617    : 9629)   cluster features      — (12,)
 
 AtbCnnExtractor in policy.py splits and reshapes internally.
-
-Action masking
---------------
-When used with MaskablePPO (algo=maskable_ppo), the env must expose
-action_masks() → np.ndarray[bool, (ACTION_SIZE,)].
-The masks are stage-aware: stages 1–3 suppress Attack/RangedAttack.
 """
 from __future__ import annotations
 
@@ -26,7 +21,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from env.action_masks import ACTION_SIZE, get_action_mask
+from env.action_masks import ACTION_SIZE
 from network.extractor import OBS_TOTAL as _OBS_TOTAL
 
 
@@ -46,16 +41,7 @@ _OBS_FLAT_SHAPE = (_OBS_TOTAL,)
 
 
 class AtbEnv(gym.Env):
-    """Single-agent Gymnasium env backed by a 1-env PyBatchEnv.
-
-    Score tracking note
-    -------------------
-    `self._score` accumulates every positive reward, which includes both
-    PICKUP (0.5) and DEPOSIT (5.0) events. It is therefore an approximation
-    of the true Rust-side `agent.score` (deposit-only). A precise score
-    would require an additional `get_agents()` call per step — too expensive
-    for the training hot path. The approximation is acceptable for logging.
-    """
+    """Single-agent Gymnasium env backed by a 1-env PyBatchEnv."""
 
     metadata = {"render_modes": []}
 
@@ -70,11 +56,7 @@ class AtbEnv(gym.Env):
         import atb
         self._env = atb.PyBatchEnv(1, config_path)
         self._stage = stage
-        self._mask = get_action_mask(stage)  # (ACTION_SIZE,) bool, pre-computed
 
-        # Flat 1D observation space — AtbCnnExtractor splits crop + minimap internally.
-        # Do NOT use atb.PyBatchEnv.obs_shape(): it returns (13, 25, 25) which would
-        # route through SB3's default CnnPolicy preprocessing instead.
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=_OBS_FLAT_SHAPE, dtype=_OBS_DTYPE
         )
@@ -83,17 +65,6 @@ class AtbEnv(gym.Env):
         self._episode_reward: float = 0.0
         self._episode_length: int = 0
         self._score: float = 0.0
-
-    # ── MaskablePPO interface ─────────────────────────────────────────────────
-
-    def action_masks(self) -> np.ndarray:
-        """Return valid-action mask for current stage.
-
-        Called every step by MaskablePPO. Returns a pre-computed bool array
-        so there is no per-step allocation overhead.
-        Shape: (ACTION_SIZE,) = (26,), dtype=bool.
-        """
-        return self._mask
 
     # ── Gymnasium interface ───────────────────────────────────────────────────
 

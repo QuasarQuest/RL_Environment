@@ -5,9 +5,9 @@
 // Agent must learn to avoid the enemy while collecting gold.
 
 (
-    width:  25,
-    height: 25,
-    match_duration_ticks: 2500,
+    width:  50,
+    height: 50,
+    match_duration_ticks: 5000,
 
     bases: [
         ( team: 0, corner: BottomLeft, margin: 0.05 ),

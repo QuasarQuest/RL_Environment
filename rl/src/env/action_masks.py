@@ -1,77 +1,66 @@
-"""Stage-aware action masks for MaskablePPO.
+"""Stage-aware action masks for the 11-action POI-based action space.
 
-Action space layout (ACTION_SIZE = 26, defined in src/rl/action.rs):
-  0– 7   Move          (N S E W NE NW SE SW)
-  8–15   Attack        (N S E W NE NW SE SW)  — melee, no ammo cost
-  16–23  RangedAttack  (N S E W NE NW SE SW)  — costs 1 ammo
-  24     Drop
-  25     Wait
+Action space layout (ACTION_SIZE = 11, defined in src/rl/action.rs):
+  0– 3   NavigateToCluster(0..3)  — top-4 gold clusters by density
+  4      NavigateToBase           — return to base and deposit
+  5      NavigateToHealth         — nearest health pickup
+  6      NavigateToAmmo           — nearest ammo pickup
+  7      NavigateToEnemy          — nearest enemy (for hunting)
+  8      MeleeAttack              — auto-target lowest-HP enemy in melee range
+  9      RangedAttack             — auto-target lowest-HP enemy in ranged range
+  10     Wait
 
 Stage progression
 -----------------
-  Stage 1–3 : no enemy → Attack and RangedAttack are no-ops.
-              Masking them reduces effective action space 26 → 10,
-              which accelerates exploration significantly.
-  Stage 4   : SimpleChaser enemy appears → melee Attack unlocked.
-              RangedAttack still masked (agent has no ammo reward yet).
-  Stage 5   : A* enemy + full item set → RangedAttack unlocked.
-  Stage 6   : self-play, all actions valid.
+  Stage 1–2 : gold + base only — health/ammo/combat masked.
+  Stage 3   : health + ammo items added — nav to pickups unlocked.
+  Stage 4   : SimpleChaser enemy — navigate to enemy + melee unlocked.
+  Stage 5+  : BehaviorTree enemy + ammo items — ranged attack unlocked.
 
-Drop (24) is available from stage 3 onward where gold carrying matters,
-but harmless to allow earlier (it does nothing when not carrying gold).
+Note: these masks are provided for optional use with MaskablePPO.
+Default training uses RecurrentPPO without masking — the agent learns
+that invalid actions (e.g. ranged attack with no ammo) return zero reward.
 """
 from __future__ import annotations
 
 import numpy as np
 
-# ── Action index ranges (must match src/rl/action.rs) ────────────────────────
+# ── Action indices (must match src/rl/action.rs) ──────────────────────────────
 
-ACTION_SIZE = 26
+ACTION_SIZE = 11
 
-_MOVE_START = 0  # 0–7
-_MOVE_END = 8
-_ATTACK_START = 8  # 8–15
-_ATTACK_END = 16
-_RANGED_START = 16  # 16–23
-_RANGED_END = 24
-_DROP = 24
-_WAIT = 25
+_CLUSTER_ACTIONS = list(range(0, 4))   # NavigateToCluster 0-3
+_NAV_BASE        = 4
+_NAV_HEALTH      = 5
+_NAV_AMMO        = 6
+_NAV_ENEMY       = 7
+_MELEE           = 8
+_RANGED          = 9
+_WAIT            = 10
 
 # ── Per-stage valid action sets ───────────────────────────────────────────────
 
-_MOVE_ACTIONS = list(range(_MOVE_START, _MOVE_END))  # [0..7]
-_ATTACK_ACTIONS = list(range(_ATTACK_START, _ATTACK_END))  # [8..15]
-_RANGED_ACTIONS = list(range(_RANGED_START, _RANGED_END))  # [16..23]
-
 STAGE_VALID_ACTIONS: dict[int, list[int]] = {
-    # Stage 1: navigation only — no enemy, no combat items.
-    1: _MOVE_ACTIONS + [_WAIT],
+    # Stage 1: open map, gold only — navigate to clusters/base, wait.
+    1: _CLUSTER_ACTIONS + [_NAV_BASE, _WAIT],
 
-    # Stage 2: obstacles added — same action set as stage 1.
-    2: _MOVE_ACTIONS + [_WAIT],
+    # Stage 2: obstacles + speed boost — same nav set.
+    2: _CLUSTER_ACTIONS + [_NAV_BASE, _WAIT],
 
-    # Stage 3: health/ammo/speed items added — Drop now meaningful.
-    3: _MOVE_ACTIONS + [_DROP, _WAIT],
+    # Stage 3: health + ammo pickups added.
+    3: _CLUSTER_ACTIONS + [_NAV_BASE, _NAV_HEALTH, _NAV_AMMO, _WAIT],
 
-    # Stage 4: SimpleChaser enemy — melee Attack unlocked.
-    4: _MOVE_ACTIONS + _ATTACK_ACTIONS + [_DROP, _WAIT],
+    # Stage 4: SimpleChaser enemy — hunting and melee unlocked.
+    4: _CLUSTER_ACTIONS + [_NAV_BASE, _NAV_HEALTH, _NAV_AMMO, _NAV_ENEMY, _MELEE, _WAIT],
 
-    # Stage 5: A* enemy + ammo items — RangedAttack unlocked.
-    5: _MOVE_ACTIONS + _ATTACK_ACTIONS + _RANGED_ACTIONS + [_DROP, _WAIT],
-
-    # Stage 6: self-play — all actions valid.
+    # Stage 5+: A* enemy, full items — ranged attack unlocked.
+    5: list(range(ACTION_SIZE)),
     6: list(range(ACTION_SIZE)),
 }
 
 
 def get_action_mask(stage: int) -> np.ndarray:
-    """Return a boolean mask of shape (ACTION_SIZE,) for the given stage.
-
-    True  = action is valid and will be sampled.
-    False = action is masked out (logit set to -inf by MaskablePPO).
-
-    Unknown stages default to all-valid (conservative fallback).
-    """
+    """Return a boolean mask of shape (ACTION_SIZE,) for the given stage."""
     mask = np.zeros(ACTION_SIZE, dtype=bool)
     valid = STAGE_VALID_ACTIONS.get(stage, list(range(ACTION_SIZE)))
     mask[valid] = True

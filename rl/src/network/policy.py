@@ -32,6 +32,16 @@ ATB_CNN_POLICY_KWARGS = dict(
     normalize_images=False,
 )
 
+# ── RecurrentPPO (LSTM) ───────────────────────────────────────────────────────
+# Uses MlpLstmPolicy — the custom extractor feeds into an LSTM layer.
+# normalize_images=False: obs are already float32 in [0,1]; SB3 must NOT ÷255.
+
+ATB_RECURRENT_POLICY_KWARGS = dict(
+    features_extractor_class=AtbCnnExtractor,
+    features_extractor_kwargs=dict(features_dim=256),
+    normalize_images=False,
+)
+
 # Canonical alias — swap RHS to switch pipelines.
 ATB_POLICY_KWARGS = ATB_CNN_POLICY_KWARGS
 

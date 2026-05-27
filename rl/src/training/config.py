@@ -53,8 +53,12 @@ class PpoConfig:
     # pi/vf head depth — override per ppo config to match stage complexity.
     # Stages 1-3: [64]  (lean, fast convergence, low overfitting risk)
     # Stages 4-6: [128, 64]  (deeper for enemy/combat decisions)
+    # Ignored for recurrent_ppo (LSTM replaces the MLP head).
     net_arch_pi: list[int] = field(default_factory=lambda: [64])
     net_arch_vf: list[int] = field(default_factory=lambda: [64])
+    # LSTM params — only used when algo=recurrent_ppo.
+    lstm_hidden_size: int = 256
+    n_lstm_layers: int = 1
 
 
 @dataclass

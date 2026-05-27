@@ -22,17 +22,12 @@ impl Dir {
     }
 }
 
-/// Discrete action the RL policy outputs each tick.
+/// Internal movement action used by both the RL agent (via A* goal navigation)
+/// and scripted enemies. Combat is handled separately via physics::try_melee/ranged_attack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Move one cell in the given direction.
     Move(Dir),
-    /// Drop all carried gold on own base tile.
-    Drop,
-    /// Melee attack — adjacent tile, no ammo cost.
-    Attack(Dir),
-    /// Ranged attack — up to RANGED_RANGE tiles along Dir, costs 1 ammo.
-    RangedAttack(Dir),
     /// Do nothing this tick.
     Wait,
 }

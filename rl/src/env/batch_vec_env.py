@@ -3,13 +3,8 @@
 Observation protocol
 --------------------
 Rust returns a flat bytearray of shape (n_envs * OBS_TOTAL * 4 bytes).
-np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 8272) — flat, not (C,H,W).
-AtbCnnExtractor in policy.py splits crop + minimap internally.
-
-Action masking
---------------
-When used with MaskablePPO, SB3 calls env.action_masks() expecting shape
-(n_envs, ACTION_SIZE). Masks are stage-aware via env/action_masks.py.
+np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 9629) — flat, not (C,H,W).
+AtbCnnExtractor in policy.py splits crop + minimap + cluster features internally.
 
 Score tracking
 --------------
@@ -25,7 +20,7 @@ from gymnasium import spaces
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
-from env.action_masks import ACTION_SIZE, get_action_mask_batch
+from env.action_masks import ACTION_SIZE
 from network.extractor import OBS_TOTAL as _OBS_TOTAL
 
 _OBS_DTYPE = np.float32
@@ -54,10 +49,7 @@ class BatchVecEnv(VecEnv):
         self._batch: Any = atb.PyBatchEnv(n_envs, config_path)
         self._stage = stage
 
-        # Pre-compute mask once — same for all envs within a stage.
-        self._mask = get_action_mask_batch(stage, n_envs)  # (n_envs, ACTION_SIZE)
-
-        # Flat 1D observation space — AtbCnnExtractor splits crop + minimap internally.
+        # Flat 1D observation space — AtbCnnExtractor splits crop + minimap + cluster features.
         obs_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=_OBS_FLAT_SHAPE, dtype=_OBS_DTYPE
         )
@@ -72,17 +64,6 @@ class BatchVecEnv(VecEnv):
         self._ep_lengths = np.zeros(n_envs, dtype=np.int32)
 
         self._pending_actions: Optional[np.ndarray] = None
-
-    # ── MaskablePPO interface ─────────────────────────────────────────────────
-
-    def action_masks(self) -> np.ndarray:
-        """Return valid-action mask for current stage.
-
-        Called every step by MaskablePPO. Returns the pre-computed array —
-        no per-step allocation.
-        Shape: (n_envs, ACTION_SIZE) = (n_envs, 26), dtype=bool.
-        """
-        return self._mask
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -167,10 +148,6 @@ class BatchVecEnv(VecEnv):
             **method_kwargs: Any,
     ) -> list[Any]:
         target = self._get_target_indices(indices)
-        if method_name == "action_masks":
-            # sb3_contrib.get_action_masks routes through env_method for VecEnvs.
-            # Return per-env mask slices so np.stack produces (n, ACTION_SIZE) bool.
-            return [self._mask[i] for i in target]
         return [None] * len(target)
 
     def seed(self, seed: Optional[int] = None) -> list[Optional[int]]:

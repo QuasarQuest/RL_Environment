@@ -11,7 +11,7 @@ defaults:
 
 train:
   run_name: run
-  algo: maskable_ppo
+  algo: recurrent_ppo
   total_timesteps: 1_500_000
   checkpoint_freq: 50_000
   eval_freq: 250_000

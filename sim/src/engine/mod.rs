@@ -3,35 +3,41 @@
 // Simulation core — one independent episode stream. agents[0] is always the RL
 // agent (team 0).
 //
-// Step order: tick_speed_buffs → apply_action → pickup → auto_deposit → spawner → reward → obs
-//
-// Performance
-// -----------
-// obs_buf        pre-allocated f32 slice, reused every step (no heap alloc)
-// grid_snapshot  memcpy-fast tile reset instead of full Grid rebuild
-// gold_positions rebuilt once per step after all item mutations (pickup + spawner)
-// rng            SmallRng per SimCore for reproducible spawns when seeded
+// Step order:
+//   tick_speed_buffs
+//   → find_clusters (gold clustering for this tick)
+//   → resolve RL action → A* navigate OR direct combat/wait
+//   → scripted enemy actions
+//   → pickup → auto_deposit → spawner
+//   → rebuild gold_positions
+//   → compute reward
+//   → build observation (includes enemy paths + cluster features)
 
 pub mod builder;
+pub mod clusters;
 pub mod enemy;
 pub mod obs;
 pub mod physics;
 pub mod pickup;
 pub mod spawner;
 
-// Re-export data types so callers can use atb::engine::{AgentState, ItemState}.
 pub use crate::entity::{AgentState, ItemState};
+
+use std::collections::VecDeque;
 
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 
+use crate::config::{MELEE_DAMAGE, MELEE_RANGE, RANGED_DAMAGE, RANGED_RANGE};
 use crate::entity::agent::Action;
 use crate::entity::item::ItemKind;
-use crate::rl::action::int_to_action;
+use crate::rl::action::{RlAction, int_to_rl_action};
 use crate::rl::obs::OBS_TOTAL;
 use crate::rl::reward;
 use crate::world::{config::{EnemyKind, WorldConfig}, coords::GridPos, grid::Grid, tile::Tile};
-use self::enemy::{compute_action, EnemyPathCache};
+use crate::rl::action::CLUSTER_K;
+use self::clusters::{GoldCluster, find_clusters, chebyshev};
+use self::enemy::{compute_action, navigate_action, EnemyPathCache};
 use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
 
@@ -46,16 +52,11 @@ pub struct SimCore {
     prev_score:  u32,
     prev_pos:    GridPos,
 
-    // Pre-filtered gold positions for reward shaping.
-    // Rebuilt after every tick's item mutations (pickup + spawner).
     gold_positions: Vec<GridPos>,
+    spawn_budgets:  Vec<SpawnBudget>,
 
-    // Probabilistic spawner budgets — gold refills to initial map density.
-    spawn_budgets: Vec<SpawnBudget>,
-
-    // Per-enemy path caches indexed by agent slot (slot 0 is the RL agent).
-    enemy_caches: Vec<EnemyPathCache>,
-    // EnemyKind per agent slot; EnemyKind::None for the RL agent.
+    // Index 0: RL agent's A* path cache. Index 1+: scripted enemy caches.
+    path_caches: Vec<EnemyPathCache>,
     enemy_kinds: Vec<EnemyKind>,
 
     rng: SmallRng,
@@ -95,7 +96,6 @@ impl SimCore {
         }];
 
         let n_agents = snap.agents.len();
-        // snapshot is sorted by team; look up enemy_kind by team to keep alignment.
         let enemy_kinds: Vec<EnemyKind> = snap.agents.iter()
             .map(|a| {
                 world_cfg.agents.iter()
@@ -104,12 +104,17 @@ impl SimCore {
                     .unwrap_or(EnemyKind::None)
             })
             .collect();
-        let enemy_caches: Vec<EnemyPathCache> = (0..n_agents)
+        let path_caches: Vec<EnemyPathCache> = (0..n_agents)
             .map(|_| EnemyPathCache::new())
             .collect();
 
         let mut obs_buf = vec![0.0f32; OBS_TOTAL];
-        build_obs_into(&mut obs_buf, &snap.agents[0], &snap.items, &snap.agents, &gold_positions, &snap.grid);
+        let clusters    = find_clusters(&gold_positions);
+        let no_paths: Vec<&VecDeque<GridPos>> = vec![];
+        build_obs_into(
+            &mut obs_buf, &snap.agents[0], &snap.items, &snap.agents,
+            &gold_positions, &snap.grid, &no_paths, &clusters,
+        );
 
         let rng = match seed {
             Some(s) => SmallRng::seed_from_u64(s),
@@ -121,7 +126,7 @@ impl SimCore {
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
             gold_positions, spawn_budgets,
-            enemy_caches, enemy_kinds,
+            path_caches, enemy_kinds,
             rng,
             obs_buf,
             grid_snapshot,
@@ -145,16 +150,21 @@ impl SimCore {
                 .filter(|it| it.kind == ItemKind::Gold)
                 .map(|it| it.pos),
         );
-        // Sync gold budget target to fresh placement count.
         if let Some(b) = self.spawn_budgets.iter_mut().find(|b| b.kind == ItemKind::Gold) {
             b.target = self.gold_positions.len();
         }
-        for cache in &mut self.enemy_caches { *cache = EnemyPathCache::default(); }
+        for cache in &mut self.path_caches { *cache = EnemyPathCache::default(); }
         self.tick       = 0;
         self.prev_gold  = 0;
         self.prev_score = 0;
         self.prev_pos   = self.agents[0].pos;
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.gold_positions, &self.grid);
+
+        let clusters = find_clusters(&self.gold_positions);
+        let no_paths: Vec<&VecDeque<GridPos>> = vec![];
+        build_obs_into(
+            &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
+            &self.gold_positions, &self.grid, &no_paths, &clusters,
+        );
     }
 
     pub fn step(&mut self, action: u32) -> (f32, bool) {
@@ -166,15 +176,20 @@ impl SimCore {
         let done = self.tick >= self.match_ticks;
 
         physics::tick_speed_buffs(&mut self.agents);
-        let agent_action = int_to_action(action);
-        physics::apply_action(&mut self.agents, &self.grid, 0, agent_action);
-        let wall_hit = matches!(agent_action, Action::Move(_)) && self.agents[0].pos == self.prev_pos;
 
-        // Run scripted enemies (agents 1+).
+        // Gold clusters for this tick — used to resolve NavigateToCluster actions.
+        let clusters = find_clusters(&self.gold_positions);
+
+        let wall_hit = self.apply_rl_action(int_to_rl_action(action), &clusters);
+
+        // Scripted enemies (agents 1+).
         for idx in 1..self.agents.len() {
             let kind = self.enemy_kinds[idx];
             if kind == EnemyKind::None { continue; }
-            let act = compute_action(kind, &self.agents[idx], &self.items, &self.grid, &mut self.enemy_caches[idx]);
+            let act = compute_action(
+                kind, &self.agents[idx], &self.items, &self.grid,
+                &mut self.path_caches[idx],
+            );
             physics::apply_action(&mut self.agents, &self.grid, idx, act);
         }
 
@@ -182,7 +197,6 @@ impl SimCore {
         physics::auto_deposit(&mut self.agents, &self.grid);
         tick_spawns(&mut self.items, &self.agents, &self.grid, &self.spawn_budgets, &mut self.rng);
 
-        // Rebuild gold_positions once after all item mutations.
         self.gold_positions.clear();
         self.gold_positions.extend(
             self.items.iter()
@@ -199,12 +213,67 @@ impl SimCore {
             &self.gold_positions,
             wall_hit,
         );
-        build_obs_into(&mut self.obs_buf, &self.agents[0], &self.items, &self.agents, &self.gold_positions, &self.grid);
+
+        // Collect enemy path references for the observation.
+        // path_caches[0] is the RL agent's cache; 1+ are enemies.
+        let enemy_paths: Vec<&VecDeque<GridPos>> = self.path_caches[1..]
+            .iter()
+            .map(|c| c.path())
+            .collect();
+
+        build_obs_into(
+            &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
+            &self.gold_positions, &self.grid, &enemy_paths, &clusters,
+        );
+
         (rew, done)
     }
 
+    /// Resolve the RL action to a navigation goal or direct combat/wait,
+    /// execute it, and return whether the agent hit a wall.
+    fn apply_rl_action(
+        &mut self,
+        rl_action: RlAction,
+        clusters:  &[Option<GoldCluster>; CLUSTER_K],
+    ) -> bool {
+        match rl_action {
+            RlAction::MeleeAttack => {
+                physics::try_melee_attack(
+                    &mut self.agents, 0,
+                    MELEE_RANGE as i32, MELEE_DAMAGE,
+                );
+                false
+            }
+            RlAction::RangedAttack => {
+                physics::try_ranged_attack(
+                    &mut self.agents, 0,
+                    RANGED_RANGE as i32, RANGED_DAMAGE,
+                );
+                false
+            }
+            RlAction::Wait => false,
+
+            nav_action => {
+                // Resolve navigation goal from the action type.
+                let goal = resolve_nav_goal(
+                    &self.agents, &self.items, nav_action, clusters,
+                );
+                if let Some(goal) = goal {
+                    let prev_pos = self.agents[0].pos;
+                    // navigate_action uses the cached path; recomputes only when goal changes.
+                    let act = navigate_action(
+                        &self.agents[0], goal, &self.grid, &mut self.path_caches[0],
+                    );
+                    physics::apply_action(&mut self.agents, &self.grid, 0, act);
+                    matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     pub fn obs_as_bytes(&self) -> &[u8] {
-        // SAFETY: f32 has no invalid bit patterns; viewing as u8 is always valid.
         unsafe {
             std::slice::from_raw_parts(
                 self.obs_buf.as_ptr() as *const u8,
@@ -214,4 +283,40 @@ impl SimCore {
     }
 
     pub fn match_ticks(&self) -> u64 { self.match_ticks }
+}
+
+// ── Navigation goal resolution ────────────────────────────────────────────────
+
+/// Resolve a navigation RlAction to a concrete GridPos target.
+/// Returns None if the target type is unavailable (e.g., no health pickups on map).
+fn resolve_nav_goal(
+    agents:   &[AgentState],
+    items:    &[ItemState],
+    action:   RlAction,
+    clusters: &[Option<GoldCluster>; CLUSTER_K],
+) -> Option<GridPos> {
+    let agent = &agents[0];
+    match action {
+        RlAction::NavigateToCluster(k) => {
+            clusters.get(k as usize)
+                .and_then(|c| c.as_ref())
+                .and_then(|c| c.nearest_gold(agent.pos))
+        }
+        RlAction::NavigateToBase => Some(agent.base_pos),
+        RlAction::NavigateToHealth => items.iter()
+            .filter(|i| i.kind == ItemKind::Health)
+            .min_by_key(|i| chebyshev(agent.pos, i.pos))
+            .map(|i| i.pos),
+        RlAction::NavigateToAmmo => items.iter()
+            .filter(|i| i.kind == ItemKind::Ammo)
+            .min_by_key(|i| chebyshev(agent.pos, i.pos))
+            .map(|i| i.pos),
+        RlAction::NavigateToEnemy => agents.iter()
+            .skip(1)
+            .filter(|a| a.team != agent.team)
+            .min_by_key(|a| chebyshev(agent.pos, a.pos))
+            .map(|a| a.pos),
+        // Direct actions handled in apply_rl_action — never reach here.
+        RlAction::MeleeAttack | RlAction::RangedAttack | RlAction::Wait => None,
+    }
 }

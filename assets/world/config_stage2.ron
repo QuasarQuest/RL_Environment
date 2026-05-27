@@ -5,9 +5,9 @@
 // Same 20×20 map; match extended to give more exploration time.
 
 (
-    width:  25,
-    height: 25,
-    match_duration_ticks: 1500,
+    width:  50,
+    height: 50,
+    match_duration_ticks: 3000,
 
     bases: [
         ( team: 0, corner: BottomLeft, margin: 0.05 ),

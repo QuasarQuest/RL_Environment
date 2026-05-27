@@ -7,9 +7,9 @@
 // Same map as stages 4–5 — curriculum convergence, not complexity creep.
 
 (
-    width:  25,
-    height: 25,
-    match_duration_ticks: 3000,
+    width:  50,
+    height: 50,
+    match_duration_ticks: 6000,
 
     bases: [
         ( team: 0, corner: BottomLeft, margin: 0.05 ),
