@@ -4,7 +4,7 @@
 # RL checkpoint as the opponent (see train_selfplay.py when implemented).
 
 stage: 6
-n_envs: 64
+n_envs: 32
 
 seed: null
 max_episode_steps: null
