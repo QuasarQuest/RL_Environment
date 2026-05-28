@@ -109,6 +109,7 @@ pub fn build_obs_into(
 
     for other in agents {
         if other.team == agent.team { continue; }
+        if other.respawn_timer > 0  { continue; }  // dead/respawning — invisible
         let cx = other.pos.x - ax + centre;
         let cy = other.pos.y - ay + centre;
         if in_crop(cx, cy) {
@@ -193,9 +194,10 @@ fn build_minimap(
         }
     }
 
-    // Enemies.
+    // Enemies (alive only).
     for other in agents {
         if other.team == agent.team { continue; }
+        if other.respawn_timer > 0  { continue; }
         let (mx, my) = to_mm(other.pos.x, other.pos.y);
         mm[mm_pixel(MM_CH_ENEMY, mx, my)] = 1.0;
     }

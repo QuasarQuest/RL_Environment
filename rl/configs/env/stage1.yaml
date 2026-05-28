@@ -2,7 +2,7 @@
 # Stage 1: single agent, gold collection, small map.
 
 stage: 1
-n_envs: 48
+n_envs: 64
 
 seed: null
 max_episode_steps: null        # match_duration_ticks in config.ron governs episode length

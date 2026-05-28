@@ -4,7 +4,7 @@ use crate::sim_config::{SimConfig, TickTimer};
 use crate::style::color::{GOLD_500, GOLD_800, GREEN_400, GREEN_500};
 use super::components::{
     TickLabelMarker, TimeLabelMarker, TeamScoreMarker,
-    SpeedDecreaseButton, SpeedIncreaseButton, SpeedResetButton,
+    SpeedDecreaseButton, SpeedIncreaseButton,
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
     PolicyModeLabel,
 };
@@ -50,7 +50,6 @@ pub fn handle_speed_buttons(
     keys:            Res<ButtonInput<KeyCode>>,
     decrease_q:      Query<&Interaction, (Changed<Interaction>, With<SpeedDecreaseButton>)>,
     increase_q:      Query<&Interaction, (Changed<Interaction>, With<SpeedIncreaseButton>)>,
-    reset_q:         Query<&Interaction, (Changed<Interaction>, With<SpeedResetButton>)>,
     mut speed_label: Query<&mut Text, With<CurrentSpeedLabel>>,
 ) {
     let mut changed = false;
@@ -59,7 +58,6 @@ pub fn handle_speed_buttons(
         || decrease_q.iter().any(|i| *i == Interaction::Pressed);
     let want_increase = keys.just_pressed(KeyCode::ArrowUp)
         || increase_q.iter().any(|i| *i == Interaction::Pressed);
-    let want_reset    = reset_q.iter().any(|i| *i == Interaction::Pressed);
 
     if want_decrease {
         let idx = cfg.speed_index();
@@ -70,10 +68,6 @@ pub fn handle_speed_buttons(
         let idx = cfg.speed_index();
         let max = cfg.available_speeds.len() - 1;
         cfg.ticks_per_second = cfg.available_speeds[(idx + 1).min(max)];
-        changed = true;
-    }
-    if want_reset {
-        cfg.ticks_per_second = atb::config::DEFAULT_TICKS_PER_SECOND;
         changed = true;
     }
 

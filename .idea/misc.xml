@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="Black">
-    <option name="sdkName" value="Python 3.14 (algorithm_test_bed)" />
+    <option name="sdkName" value="Python 3.14 (rl)" />
   </component>
   <component name="PythonCompatibilityInspectionAdvertiser">
     <option name="version" value="3" />

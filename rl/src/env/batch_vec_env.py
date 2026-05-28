@@ -10,9 +10,17 @@ Score tracking
 --------------
 True episode score read from Rust via get_agents() on episode end.
 One FFI call per done env per episode — negligible overhead.
+
+Profiling
+---------
+Set ATB_PROFILE_STEPS=1 in env to print sim/total wall-time ratio every
+100 step_wait calls. Lets you see whether throughput is sim-bound or
+PPO-update bound without a full profiler run.
 """
 from __future__ import annotations
 
+import os
+import time
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -20,8 +28,7 @@ from gymnasium import spaces
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
-from env.action_masks import ACTION_SIZE
-from network.extractor import OBS_TOTAL as _OBS_TOTAL
+from network.extractor import ACTION_SIZE, OBS_TOTAL as _OBS_TOTAL
 
 _OBS_DTYPE = np.float32
 _OBS_FLAT_SHAPE = (_OBS_TOTAL,)
@@ -30,6 +37,10 @@ _OBS_FLAT_SHAPE = (_OBS_TOTAL,)
 _RL_AGENT_IDX = 0
 # Index of the score field in the (x, y, team, gold_carried, score) tuple.
 _SCORE_FIELD = 4
+
+# Profiling: print sim/total ratio every N step_wait calls when enabled.
+_PROFILE_ENABLED = os.environ.get("ATB_PROFILE_STEPS", "0") == "1"
+_PROFILE_INTERVAL = 100
 
 
 class BatchVecEnv(VecEnv):
@@ -65,6 +76,14 @@ class BatchVecEnv(VecEnv):
 
         self._pending_actions: Optional[np.ndarray] = None
 
+        # ── Profiling state ──────────────────────────────────────────────────
+        # _t_sim   : cumulative wall-time spent in Rust step_batch FFI call.
+        # _t_total : cumulative wall-time spent in step_wait (sim + Python post).
+        # _n_steps : step_wait calls since last report.
+        self._t_sim: float = 0.0
+        self._t_total: float = 0.0
+        self._n_steps: int = 0
+
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -91,7 +110,13 @@ class BatchVecEnv(VecEnv):
     def step_wait(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
         assert self._pending_actions is not None, "step_async must be called first"
 
+        t_wait_start = time.perf_counter() if _PROFILE_ENABLED else 0.0
+
+        t_sim_start = time.perf_counter() if _PROFILE_ENABLED else 0.0
         obs_ba, rews, dones = self._batch.step_batch(self._pending_actions.tolist())
+        if _PROFILE_ENABLED:
+            self._t_sim += time.perf_counter() - t_sim_start
+
         self._pending_actions = None
 
         obs = self._ba_to_obs(obs_ba, self.num_envs)
@@ -121,7 +146,30 @@ class BatchVecEnv(VecEnv):
             self._ep_rewards[i] = 0.0
             self._ep_lengths[i] = 0
 
-        return obs.copy(), rews, dones, infos
+        result = obs.copy(), rews, dones, infos
+
+        if _PROFILE_ENABLED:
+            self._t_total += time.perf_counter() - t_wait_start
+            self._n_steps += 1
+            if self._n_steps >= _PROFILE_INTERVAL:
+                sim_ms = (self._t_sim / self._n_steps) * 1000.0
+                tot_ms = (self._t_total / self._n_steps) * 1000.0
+                ratio = self._t_sim / self._t_total if self._t_total > 0 else 0.0
+                py_ms = tot_ms - sim_ms
+                # \r overwrites in-place when running standalone; keep \n for log capture.
+                print(
+                    f"[BatchVecEnv profile] "
+                    f"step_wait {tot_ms:6.2f}ms  "
+                    f"(sim {sim_ms:6.2f}ms = {ratio*100:5.1f}%, "
+                    f"py-post {py_ms:5.2f}ms)  "
+                    f"n_envs={self.num_envs}",
+                    flush=True,
+                )
+                self._t_sim = 0.0
+                self._t_total = 0.0
+                self._n_steps = 0
+
+        return result
 
     def close(self) -> None:
         pass

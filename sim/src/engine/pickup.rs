@@ -8,6 +8,7 @@ use crate::entity::{AgentState, ItemState};
 
 pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
     for agent_idx in 0..agents.len() {
+        if agents[agent_idx].respawn_timer > 0 { continue; }
         let pos = agents[agent_idx].pos;
         let mut item_idx = 0;
         while item_idx < items.len() {
@@ -33,7 +34,8 @@ pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
                         } else { false }
                     }
                     ItemKind::SpeedBoost => {
-                        a.speed_buff = config::SPEED_BUFF_TICKS;
+                        // Extend, not reset: never cut short a buff already running longer.
+                        a.speed_buff = a.speed_buff.max(config::SPEED_BUFF_TICKS);
                         true
                     }
                 }

@@ -32,6 +32,25 @@ app = typer.Typer(add_completion=False)
 
 # ── Wrapper modules for ONNX tracing ─────────────────────────────────────────
 
+def _actor_forward(policy: torch.nn.Module, features: torch.Tensor) -> torch.Tensor:
+    """Run features → (optional LSTM) → MLP → action logits.
+
+    RecurrentPPO inserts an LSTM between the feature extractor and the MLP.
+    We run it with a zero hidden state so the export is stateless — each viewer
+    inference call starts fresh, which is acceptable for greedy action selection.
+    """
+    if hasattr(policy, "lstm_actor"):
+        lstm: torch.nn.LSTM = policy.lstm_actor  # type: ignore[assignment]
+        batch = features.shape[0]
+        h0 = torch.zeros(lstm.num_layers, batch, lstm.hidden_size, device=features.device)
+        c0 = torch.zeros(lstm.num_layers, batch, lstm.hidden_size, device=features.device)
+        # LSTM expects (seq_len, batch, input_size); we treat each obs as seq_len=1.
+        features, _ = lstm(features.unsqueeze(0), (h0, c0))
+        features = features.squeeze(0)
+    latent = policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
+    return policy.action_net(latent)  # type: ignore[return-value]
+
+
 class _PolicyWrapper(torch.nn.Module):
     """Actor path only — no value head, no sampling."""
 
@@ -41,8 +60,7 @@ class _PolicyWrapper(torch.nn.Module):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         features = self.policy.extract_features(obs, self.policy.pi_features_extractor)  # type: ignore[arg-type]
-        latent = self.policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
-        return self.policy.action_net(latent)  # type: ignore[return-value]
+        return _actor_forward(self.policy, features)
 
 
 class _NormPolicyWrapper(torch.nn.Module):
@@ -71,8 +89,7 @@ class _NormPolicyWrapper(torch.nn.Module):
         obs = (obs - self.obs_mean) / self.obs_std  # type: ignore[operator]
         obs = obs.clamp(-self.clip_obs, self.clip_obs)
         features = self.policy.extract_features(obs, self.policy.pi_features_extractor)  # type: ignore[arg-type]
-        latent = self.policy.mlp_extractor.forward_actor(features)  # type: ignore[union-attr]
-        return self.policy.action_net(latent)  # type: ignore[return-value]
+        return _actor_forward(self.policy, features)
 
 
 # ── Library function ──────────────────────────────────────────────────────────
@@ -142,7 +159,7 @@ def export_onnx(
     opset: int = typer.Option(17, "--opset"),
     tolerance: float = typer.Option(1e-5, "--tolerance"),
     vecnorm_path: Optional[Path] = typer.Option(None, "--vecnorm"),
-    algo: str = typer.Option("maskable_ppo", "--algo", help="ppo or maskable_ppo"),
+    algo: str = typer.Option("recurrent_ppo", "--algo", help="ppo, maskable_ppo, or recurrent_ppo"),
 ) -> None:
     """Export a saved PPO / MaskablePPO policy to ONNX and validate."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -152,6 +169,13 @@ def export_onnx(
         try:
             from sb3_contrib import MaskablePPO
             policy = MaskablePPO.load(str(model_path)).policy
+        except ImportError:
+            log.warning("sb3-contrib not installed — falling back to PPO loader")
+            policy = PPO.load(str(model_path)).policy
+    elif algo == "recurrent_ppo":
+        try:
+            from sb3_contrib import RecurrentPPO
+            policy = RecurrentPPO.load(str(model_path)).policy
         except ImportError:
             log.warning("sb3-contrib not installed — falling back to PPO loader")
             policy = PPO.load(str(model_path)).policy

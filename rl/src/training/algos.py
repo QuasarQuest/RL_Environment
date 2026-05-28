@@ -17,7 +17,7 @@ maskable_ppo : PPO with per-step action masking (sb3-contrib).
 Policy choice
 -------------
 Both PPO variants use "MlpPolicy" here because our observation space is flat
-(8272,) and AtbCnnExtractor handles the CNN internally. SB3 routes "MlpPolicy"
+(9629,) and AtbCnnExtractor handles the CNN internally. SB3 routes "MlpPolicy"
 through the custom features_extractor_class in ATB_POLICY_KWARGS.
 
 Switching back to the legacy flat-vector pipeline:
@@ -111,11 +111,6 @@ PPO_SPEC = AlgoSpec(
 
 
 def _make_maskable_spec() -> AlgoSpec:
-    if not _MASKABLE_AVAILABLE or MaskablePPO is None:
-        raise ImportError(
-            "MaskablePPO requires sb3-contrib. Install with:\n"
-            "  pip install sb3-contrib"
-        )
     return AlgoSpec(
         name="maskable_ppo",
         cls=MaskablePPO,
@@ -126,11 +121,6 @@ def _make_maskable_spec() -> AlgoSpec:
 
 
 def _make_recurrent_spec() -> AlgoSpec:
-    if not _RECURRENT_AVAILABLE or RecurrentPPO is None:
-        raise ImportError(
-            "RecurrentPPO requires sb3-contrib. Install with:\n"
-            "  pip install sb3-contrib"
-        )
     return AlgoSpec(
         name="recurrent_ppo",
         cls=RecurrentPPO,
@@ -150,17 +140,9 @@ ALGOS: dict[str, AlgoSpec] = {
 def get_algo(name: str) -> AlgoSpec:
     """Look up an algorithm spec by name with a helpful error message."""
     try:
-        spec = ALGOS[name.lower()]
+        return ALGOS[name.lower()]
     except KeyError as exc:
         available = ", ".join(sorted(ALGOS))
         raise ValueError(
             f"Unknown algorithm '{name}'. Available: {available}"
         ) from exc
-
-    # Guard: if maskable_ppo was requested but sb3-contrib is missing, raise now.
-    if name.lower() == "maskable_ppo" and not _MASKABLE_AVAILABLE:
-        raise ImportError(
-            "MaskablePPO requires sb3-contrib. Install with:\n"
-            "  pip install sb3-contrib"
-        )
-    return spec

@@ -5,10 +5,18 @@
 // Algorithm: try radii [3, 5, 8, 12, 20, 50] in ascending order.
 // At each radius, merge any two gold pieces within that Chebyshev distance
 // into the same cluster.  Stop at the first radius that produces at least
-// CLUSTER_K distinct clusters, then return the top-K by gold count.
+// CLUSTER_K distinct clusters, then return the top-K sorted by centroid
+// position (x primary, y secondary).
 //
-// This ensures that on a sparse map (gold spread out), small radii keep
-// clusters separate; on a dense map (gold clumped), larger radii group them.
+// Sorted by centroid position rather than gold count so that cluster IDs
+// remain stable across ticks.  Sorting by count causes IDs to shuffle
+// every time the agent picks up a piece and two clusters swap rank —
+// "cluster 0" today becomes "cluster 2" next tick.  Centroid position
+// drifts only slightly as individual pieces are consumed, so the same
+// physical region of the map keeps the same ID throughout the episode.
+// The count is still communicated to the agent via count_norm in the
+// cluster observation feature.
+//
 // Fallback (all gold in one cluster at slot 0) fires when even radius 50
 // doesn't produce enough distinct clusters.
 
@@ -37,6 +45,14 @@ impl GoldCluster {
         self.golds.iter()
             .min_by_key(|&&g| chebyshev(pos, g))
             .copied()
+    }
+
+    /// Mean position of all gold pieces in the cluster.
+    pub fn centroid(&self) -> (f32, f32) {
+        let n = self.golds.len() as f32;
+        let cx = self.golds.iter().map(|g| g.x as f32).sum::<f32>() / n;
+        let cy = self.golds.iter().map(|g| g.y as f32).sum::<f32>() / n;
+        (cx, cy)
     }
 }
 
@@ -73,7 +89,7 @@ impl UnionFind {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Returns up to CLUSTER_K clusters sorted by gold count (largest first).
+/// Returns up to CLUSTER_K clusters sorted by centroid position (x, then y).
 /// Empty slots are `None`.
 pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
     // Workaround: [None; CLUSTER_K] requires Copy, use explicit init instead.
@@ -104,7 +120,14 @@ pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
                     golds: indices.iter().map(|&i| gold[i]).collect(),
                 })
                 .collect();
-            clusters.sort_by(|a, b| b.count().cmp(&a.count()));
+            // Sort by centroid position (x primary, y secondary) so cluster IDs
+            // represent stable spatial regions rather than transient gold-count rank.
+            clusters.sort_by(|a, b| {
+                let (ax, ay) = a.centroid();
+                let (bx, by) = b.centroid();
+                ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
+                    .then(ay.partial_cmp(&by).unwrap_or(std::cmp::Ordering::Equal))
+            });
             clusters.truncate(CLUSTER_K);
             for (i, c) in clusters.into_iter().enumerate() {
                 result[i] = Some(c);

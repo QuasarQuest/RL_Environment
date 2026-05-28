@@ -67,9 +67,14 @@ pub fn update_tooltip(
     };
 
     let hit_radius_sq = (config::TILE_SIZE * HIT_RADIUS_FACTOR).powi(2);
-    let world_cursor  = camera
-        .viewport_to_world_2d(cam_tf, cursor_px)
-        .unwrap_or(Vec2::ZERO);
+    let world_cursor = match camera.viewport_to_world_2d(cam_tf, cursor_px) {
+        Ok(w)  => w,
+        Err(_) => {
+            panel_node.display = Display::None;
+            *vis = Visibility::Hidden;
+            return;
+        }
+    };
 
     let mut closest: Option<usize> = None;
     let mut best_dist = f32::MAX;

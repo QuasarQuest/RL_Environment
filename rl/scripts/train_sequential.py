@@ -42,12 +42,12 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 # ── Per-stage timesteps (override all with --timesteps) ───────────────────────
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
-    1: 2_500_000,
-    2: 2_500_000,
-    3: 3_000_000,
-    4: 3_000_000,
-    5: 3_500_000,
-    6: 3_500_000,
+    1: 1_500_000,
+    2: 1_500_000,
+    3: 1_500_000,
+    4: 2_000_000,
+    5: 2_500_000,
+    6: 2_500_000,
 }
 
 
@@ -80,7 +80,9 @@ def run_stage(
     ]
 
     if stage in (4, 5, 6):
-        # Deeper heads for combat stages — override net_arch.
+        # Deeper heads for combat stages — only applied by train.py when
+        # algo != recurrent_ppo (RecurrentPPO ignores net_arch; LSTM depth
+        # is controlled by n_lstm_layers instead).
         cmd += ["ppo.net_arch_pi=[128,64]", "ppo.net_arch_vf=[128,64]"]
 
     if resume is not None:

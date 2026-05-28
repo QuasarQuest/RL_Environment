@@ -39,7 +39,7 @@ pub fn toggle_range_viz(
     }
 }
 
-/// Draw the current A* path for the RL agent when using BT or GOAP mode.
+/// Draw the RL agent's current A* path (available for all non-random modes).
 pub fn draw_path_gizmo(
     bridge: Res<SimBridge>,
     flags:  Res<DebugGizmoFlags>,
@@ -47,12 +47,9 @@ pub fn draw_path_gizmo(
     mut gizmos: Gizmos,
 ) {
     if !flags.show_path { return; }
+    if bridge.mode == PolicyMode::Random { return; }
 
-    let waypoints = match bridge.mode {
-        PolicyMode::BehaviorTree => bridge.bt_path(),
-        PolicyMode::Goap         => bridge.goap_path(),
-        _                        => return,
-    };
+    let waypoints = bridge.agent_path();
     if waypoints.is_empty() { return; }
 
     let Some(agent) = bridge.agents().first() else { return };

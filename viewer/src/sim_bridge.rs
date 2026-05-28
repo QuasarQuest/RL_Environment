@@ -1,16 +1,19 @@
 use bevy::prelude::*;
 use atb::engine::{SimCore, AgentState, ItemState};
-use atb::engine::enemy::{EnemyPathCache, compute_action, navigate_action};
-use atb::world::config::EnemyKind;
-use atb::world::coords::GridPos;
 use atb::world::grid::Grid;
 use atb::entity::item::ItemKind;
 use atb::config::AGENT_MAX_GOLD;
-use atb::rl::action::{action_to_int, ACTION_SIZE, ACTION_WAIT};
+use atb::rl::action::{ACTION_SIZE, ACTION_WAIT};
 use atb::algorithm::behavior::goap;
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::viz::events::RestartPending;
+use crate::viz::grid_offset::GridOffset;
+use crate::viz::renderer::tile_renderer::{TileMarker, do_spawn_tiles};
+
+// Action indices — must stay in sync with RlAction ordering in the sim.
+const ACTION_NAVIGATE_TO_BASE:   u32 = 4;
+const ACTION_NAVIGATE_TO_HEALTH: u32 = 5;
 
 pub const DEFAULT_CONFIG_PATH: &str = "assets/world/default.ron";
 const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
@@ -64,8 +67,6 @@ pub struct SimBridge {
     pub episode_reward: f32,
     pub mode:           PolicyMode,
     policy:             Option<OnnxPolicy>,
-    bt_cache:           EnemyPathCache,
-    goap_cache:         EnemyPathCache,
 }
 
 fn normalize_path(raw: &str) -> std::path::PathBuf {
@@ -88,8 +89,6 @@ impl SimBridge {
             sim: SimCore::new(DEFAULT_CONFIG_PATH), game_over: false, policy,
             last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
-            bt_cache:   EnemyPathCache::new(),
-            goap_cache: EnemyPathCache::new(),
         }
     }
 
@@ -97,8 +96,9 @@ impl SimBridge {
     pub fn grid(&self) -> &Grid { &self.sim.grid }
     pub fn agents(&self) -> &[AgentState] { &self.sim.agents }
     pub fn items(&self) -> &[ItemState] { &self.sim.items }
-    pub fn bt_path(&self) -> &std::collections::VecDeque<atb::world::coords::GridPos> { self.bt_cache.path() }
-    pub fn goap_path(&self) -> &std::collections::VecDeque<atb::world::coords::GridPos> { self.goap_cache.path() }
+    pub fn agent_path(&self) -> &std::collections::VecDeque<atb::world::coords::GridPos> {
+        self.sim.agent_path()
+    }
 
     pub fn remaining_display(&self) -> String {
         format!("{} / {}", self.sim.tick, self.sim.match_ticks())
@@ -184,14 +184,17 @@ pub fn handle_load_request(
     mut req:      ResMut<LoadRequest>,
     mut commands: Commands,
     mut bridge:   ResMut<SimBridge>,
+    mut offset:   ResMut<GridOffset>,
     agent_q:      Query<Entity, With<AgentMarker>>,
     item_q:       Query<Entity, With<ItemMarker>>,
+    tile_q:       Query<Entity, With<TileMarker>>,
 ) {
     if !req.pending { return; }
     req.pending = false;
 
     for e in agent_q.iter() { commands.entity(e).despawn(); }
     for e in item_q.iter()  { commands.entity(e).despawn(); }
+    for e in tile_q.iter()  { commands.entity(e).despawn(); }
 
     bridge.policy = if req.policy_path.is_empty() {
         info!("No policy — falling back to BT");
@@ -209,9 +212,19 @@ pub fn handle_load_request(
     bridge.last_action    = ACTION_WAIT;
     bridge.action_counts  = [0; ACTION_SIZE];
     bridge.episode_reward = 0.0;
-    bridge.bt_cache       = EnemyPathCache::new();
-    bridge.goap_cache     = EnemyPathCache::new();
     bridge.mode = if bridge.policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
+
+    // Recompute GridOffset — the new config may have different map dimensions.
+    let step = atb::config::TILE_SIZE + atb::config::TILE_GAP;
+    let (gw, gh) = (bridge.grid().width, bridge.grid().height);
+    *offset = GridOffset {
+        x: -(gw as f32 * step) / 2.0 + step / 2.0,
+        y: -(gh as f32 * step) / 2.0 + step / 2.0,
+        step,
+    };
+
+    // Respawn tiles for the new grid (obstacles, base tiles may differ per stage).
+    do_spawn_tiles(&mut commands, &bridge, &offset);
 
     spawn_sim_entities(&mut commands, &bridge);
 }
@@ -225,8 +238,6 @@ pub fn step_sim(
 ) {
     if restart.0 {
         bridge.sim.reset();
-        bridge.bt_cache       = EnemyPathCache::new();
-        bridge.goap_cache     = EnemyPathCache::new();
         bridge.game_over      = false;
         bridge.last_action    = ACTION_WAIT;
         bridge.action_counts  = [0; ACTION_SIZE];
@@ -255,27 +266,22 @@ pub fn step_sim(
                 (x >> 38) as u32 % ACTION_SIZE as u32
             }
             PolicyMode::BehaviorTree => {
-                // Deref once to &mut SimBridge so the borrow checker sees
-                // `sim` and `bt_cache` as disjoint fields.
-                let b = &mut *bridge;
-                if b.sim.agents.is_empty() { ACTION_WAIT } else {
-                    let agent = b.sim.agents[0].clone();
-                    let act   = compute_action(
-                        EnemyKind::BehaviorTree,
-                        &agent,
-                        &b.sim.items,
-                        &b.sim.grid,
-                        &mut b.bt_cache,
-                    );
-                    action_to_int(act)
+                if bridge.sim.agents.is_empty() { ACTION_WAIT } else {
+                    let agent = &bridge.sim.agents[0];
+                    if agent.gold_carried >= AGENT_MAX_GOLD {
+                        ACTION_NAVIGATE_TO_BASE
+                    } else if agent.hearts <= 1
+                        && bridge.sim.items.iter().any(|i| i.kind == ItemKind::Health)
+                    {
+                        ACTION_NAVIGATE_TO_HEALTH
+                    } else {
+                        bt_nearest_cluster(&bridge.sim)
+                    }
                 }
             }
             PolicyMode::Goap => {
-                let b = &mut *bridge;
-                if b.sim.agents.is_empty() { ACTION_WAIT } else {
-                    let agent  = b.sim.agents[0].clone();
-                    let agents = b.sim.agents.clone();
-                    goap_action(&agent, &agents, &b.sim.items, &b.sim.grid, &mut b.goap_cache)
+                if bridge.sim.agents.is_empty() { ACTION_WAIT } else {
+                    goap_action(&bridge.sim)
                 }
             }
         };
@@ -290,15 +296,38 @@ pub fn step_sim(
     }
 }
 
-fn goap_action(
-    agent:  &AgentState,
-    agents: &[AgentState],
-    items:  &[ItemState],
-    grid:   &Grid,
-    cache:  &mut EnemyPathCache,
-) -> u32 {
-    const NEAR_SQ:          i32 = 10 * 10;
-    const LOW_HEALTH_THRESH: u8 = 1;
+/// Pick the cluster whose nearest gold is closest to the agent.
+/// Clusters are sorted by centroid position, not gold count, so we must search
+/// all slots to find which one is spatially nearest rather than assuming slot 0.
+fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
+    use atb::engine::clusters::{chebyshev, find_clusters};
+
+    let gold: Vec<_> = sim.items.iter()
+        .filter(|i| i.kind == ItemKind::Gold)
+        .map(|i| i.pos)
+        .collect();
+
+    if gold.is_empty() { return ACTION_WAIT; }
+
+    let clusters  = find_clusters(&gold);
+    let agent_pos = sim.agents[0].pos;
+
+    clusters.iter().enumerate()
+        .filter_map(|(k, c)| {
+            c.as_ref()?.nearest_gold(agent_pos).map(|g| (k as u32, chebyshev(agent_pos, g)))
+        })
+        .min_by_key(|&(_, d)| d)
+        .map(|(k, _)| k)
+        .unwrap_or(ACTION_WAIT)
+}
+
+fn goap_action(sim: &atb::engine::SimCore) -> u32 {
+    let agent  = &sim.agents[0];
+    let agents = &sim.agents;
+    let items  = &sim.items;
+
+    const NEAR_SQ:           i32 = 10 * 10;
+    const LOW_HEALTH_THRESH:  u8 = 1;
 
     let gold_nearby = items.iter()
         .filter(|i| i.kind == ItemKind::Gold)
@@ -325,45 +354,28 @@ fn goap_action(
 
     let ws = {
         let mut bits = 0u64;
-        if agent.gold_carried > 0                          { bits |= goap::BIT_HAS_GOLD; }
-        if agent.gold_carried >= AGENT_MAX_GOLD            { bits |= goap::BIT_INVENTORY_FULL; }
-        if agent.gold_carried >= AGENT_MAX_GOLD / 2        { bits |= goap::BIT_INVENTORY_HALF; }
-        if agent.pos == agent.base_pos                     { bits |= goap::BIT_ON_OWN_BASE; }
-        if gold_nearby                                     { bits |= goap::BIT_GOLD_NEARBY; }
-        if enemy_nearby                                    { bits |= goap::BIT_ENEMY_NEARBY; }
-        if dist_to_base < dist_to_gold                     { bits |= goap::BIT_BASE_CLOSER; }
-        if agent.hearts <= LOW_HEALTH_THRESH               { bits |= goap::BIT_LOW_HEALTH; }
+        if agent.gold_carried > 0                    { bits |= goap::BIT_HAS_GOLD; }
+        if agent.gold_carried >= AGENT_MAX_GOLD      { bits |= goap::BIT_INVENTORY_FULL; }
+        if agent.gold_carried >= AGENT_MAX_GOLD / 2  { bits |= goap::BIT_INVENTORY_HALF; }
+        if agent.pos == agent.base_pos               { bits |= goap::BIT_ON_OWN_BASE; }
+        if gold_nearby                               { bits |= goap::BIT_GOLD_NEARBY; }
+        if enemy_nearby                              { bits |= goap::BIT_ENEMY_NEARBY; }
+        if dist_to_base < dist_to_gold               { bits |= goap::BIT_BASE_CLOSER; }
+        if agent.hearts <= LOW_HEALTH_THRESH         { bits |= goap::BIT_LOW_HEALTH; }
         goap::WorldState(bits)
     };
 
     // Goal: have collected gold and returned to base.
-    // BIT_INVENTORY_HALF gets set by collect_gold; BIT_ON_OWN_BASE by navigate_to_base.
-    // Both must be set before goal is satisfied, producing a full collect→deposit plan.
     let goal = goap::GoalState(goap::BIT_INVENTORY_HALF | goap::BIT_ON_OWN_BASE);
 
     let first_step = goap::plan(ws, goal, goap::ACTIONS, goap::PlanConfig::default())
         .ok()
         .and_then(|r| r.steps.into_iter().next());
 
-    let nav_target: Option<GridPos> = match first_step.as_deref() {
-        Some(goap::ACT_NAVIGATE_TO_GOLD) | Some(goap::ACT_COLLECT_GOLD) => {
-            items.iter()
-                .filter(|i| i.kind == ItemKind::Gold)
-                .min_by_key(|i| {
-                    let dx = agent.pos.x - i.pos.x;
-                    let dy = agent.pos.y - i.pos.y;
-                    dx.abs() + dy.abs()
-                })
-                .map(|i| i.pos)
-        }
-        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) => Some(agent.base_pos),
-        Some(goap::ACT_FLEE) => Some(agent.base_pos), // retreat to own base
-        _ => None,
-    };
-
-    match nav_target {
-        None         => ACTION_WAIT,
-        Some(target) => action_to_int(navigate_action(agent, target, grid, cache)),
+    match first_step.as_deref() {
+        Some(goap::ACT_NAVIGATE_TO_GOLD) | Some(goap::ACT_COLLECT_GOLD) => bt_nearest_cluster(sim),
+        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) | Some(goap::ACT_FLEE) => ACTION_NAVIGATE_TO_BASE,
+        _ => ACTION_WAIT,
     }
 }
 

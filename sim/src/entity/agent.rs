@@ -43,4 +43,12 @@ pub struct AgentState {
     pub speed_buff:   u8,
     pub spawn_pos:    GridPos,
     pub base_pos:     GridPos,
+    /// Ticks until melee attack is ready again (0 = ready).
+    pub melee_cooldown:  u8,
+    /// Ticks until ranged attack is ready again (0 = ready).
+    pub ranged_cooldown: u8,
+    /// Dead-and-respawning countdown: 0 = alive, >0 = respawning.
+    pub respawn_timer:   u8,
+    /// Cumulative kill count — used for kill-reward tracking.
+    pub kills:           u32,
 }

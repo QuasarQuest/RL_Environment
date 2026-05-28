@@ -21,8 +21,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from env.action_masks import ACTION_SIZE
-from network.extractor import OBS_TOTAL as _OBS_TOTAL
+from network.extractor import ACTION_SIZE, OBS_TOTAL as _OBS_TOTAL
 
 
 def _find_project_root() -> Path:

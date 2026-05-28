@@ -124,8 +124,8 @@ class TuneConfig:
     gamma_max: float = 0.999
     gae_lambda_min: float = 0.9
     gae_lambda_max: float = 0.99
-    batch_size_opts: list = field(default_factory=lambda: [256, 512, 1024])
-    n_epochs_opts: list = field(default_factory=lambda: [5, 10, 15])
+    batch_size_opts: list[int] = field(default_factory=lambda: [256, 512, 1024])
+    n_epochs_opts: list[int] = field(default_factory=lambda: [5, 10, 15])
 
 
 # ---------------------------------------------------------------------------

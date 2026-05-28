@@ -2,7 +2,7 @@
 # Stage 3: full item set (health, ammo, speed), mixed obstacles.
 
 stage: 3
-n_envs: 48
+n_envs: 64
 
 seed: null
 max_episode_steps: null

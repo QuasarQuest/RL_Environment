@@ -6,7 +6,6 @@ use bevy::prelude::*;
 
 #[derive(Component)] pub struct SpeedDecreaseButton;
 #[derive(Component)] pub struct SpeedIncreaseButton;
-#[derive(Component)] pub struct SpeedResetButton;
 #[derive(Component)] pub struct CurrentSpeedLabel;
 #[derive(Component)] pub struct PauseButtonMarker;
 #[derive(Component)] pub struct PauseButtonText;

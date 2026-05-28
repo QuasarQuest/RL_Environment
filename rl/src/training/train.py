@@ -35,10 +35,8 @@ import hydra
 import torch.nn as nn
 from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
-from rich import box
 from rich.columns import Columns
 from rich.console import Console
-from rich.table import Table
 from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
 
@@ -195,6 +193,7 @@ def train(cfg: DictConfig) -> None:
     if _dev.type == "cuda" and _dev.index is None:
         import torch
         device = f"cuda:{torch.cuda.current_device()}"
+        torch.backends.cudnn.benchmark = True
     else:
         device = str(_dev)
 
@@ -255,11 +254,15 @@ def train(cfg: DictConfig) -> None:
             tensorboard_log=str(run_dir / "tensorboard"),
         )
         if vec_normalize is not None and vn_path.exists():
-            vec_normalize = VecNormalize.load(str(vn_path), vec_env)
+            # Copy saved running stats into the existing VecNormalize rather than
+            # creating a new wrapper around it (which would double-normalize obs).
+            # The model's env reference to vec_normalize remains valid.
+            _loaded_vn = VecNormalize.load(str(vn_path), vec_normalize.venv)
+            vec_normalize.obs_rms = _loaded_vn.obs_rms
+            vec_normalize.ret_rms = _loaded_vn.ret_rms
             console.print(f"  vecnorm  ← {vn_path}")
-        else:
-            if vec_normalize is not None:
-                console.print(f"  [yellow]vecnorm not found at {vn_path}, using fresh stats[/yellow]")
+        elif vec_normalize is not None:
+            console.print(f"  [yellow]vecnorm not found at {vn_path}, using fresh stats[/yellow]")
         # Re-sync eval stats after potentially reloading vec_normalize.
         eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
         _sync_vecnorm_stats(vec_normalize, eval_normalize)
@@ -329,10 +332,13 @@ def train(cfg: DictConfig) -> None:
             deterministic=True,
             render=False,
             vec_normalize=vec_normalize,
+            onnx_path=run_dir / "policy.onnx",
+            viewer_onnx_path=_WORKSPACE_ROOT / "assets" / "model" / "policy.onnx",
         ),
     ]
 
     t0 = time.time()
+    interrupted = False
     try:
         model.learn(
             total_timesteps=t_cfg.total_timesteps,
@@ -340,12 +346,18 @@ def train(cfg: DictConfig) -> None:
             tb_log_name=run_tag,
             reset_num_timesteps=resume is None,
         )
+    except KeyboardInterrupt:
+        interrupted = True
+        console.print("[yellow]Interrupted — saving checkpoint and exporting ONNX...[/yellow]")
     finally:
         vec_env.close()
         eval_env.close()
 
     elapsed = time.time() - t0
-    console.print(f"[bold green]Done in {elapsed / 3600:.2f}h[/bold green]")
+    if interrupted:
+        console.print(f"[bold yellow]Stopped after {elapsed / 3600:.2f}h[/bold yellow]")
+    else:
+        console.print(f"[bold green]Done in {elapsed / 3600:.2f}h[/bold green]")
 
     final = run_dir / "final"
     model.save(str(final))
@@ -356,12 +368,20 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  stats  → {run_dir / 'stats.h5'}")
     console.print(f"  tb     → tensorboard --logdir {run_dir / 'tensorboard'}")
 
-    onnx_path = run_dir / "policy.onnx"
-    best_vn_path = Path(eval_best_path + "_vecnorm.pkl")
+    onnx_path    = run_dir / "policy.onnx"
+    eval_best_zip = Path(eval_best_path) / "best_model.zip"
+    if eval_best_zip.exists():
+        export_src    = Path(eval_best_path) / "best_model"
+        export_vn     = Path(eval_best_path + "_vecnorm.pkl")
+        export_label  = "eval best"
+    else:
+        export_src    = final
+        export_vn     = Path(str(final) + "_vecnorm.pkl")
+        export_label  = "final (no eval-best yet)"
     try:
-        best_policy = algo_spec.cls.load(str(Path(eval_best_path) / "best_model")).policy
-        export_to_onnx(best_policy, onnx_path, vecnorm_path=best_vn_path if best_vn_path.exists() else None)
-        console.print(f"  policy → {onnx_path}  (eval best)")
+        best_policy = algo_spec.cls.load(str(export_src)).policy
+        export_to_onnx(best_policy, onnx_path, vecnorm_path=export_vn if export_vn.exists() else None)
+        console.print(f"  policy → {onnx_path}  ({export_label})")
         viewer_path = _WORKSPACE_ROOT / "assets" / "model" / "policy.onnx"
         shutil.copy2(onnx_path, viewer_path)
         console.print(f"  viewer → {viewer_path}  (copied)")

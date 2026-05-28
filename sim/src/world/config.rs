@@ -251,6 +251,22 @@ pub struct WorldConfig {
     pub gold_carry_speed: f32,
     #[serde(default)]
     pub reward: RewardConfig,
+
+    // ── Combat ────────────────────────────────────────────────────────────────
+    #[serde(default = "default_melee_range")]
+    pub melee_range: u8,
+    #[serde(default = "default_ranged_range")]
+    pub ranged_range: u8,
+    #[serde(default = "default_melee_damage")]
+    pub melee_damage: u8,
+    #[serde(default = "default_ranged_damage")]
+    pub ranged_damage: u8,
+    #[serde(default = "default_melee_cooldown_ticks")]
+    pub melee_cooldown_ticks: u8,
+    #[serde(default = "default_ranged_cooldown_ticks")]
+    pub ranged_cooldown_ticks: u8,
+    #[serde(default = "default_respawn_ticks")]
+    pub respawn_ticks: u8,
 }
 
 // ── Serde default fns ────────────────────────────────────────────────────────
@@ -262,11 +278,18 @@ fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
 fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
-fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
-fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
-fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
-fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
-fn default_reward_approach()    -> f32 { RewardConfig::DEFAULT_APPROACH }
+fn default_gold_carry_speed()       -> f32 { global::GOLD_CARRY_SPEED }
+fn default_reward_tick()            -> f32 { RewardConfig::DEFAULT_TICK }
+fn default_reward_pickup()          -> f32 { RewardConfig::DEFAULT_PICKUP }
+fn default_reward_deposit()         -> f32 { RewardConfig::DEFAULT_DEPOSIT }
+fn default_reward_approach()        -> f32 { RewardConfig::DEFAULT_APPROACH }
+fn default_melee_range()            -> u8  { global::MELEE_RANGE }
+fn default_ranged_range()           -> u8  { global::RANGED_RANGE }
+fn default_melee_damage()           -> u8  { global::MELEE_DAMAGE }
+fn default_ranged_damage()          -> u8  { global::RANGED_DAMAGE }
+fn default_melee_cooldown_ticks()   -> u8  { global::MELEE_COOLDOWN_TICKS }
+fn default_ranged_cooldown_ticks()  -> u8  { global::RANGED_COOLDOWN_TICKS }
+fn default_respawn_ticks()          -> u8  { global::AGENT_RESPAWN_TICKS }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 

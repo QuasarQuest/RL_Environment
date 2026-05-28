@@ -28,6 +28,13 @@ impl Default for LoadMenuState {
 
 fn scan_configs() -> Vec<(String, String)> {
     let mut entries = vec![];
+
+    // Always list default.ron first so users can return to the viewer default.
+    let default_ron = "assets/world/default.ron";
+    if std::path::Path::new(default_ron).exists() {
+        entries.push(("Default".to_string(), default_ron.to_string()));
+    }
+
     let Ok(dir) = std::fs::read_dir("assets/world") else { return entries; };
     let mut paths: Vec<_> = dir.flatten()
         .map(|e| e.path())
@@ -51,6 +58,13 @@ fn scan_configs() -> Vec<(String, String)> {
 
 fn scan_policies() -> Vec<(String, String)> {
     let mut entries = vec![("None  (BT fallback)".to_string(), String::new())];
+
+    // Include the deployed policy so users can switch back to it after selecting a run.
+    let deployed = "assets/model/policy.onnx";
+    if std::path::Path::new(deployed).exists() {
+        entries.push(("Default (assets/model)".to_string(), deployed.to_string()));
+    }
+
     let Ok(dir) = std::fs::read_dir("runs") else { return entries; };
     let mut paths: Vec<_> = dir.flatten()
         .filter(|e| e.path().is_dir() && e.path().join("policy.onnx").exists())

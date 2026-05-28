@@ -28,7 +28,6 @@ use std::collections::VecDeque;
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 
-use crate::config::{MELEE_DAMAGE, MELEE_RANGE, RANGED_DAMAGE, RANGED_RANGE};
 use crate::entity::agent::Action;
 use crate::entity::item::ItemKind;
 use crate::rl::action::{RlAction, int_to_rl_action};
@@ -50,6 +49,7 @@ pub struct SimCore {
     world_cfg:   WorldConfig,
     prev_gold:   u8,
     prev_score:  u32,
+    prev_kills:  u32,
     prev_pos:    GridPos,
 
     gold_positions: Vec<GridPos>,
@@ -124,7 +124,7 @@ impl SimCore {
         Self {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
-            prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
+            prev_gold: 0, prev_score: 0, prev_kills: 0, prev_pos: initial_pos,
             gold_positions, spawn_budgets,
             path_caches, enemy_kinds,
             rng,
@@ -155,9 +155,10 @@ impl SimCore {
         }
         for cache in &mut self.path_caches { *cache = EnemyPathCache::default(); }
         self.tick       = 0;
-        self.prev_gold  = 0;
-        self.prev_score = 0;
-        self.prev_pos   = self.agents[0].pos;
+        self.prev_gold   = 0;
+        self.prev_score  = 0;
+        self.prev_kills  = 0;
+        self.prev_pos    = self.agents[0].pos;
 
         let clusters = find_clusters(&self.gold_positions);
         let no_paths: Vec<&VecDeque<GridPos>> = vec![];
@@ -168,19 +169,31 @@ impl SimCore {
     }
 
     pub fn step(&mut self, action: u32) -> (f32, bool) {
-        self.prev_gold  = self.agents[0].gold_carried;
-        self.prev_score = self.agents[0].score;
-        self.prev_pos   = self.agents[0].pos;
+        self.prev_gold   = self.agents[0].gold_carried;
+        self.prev_score  = self.agents[0].score;
+        self.prev_kills  = self.agents[0].kills;
+        self.prev_pos    = self.agents[0].pos;
+        let prev_alive   = self.agents[0].respawn_timer == 0;
 
         self.tick += 1;
         let done = self.tick >= self.match_ticks;
 
         physics::tick_speed_buffs(&mut self.agents);
+        physics::tick_cooldowns(&mut self.agents);
+        let respawned = physics::tick_respawns(&mut self.agents);
+        // Clear stale path caches for any agent that just respawned.
+        for i in 0..self.path_caches.len() {
+            if respawned & (1 << i) != 0 {
+                self.path_caches[i] = EnemyPathCache::default();
+            }
+        }
+
+        let carry_speed = self.world_cfg.gold_carry_speed;
 
         // Gold clusters for this tick — used to resolve NavigateToCluster actions.
         let clusters = find_clusters(&self.gold_positions);
 
-        let wall_hit = self.apply_rl_action(int_to_rl_action(action), &clusters);
+        let (wall_hit, nav_goal) = self.apply_rl_action(int_to_rl_action(action), &clusters, carry_speed);
 
         // Scripted enemies (agents 1+).
         for idx in 1..self.agents.len() {
@@ -190,7 +203,7 @@ impl SimCore {
                 kind, &self.agents[idx], &self.items, &self.grid,
                 &mut self.path_caches[idx],
             );
-            physics::apply_action(&mut self.agents, &self.grid, idx, act);
+            physics::apply_action(&mut self.agents, &self.grid, idx, act, carry_speed);
         }
 
         pickup::pickup(&mut self.agents, &mut self.items);
@@ -204,21 +217,23 @@ impl SimCore {
                 .map(|it| it.pos),
         );
 
+        let just_died = prev_alive && self.agents[0].respawn_timer > 0;
         let rew = reward::compute(
             &self.world_cfg.reward,
             &self.agents[0],
             self.prev_pos,
             self.prev_gold,
             self.prev_score,
-            &self.gold_positions,
+            self.prev_kills,
+            nav_goal,
             wall_hit,
+            just_died,
         );
 
-        // Collect enemy path references for the observation.
-        // path_caches[0] is the RL agent's cache; 1+ are enemies.
-        let enemy_paths: Vec<&VecDeque<GridPos>> = self.path_caches[1..]
-            .iter()
-            .map(|c| c.path())
+        // Collect path references for alive enemies only (path_caches[0] is the RL agent).
+        let enemy_paths: Vec<&VecDeque<GridPos>> = (1..self.agents.len())
+            .filter(|&i| self.agents[i].respawn_timer == 0)
+            .map(|i| self.path_caches[i].path())
             .collect();
 
         build_obs_into(
@@ -229,29 +244,40 @@ impl SimCore {
         (rew, done)
     }
 
-    /// Resolve the RL action to a navigation goal or direct combat/wait,
-    /// execute it, and return whether the agent hit a wall.
+    /// Resolve the RL action to a navigation goal or direct combat/wait.
+    /// Returns `(wall_hit, nav_goal)` — nav_goal is None for Wait/Attack actions
+    /// or when no valid target exists (e.g. no health pickups on the map).
+    /// The nav_goal is forwarded to reward::compute so approach shaping is
+    /// always aligned with the action the policy actually chose.
     fn apply_rl_action(
         &mut self,
-        rl_action: RlAction,
-        clusters:  &[Option<GoldCluster>; CLUSTER_K],
-    ) -> bool {
+        rl_action:   RlAction,
+        clusters:    &[Option<GoldCluster>; CLUSTER_K],
+        carry_speed: f32,
+    ) -> (bool, Option<GridPos>) {
+        if self.agents[0].respawn_timer > 0 { return (false, None); }
         match rl_action {
             RlAction::MeleeAttack => {
                 physics::try_melee_attack(
                     &mut self.agents, 0,
-                    MELEE_RANGE as i32, MELEE_DAMAGE,
+                    self.world_cfg.melee_range  as i32,
+                    self.world_cfg.melee_damage,
+                    self.world_cfg.melee_cooldown_ticks,
+                    self.world_cfg.respawn_ticks,
                 );
-                false
+                (false, None)
             }
             RlAction::RangedAttack => {
                 physics::try_ranged_attack(
                     &mut self.agents, 0,
-                    RANGED_RANGE as i32, RANGED_DAMAGE,
+                    self.world_cfg.ranged_range  as i32,
+                    self.world_cfg.ranged_damage,
+                    self.world_cfg.ranged_cooldown_ticks,
+                    self.world_cfg.respawn_ticks,
                 );
-                false
+                (false, None)
             }
-            RlAction::Wait => false,
+            RlAction::Wait => (false, None),
 
             nav_action => {
                 // Resolve navigation goal from the action type.
@@ -264,13 +290,20 @@ impl SimCore {
                     let act = navigate_action(
                         &self.agents[0], goal, &self.grid, &mut self.path_caches[0],
                     );
-                    physics::apply_action(&mut self.agents, &self.grid, 0, act);
-                    matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos
+                    physics::apply_action(&mut self.agents, &self.grid, 0, act, carry_speed);
+                    let wall_hit = matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos;
+                    (wall_hit, Some(goal))
                 } else {
-                    false
+                    (false, None)
                 }
             }
         }
+    }
+
+    /// The RL agent's current A* path (remaining waypoints toward the last navigation goal).
+    /// Populated by apply_rl_action every step; empty for Wait/Attack actions.
+    pub fn agent_path(&self) -> &std::collections::VecDeque<GridPos> {
+        self.path_caches[0].path()
     }
 
     pub fn obs_as_bytes(&self) -> &[u8] {

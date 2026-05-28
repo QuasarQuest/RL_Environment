@@ -75,6 +75,10 @@ pub fn build(cfg: &WorldConfig) -> WorldSnapshot {
             speed_buff:   0,
             spawn_pos:    GridPos::new(ra.x, ra.y),
             base_pos:     base,
+            melee_cooldown:  0,
+            ranged_cooldown: 0,
+            respawn_timer:   0,
+            kills:           0,
         }
     }).collect();
     agents.sort_by_key(|a| a.team);

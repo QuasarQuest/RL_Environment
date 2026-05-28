@@ -4,10 +4,9 @@ use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
 
 const ACTION_NAMES: [&str; ACTION_SIZE] = [
-    "Move N", "Move S", "Move E", "Move W", "Move NE", "Move NW", "Move SE", "Move SW",
-    "Atk N",  "Atk S",  "Atk E",  "Atk W",  "Atk NE",  "Atk NW",  "Atk SE",  "Atk SW",
-    "Rng N",  "Rng S",  "Rng E",  "Rng W",  "Rng NE",  "Rng NW",  "Rng SE",  "Rng SW",
-    "Drop",   "Wait",
+    "Nav Cluster 0", "Nav Cluster 1", "Nav Cluster 2", "Nav Cluster 3",
+    "Nav Base", "Nav Health", "Nav Ammo", "Nav Enemy",
+    "Melee Atk", "Ranged Atk", "Wait",
 ];
 
 #[derive(Component)] pub struct DebugOverlay;

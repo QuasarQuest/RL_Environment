@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::color::Alpha;
 use atb::{config, world::tile::Tile};
 use crate::sim_bridge::SimBridge;
 use crate::viz::grid_offset::GridOffset;
@@ -14,22 +15,14 @@ fn tile_color(tile: Tile) -> Color {
     match tile {
         Tile::Free           => Color::srgb(0.10, 0.10, 0.12),
         Tile::Obstacle       => Color::srgb(0.28, 0.28, 0.32),
-        Tile::Base(team)     => {
-            let c = team_color(team);
-            Color::srgba(c.to_srgba().red, c.to_srgba().green, c.to_srgba().blue, 0.70)
-        }
-        Tile::SafeZone(team) => {
-            let c = team_color(team);
-            Color::srgba(c.to_srgba().red, c.to_srgba().green, c.to_srgba().blue, 0.18)
-        }
+        Tile::Base(team)     => team_color(team).with_alpha(0.70),
+        Tile::SafeZone(team) => team_color(team).with_alpha(0.18),
     }
 }
 
-pub fn spawn_tiles(
-    mut commands: Commands,
-    bridge:       Res<SimBridge>,
-    offset:       Res<GridOffset>,
-) {
+/// Spawn tile sprites for the current bridge grid.
+/// Extracted so it can be called both at startup and on hot-reload.
+pub fn do_spawn_tiles(commands: &mut Commands, bridge: &SimBridge, offset: &GridOffset) {
     for (x, y, tile) in bridge.grid().iter() {
         let pos = offset.world_pos(x as i32, y as i32);
         commands.spawn((
@@ -42,6 +35,14 @@ pub fn spawn_tiles(
             TileMarker { x, y },
         ));
     }
+}
+
+pub fn spawn_tiles(
+    mut commands: Commands,
+    bridge:       Res<SimBridge>,
+    offset:       Res<GridOffset>,
+) {
+    do_spawn_tiles(&mut commands, &bridge, &offset);
 }
 
 pub fn sync_tile_colors(

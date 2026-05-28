@@ -77,14 +77,13 @@ fn action_button<M: Component>(
 
 pub fn show_end_screen(
     bridge:    Res<SimBridge>,
-    mut query: Query<(&mut Node, &mut Visibility), With<EndScreen>>,
+    mut query: Query<&mut Node, With<EndScreen>>,
     mut label: Query<&mut Text, With<WinnerLabel>>,
 ) {
     if !bridge.is_changed() { return; }
     let game_over = bridge.game_over;
-    for (mut node, mut vis) in query.iter_mut() {
+    for mut node in query.iter_mut() {
         node.display = if game_over { Display::Flex } else { Display::None };
-        *vis = if game_over { Visibility::Visible } else { Visibility::Hidden };
     }
     if game_over {
         // Find leading team.
