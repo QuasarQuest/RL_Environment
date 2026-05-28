@@ -39,13 +39,13 @@ def best_checkpoint(run_dir: Path) -> Path:
         return eval_best / "best_model"
 
     for name in ("final", "interrupted"):
-        p = run_dir / f"{name}.zip"
-        if p.exists():
+        cand = run_dir / f"{name}.zip"
+        if cand.exists():
             return run_dir / name
 
     ckpts = sorted(
         (run_dir / "checkpoints").glob("step_*.zip"),
-        key=lambda p: int(p.stem.split("_")[1]),
+        key=lambda c: int(c.stem.split("_")[1]),
     )
     if ckpts:
         return ckpts[-1].with_suffix("")
@@ -77,7 +77,8 @@ def main() -> None:
     try:
         from sb3_contrib import RecurrentPPO
         model = RecurrentPPO.load(str(ckpt))
-    except Exception:
+    except (ImportError, ValueError, RuntimeError, KeyError, TypeError):
+        # Not a recurrent checkpoint (or sb3-contrib missing) — load as plain PPO.
         from stable_baselines3 import PPO
         model = PPO.load(str(ckpt))
 

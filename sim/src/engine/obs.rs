@@ -19,9 +19,9 @@ use crate::engine::clusters::GoldCluster;
 use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
     CH_AMMO, CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_ENEMY,
-    CH_ENEMY_AMMO, CH_ENEMY_HP, CH_ENEMY_PATH, CH_GOLD, CH_HEALTH, CH_ITEMS,
-    CH_OBSTACLE, CH_OOB,
-    ITEM_AMMO, ITEM_HEALTH, ITEM_SPEED,
+    CH_ENEMY_AMMO, CH_ENEMY_HP, CH_ENEMY_PATH, CH_GOLD, CH_HEALTH,
+    CH_ITEM_AMMO, CH_ITEM_HEALTH, CH_ITEM_SPEED,
+    CH_OBSTACLE, CH_OOB, CH_TIME_REMAINING,
     MM_CH_ENEMY, MM_CH_GOLD, MM_CH_OBSTACLE,
     MM_CHANNELS, MM_DIM, MM_SIZE,
     OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
@@ -45,6 +45,7 @@ pub fn build_obs_into(
     grid:           &Grid,
     enemy_paths:    &[&VecDeque<GridPos>],
     clusters:       &[Option<GoldCluster>; CLUSTER_K],
+    time_remaining: f32,
 ) {
     debug_assert_eq!(buf.len(), OBS_TOTAL,
         "buf must be exactly OBS_TOTAL={OBS_TOTAL} floats");
@@ -70,6 +71,11 @@ pub fn build_obs_into(
     let base_dy = (agent.base_pos.y - ay) as f32 / gh as f32;
     buf[CH_BASE_DX * plane..(CH_BASE_DX + 1) * plane].fill(base_dx);
     buf[CH_BASE_DY * plane..(CH_BASE_DY + 1) * plane].fill(base_dy);
+
+    // ── Broadcast: episode progress ───────────────────────────────────────────
+
+    buf[CH_TIME_REMAINING * plane..(CH_TIME_REMAINING + 1) * plane]
+        .fill(time_remaining.clamp(0.0, 1.0));
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 
@@ -98,10 +104,10 @@ pub fn build_obs_into(
         let cy = item.pos.y - ay + centre;
         if !in_crop(cx, cy) { continue; }
         match item.kind {
-            ItemKind::Gold       => buf[pixel(CH_GOLD,  cx, cy)] = 1.0,
-            ItemKind::Health     => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_HEALTH,
-            ItemKind::Ammo       => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_AMMO,
-            ItemKind::SpeedBoost => buf[pixel(CH_ITEMS, cx, cy)] = ITEM_SPEED,
+            ItemKind::Gold       => buf[pixel(CH_GOLD,        cx, cy)] = 1.0,
+            ItemKind::Health     => buf[pixel(CH_ITEM_HEALTH, cx, cy)] = 1.0,
+            ItemKind::Ammo       => buf[pixel(CH_ITEM_AMMO,   cx, cy)] = 1.0,
+            ItemKind::SpeedBoost => buf[pixel(CH_ITEM_SPEED,  cx, cy)] = 1.0,
         }
     }
 

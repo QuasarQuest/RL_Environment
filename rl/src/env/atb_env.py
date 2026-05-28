@@ -5,12 +5,20 @@ This class exists so the factory's eval path and DummyVecEnv work correctly.
 
 Observation layout
 ------------------
-Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (9629,):
-  [0       : 8750)   main egocentric crop  — (14, 25, 25)
-  [8750    : 9617)   minimap               — ( 3, 17, 17)
-  [9617    : 9629)   cluster features      — (12,)
+Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (11504,):
+  [0      : 10625)   main egocentric crop  — (17, 25, 25)
+  [10625  : 11492)   minimap               — ( 3, 17, 17)
+  [11492  : 11504)   cluster features      — (12,)
 
 AtbCnnExtractor in policy.py splits and reshapes internally.
+
+Termination semantics
+---------------------
+Rust ends an episode only at match_duration_ticks; the agent respawns on death
+rather than terminating. So the Rust `done` is a time-limit TRUNCATION, not a
+true MDP termination — we report it as `truncated`, which lets SB3 bootstrap the
+final-state value (a terminal state would be treated as value 0). See
+BatchVecEnv for the same reasoning on the training path.
 """
 from __future__ import annotations
 
@@ -53,6 +61,12 @@ class AtbEnv(gym.Env):
         config_path = str(Path(config_path).expanduser().resolve())
 
         import atb
+
+        # Fail loudly on a stale Rust build whose observation/action layout
+        # disagrees with network.extractor. Shared with the training path.
+        from env.batch_vec_env import _assert_rust_python_contract
+        _assert_rust_python_contract(atb)
+
         self._env = atb.PyBatchEnv(1, config_path)
         self._stage = stage
 
@@ -80,7 +94,12 @@ class AtbEnv(gym.Env):
         obs_ba, rews, dones = self._env.step_batch([int(action)])
         obs = np.frombuffer(obs_ba, dtype=_OBS_DTYPE).reshape(_OBS_FLAT_SHAPE).copy()
         reward = float(rews[0])
-        terminated = bool(dones[0])
+
+        # Match-timer end is a truncation, not a termination (the agent respawns
+        # on death). Reporting truncated=True makes SB3 bootstrap V(final_obs).
+        done = bool(dones[0])
+        terminated = False
+        truncated = done
 
         self._episode_reward += reward
         self._episode_length += 1
@@ -88,10 +107,10 @@ class AtbEnv(gym.Env):
             self._score += reward
 
         info: dict[str, Any] = {"score": self._score, "win": 0}
-        if terminated:
+        if done:
             info["episode"] = {"r": self._episode_reward, "l": self._episode_length}
 
-        return obs, reward, terminated, False, info
+        return obs, reward, terminated, truncated, info
 
     def render(self):
         return None

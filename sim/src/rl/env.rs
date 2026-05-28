@@ -16,11 +16,13 @@
 //   3. results.iter().map(d)   — serial unzip into dones Vec
 // All three are now absorbed into the single parallel step pass.
 //
-// Scaling note: gather was O(n_envs × OBS_TOTAL) serial memcpy. At
-// n_envs=256 and OBS_TOTAL=3750 that's ~3.8M f32 copies (~15MB) on a
-// single core. The new design distributes this across all Rayon threads,
-// with each thread writing into its own non-overlapping obs_flat slice —
-// no false sharing, no synchronisation needed.
+// Scaling note: gather was O(n_envs × OBS_TOTAL) serial memcpy. With
+// OBS_TOTAL = 11504 (10625 crop + 867 minimap + 12 cluster) at n_envs = 256
+// that is ~2.95M f32 copies (~11.8MB) per step. The obs copy is now distributed
+// across Rayon threads, each writing its own non-overlapping OBS_TOTAL-float
+// slice of obs_flat (well above a cache line, so no false sharing on obs; the
+// adjacent single-element writes into rews/dones can share a line only at the
+// handful of thread-chunk boundaries — negligible vs the sim step).
 
 use rayon::prelude::*;
 use crate::entity::item::ItemKind;
@@ -78,6 +80,13 @@ impl BatchEnv {
     ///
     /// No serial gather pass, no intermediate Vec<(f32,bool)> allocation.
     pub fn step_batch(&mut self, actions: &[u32]) -> (&[f32], &[bool]) {
+        // A short `actions` would make the zip silently truncate, leaving the
+        // tail envs unstepped with stale rews/dones — catch that in debug builds.
+        debug_assert_eq!(
+            actions.len(), self.envs.len(),
+            "actions length ({}) must equal n_envs ({})", actions.len(), self.envs.len()
+        );
+
         self.envs
             .par_iter_mut()
             .zip(actions.par_iter())

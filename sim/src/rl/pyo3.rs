@@ -8,28 +8,36 @@
 //   to get a zero-extra-copy numpy array. A single memcpy per step call
 //   instead of ~200K Python float object allocations.
 //
-// Reward/done protocol (updated):
-//   step_batch now returns (&[f32], &[bool]) slices into pre-allocated BatchEnv
+//   IMPORTANT: the per-env stride is OBS_TOTAL (crop + minimap + cluster
+//   features), NOT obs_dim() (which is the egocentric crop only). Always slice
+//   with obs_total(). obs_shape()/mm_shape() describe the crop and minimap
+//   sub-tensors; the consumer (AtbCnnExtractor) splits the flat buffer with:
+//       crop    = flat[:, 0 : OBS_DIM         ].reshape(n, *obs_shape())
+//       minimap = flat[:, OBS_DIM : OBS_DIM+MM].reshape(n, *mm_shape())
+//       cluster = flat[:, -cluster_features() :]
+//
+// Reward/done protocol:
+//   step_batch returns (&[f32], &[bool]) slices into pre-allocated BatchEnv
 //   buffers — no Vec<(f32,bool)> intermediate allocation, no serial unzip.
 //   pyo3.rs converts those slices to Vec<f32>/Vec<bool> at the FFI boundary,
 //   which is unavoidable (Python needs owned data), but the Rust-side work is
-//   now fully parallel with no serial passes.
+//   fully parallel with no serial passes.
 //
 // Python usage:
 //
 //   import atb, numpy as np
-//   env = atb.PyBatchEnv(64, "assets/world/config.ron")
-//   obs_ba = env.reset_all()                              # bytearray
-//   obs = np.frombuffer(obs_ba, dtype=np.float32).reshape(64, *env.obs_shape())
-//
+//   env  = atb.PyBatchEnv(64, "assets/world/config.ron")
+//   N, T = env.n_envs(), atb.PyBatchEnv.obs_total()
+//   obs  = np.frombuffer(env.reset_all(), dtype=np.float32).reshape(N, T)
 //   obs_ba, rews, dones = env.step_batch(actions_list)   # bytearray, list[float], list[bool]
+//   obs  = np.frombuffer(obs_ba, dtype=np.float32).reshape(N, T)
 
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 
 use super::env::BatchEnv;
 use super::action::ACTION_SIZE;
-use super::obs::{OBS_DIM, OBS_SHAPE, OBS_TOTAL};
+use super::obs::{CLUSTER_FEATURES, MM_SHAPE, OBS_DIM, OBS_SHAPE, OBS_TOTAL};
 
 // ── PyBatchEnv ────────────────────────────────────────────────────────────────
 
@@ -62,7 +70,7 @@ impl PyBatchEnv {
     // ── Reset ─────────────────────────────────────────────────────────────────
 
     /// Reset all envs in parallel. Returns flat bytearray [n_envs * OBS_TOTAL * 4 bytes].
-    /// Python: np.frombuffer(ba, dtype=np.float32).reshape(n_envs, *obs_shape)
+    /// Python: np.frombuffer(ba, dtype=np.float32).reshape(n_envs, obs_total())
     pub fn reset_all<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyByteArray> {
         self.inner.reset_all();
         Self::slice_to_bytearray(py, &self.inner.obs_flat)
@@ -79,13 +87,11 @@ impl PyBatchEnv {
 
     /// Step all envs in parallel. Returns (obs_bytearray, rewards, dones).
     ///
-    /// obs_bytearray : flat [n_envs * OBS_TOTAL * 4 bytes]; reshape to (n_envs, *obs_shape).
+    /// obs_bytearray : flat [n_envs * OBS_TOTAL * 4 bytes]; reshape to (n_envs, obs_total()).
     /// rewards       : list[float] — copied from BatchEnv's pre-allocated reward buffer.
     /// dones         : list[bool]  — copied from BatchEnv's pre-allocated done buffer.
     ///
     /// The Vec conversions here are unavoidable — Python needs owned data.
-    /// All Rust-side work (sim step, obs copy, reward/done write) is parallel;
-    /// the only serial work is the FFI boundary copy into Python objects.
     pub fn step_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -125,9 +131,16 @@ impl PyBatchEnv {
     pub fn get_tick(&self, i: usize) -> u64                              { self.inner.get_tick(i) }
     pub fn get_match_ticks(&self, i: usize) -> u64                       { self.inner.get_match_ticks(i) }
 
-    #[staticmethod] pub fn obs_dim()     -> usize                  { OBS_DIM }
-    #[staticmethod] pub fn obs_shape()   -> (usize, usize, usize)  { OBS_SHAPE }
-    #[staticmethod] pub fn action_size() -> usize                  { ACTION_SIZE }
+    // ── Layout accessors (single source of truth for the Python side) ──────────
+    // obs_total() is the per-env buffer stride. obs_dim()/obs_shape() describe the
+    // egocentric crop ONLY; do not use them to compute the stride.
+
+    #[staticmethod] pub fn obs_dim()          -> usize                 { OBS_DIM }
+    #[staticmethod] pub fn obs_total()        -> usize                 { OBS_TOTAL }
+    #[staticmethod] pub fn obs_shape()        -> (usize, usize, usize) { OBS_SHAPE }
+    #[staticmethod] pub fn mm_shape()         -> (usize, usize, usize) { MM_SHAPE }
+    #[staticmethod] pub fn cluster_features() -> usize                 { CLUSTER_FEATURES }
+    #[staticmethod] pub fn action_size()      -> usize                 { ACTION_SIZE }
 }
 
 // ── Module registration ───────────────────────────────────────────────────────

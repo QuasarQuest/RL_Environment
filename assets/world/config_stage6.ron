@@ -51,6 +51,6 @@
         deposit:        5.0,
         approach:       0.05,
         kill:           2.0,
-        death_penalty:  2.0,
+        death_penalty: -2.0,
     ),
 )

@@ -11,5 +11,7 @@ clip_reward: true
 clip_reward_max: 100.0
 reward_scale: 1.0
 
-normalize_obs: true
+# obs is already scaled to [0,1]/[-1,1] in sim/src/engine/obs.rs; per-dim
+# VecNormalize over sparse binary CNN planes injects scale noise — keep off.
+normalize_obs: false
 normalize_reward: true

@@ -114,6 +114,7 @@ impl SimCore {
         build_obs_into(
             &mut obs_buf, &snap.agents[0], &snap.items, &snap.agents,
             &gold_positions, &snap.grid, &no_paths, &clusters,
+            1.0, // full match remaining at construction
         );
 
         let rng = match seed {
@@ -165,6 +166,7 @@ impl SimCore {
         build_obs_into(
             &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
             &self.gold_positions, &self.grid, &no_paths, &clusters,
+            1.0, // full match remaining after reset
         );
     }
 
@@ -193,7 +195,9 @@ impl SimCore {
         // Gold clusters for this tick — used to resolve NavigateToCluster actions.
         let clusters = find_clusters(&self.gold_positions);
 
-        let (wall_hit, nav_goal) = self.apply_rl_action(int_to_rl_action(action), &clusters, carry_speed);
+        // nav_goal (the action's chosen target) is no longer used for shaping —
+        // shaping uses a state-defined objective instead (see below).
+        let (wall_hit, _nav_goal) = self.apply_rl_action(int_to_rl_action(action), &clusters, carry_speed);
 
         // Scripted enemies (agents 1+).
         for idx in 1..self.agents.len() {
@@ -218,6 +222,21 @@ impl SimCore {
         );
 
         let just_died = prev_alive && self.agents[0].respawn_timer > 0;
+
+        // State-defined shaping objective (policy-invariant PBRS): head to base
+        // while carrying gold, otherwise to the nearest remaining gold. Resolved
+        // from world state — NOT the chosen action — so shaping can't be farmed.
+        let agent0 = &self.agents[0];
+        let objective = if agent0.gold_carried > 0 {
+            Some(agent0.base_pos)
+        } else {
+            self.gold_positions.iter().copied().min_by_key(|g| {
+                let dx = (g.x - agent0.pos.x) as i64;
+                let dy = (g.y - agent0.pos.y) as i64;
+                dx * dx + dy * dy
+            })
+        };
+
         let rew = reward::compute(
             &self.world_cfg.reward,
             &self.agents[0],
@@ -225,7 +244,7 @@ impl SimCore {
             self.prev_gold,
             self.prev_score,
             self.prev_kills,
-            nav_goal,
+            objective,
             wall_hit,
             just_died,
         );
@@ -236,9 +255,13 @@ impl SimCore {
             .map(|i| self.path_caches[i].path())
             .collect();
 
+        // Fraction of the match still to play — fed to CH_TIME_REMAINING so the
+        // value function is time-aware (keeps the truncation bootstrap unbiased).
+        let time_remaining = 1.0 - (self.tick as f32 / self.match_ticks.max(1) as f32);
         build_obs_into(
             &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
             &self.gold_positions, &self.grid, &enemy_paths, &clusters,
+            time_remaining,
         );
 
         (rew, done)
@@ -247,8 +270,8 @@ impl SimCore {
     /// Resolve the RL action to a navigation goal or direct combat/wait.
     /// Returns `(wall_hit, nav_goal)` — nav_goal is None for Wait/Attack actions
     /// or when no valid target exists (e.g. no health pickups on the map).
-    /// The nav_goal is forwarded to reward::compute so approach shaping is
-    /// always aligned with the action the policy actually chose.
+    /// nav_goal is no longer used for reward shaping (shaping uses a state-defined
+    /// objective resolved in `step`); it is retained for the agent's A* target.
     fn apply_rl_action(
         &mut self,
         rl_action:   RlAction,

@@ -1,15 +1,15 @@
 # configs/ppo/default.yaml
 # @package ppo
 #
-# PPO Hyperparameters — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=9629
+# PPO Hyperparameters — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=11504
 # Slim architecture v2: ~1.47M params total (was 13.9M, 9.1× reduction)
 #
 # VRAM budget (slim, 32 envs, n_steps=256):
-#   Rollout buffer : 32 × 256 steps × 9629 floats × 4 bytes ≈ 315 MB
+#   Rollout buffer : 32 × 256 steps × 11504 floats × 4 bytes ≈ 377 MB
 #   Policy + Adam  : ~10 MB   (was ~30 MB)
 #   Activations    : ~60 MB   (was ~250 MB)
 #   ─────────────────────────────────────────────────────────────────
-#   Total          : ~385 MB  ✓  (was ~1.2 GB)
+#   Total          : ~447 MB  ✓  (was ~1.2 GB)
 
 # ── Rollout ───────────────────────────────────────────────────────────────────
 n_steps: 256

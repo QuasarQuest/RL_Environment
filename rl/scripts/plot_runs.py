@@ -344,7 +344,7 @@ def plot_score_distributions(runs: list[RunInfo], show: bool) -> None:
     fig, ax = plt.subplots(figsize=(max(6, 2.5 * len(data)), 5))
     fig.suptitle("Score Distribution (all episodes)", fontsize=11, color="#eee")
 
-    parts = ax.violinplot(data, showmedians=True, showextrema=True)
+    parts: dict = ax.violinplot(data, showmedians=True, showextrema=True)
     for body, color in zip(parts["bodies"], colors):
         body.set_facecolor(color)
         body.set_alpha(0.55)

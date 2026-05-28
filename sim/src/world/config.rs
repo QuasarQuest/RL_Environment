@@ -201,16 +201,23 @@ pub struct RewardConfig {
     /// Reward on killing an enemy agent.  0 in stages 1–5.
     #[serde(default)]
     pub kill: f32,
-    /// Negative reward on being killed.  0 in stages 1–5.
+    /// Reward applied once on the tick the agent dies.  Added directly to the
+    /// step reward, so it must be stored with its sign: use a NEGATIVE value to
+    /// penalise death (e.g. -2.0).  0 in stages 1–5.
     #[serde(default)]
     pub death_penalty: f32,
+    /// Discount used by the potential-based approach shaping (F = γΦ(s') − Φ(s)).
+    /// Must match the PPO `gamma` so the shaping stays policy-invariant.
+    #[serde(default = "default_shaping_gamma")]
+    pub shaping_gamma: f32,
 }
 
 impl RewardConfig {
-    pub const DEFAULT_TICK:     f32 = -0.0005;
-    pub const DEFAULT_PICKUP:   f32 =  0.5;
-    pub const DEFAULT_DEPOSIT:  f32 =  5.0;
-    pub const DEFAULT_APPROACH: f32 =  0.05;
+    pub const DEFAULT_TICK:          f32 = -0.0005;
+    pub const DEFAULT_PICKUP:        f32 =  0.5;
+    pub const DEFAULT_DEPOSIT:       f32 =  5.0;
+    pub const DEFAULT_APPROACH:      f32 =  0.05;
+    pub const DEFAULT_SHAPING_GAMMA: f32 =  0.99;
 }
 
 impl Default for RewardConfig {
@@ -223,6 +230,7 @@ impl Default for RewardConfig {
             wall_hit:      0.0,
             kill:          0.0,
             death_penalty: 0.0,
+            shaping_gamma: Self::DEFAULT_SHAPING_GAMMA,
         }
     }
 }
@@ -283,6 +291,7 @@ fn default_reward_tick()            -> f32 { RewardConfig::DEFAULT_TICK }
 fn default_reward_pickup()          -> f32 { RewardConfig::DEFAULT_PICKUP }
 fn default_reward_deposit()         -> f32 { RewardConfig::DEFAULT_DEPOSIT }
 fn default_reward_approach()        -> f32 { RewardConfig::DEFAULT_APPROACH }
+fn default_shaping_gamma()          -> f32 { RewardConfig::DEFAULT_SHAPING_GAMMA }
 fn default_melee_range()            -> u8  { global::MELEE_RANGE }
 fn default_ranged_range()           -> u8  { global::RANGED_RANGE }
 fn default_melee_damage()           -> u8  { global::MELEE_DAMAGE }

@@ -62,6 +62,10 @@ class EvalWithVecNorm(_EvalBase):
     def _try_export_onnx(self) -> None:
         import copy
         from network.export import export_to_onnx
+
+        onnx_path = self._onnx_path
+        if onnx_path is None:
+            return
         try:
             vn_path = (
                 Path(self.best_model_save_path + "_vecnorm.pkl")
@@ -69,10 +73,10 @@ class EvalWithVecNorm(_EvalBase):
             )
             export_to_onnx(
                 copy.deepcopy(self.model.policy),
-                self._onnx_path,
+                onnx_path,
                 vecnorm_path=vn_path if vn_path and vn_path.exists() else None,
             )
             if self._viewer_onnx_path is not None:
-                shutil.copy2(self._onnx_path, self._viewer_onnx_path)
+                shutil.copy2(onnx_path, self._viewer_onnx_path)
         except Exception as exc:
             print(f"  [ONNX export skipped: {exc}]")

@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations.
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (9629,):
-  [0       : 8750)   main egocentric crop  — (14, 25, 25) logically
-  [8750    : 9617)   minimap               — ( 3, 17, 17) logically
-  [9617    : 9629)   cluster features      — (12,) = 4 clusters × (dx, dy, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11504,):
+  [0      : 10625)   main egocentric crop  — (17, 25, 25) logically
+  [10625  : 11492)   minimap               — ( 3, 17, 17) logically
+  [11492  : 11504)   cluster features      — (12,) = 4 clusters × (dx, dy, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -12,16 +12,19 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     2  GOLD          gold item
     3  OBSTACLE      impassable wall
     4  ENEMY         enemy position (binary)
-    5  ITEMS         consumable items, float-encoded
-    6  ENEMY_HP      enemy HP at enemy cell, normalised [0,1]
-    7  ENEMY_AMMO    enemy ammo at enemy cell, normalised [0,1]
-   13  ENEMY_PATH    planned enemy path, decaying [0,1]
+    5  ITEM_HEALTH   health pickup (one-hot)
+    6  ITEM_AMMO     ammo pickup   (one-hot)
+    7  ITEM_SPEED    speed pickup  (one-hot)
+    8  ENEMY_HP      enemy HP at enemy cell, normalised [0,1]
+    9  ENEMY_AMMO    enemy ammo at enemy cell, normalised [0,1]
+   10  ENEMY_PATH    planned enemy path, decaying [0,1]
   Broadcast:
-    8  CARRYING      gold carried (broadcast)
-    9  HEALTH        agent HP (broadcast)
-   10  AMMO          agent ammo (broadcast)
-   11  BASE_DX       direction to own base X (broadcast)
-   12  BASE_DY       direction to own base Y (broadcast)
+   11  CARRYING      gold carried (broadcast)
+   12  HEALTH        agent HP (broadcast)
+   13  AMMO          agent ammo (broadcast)
+   14  BASE_DX       direction to own base X (broadcast)
+   15  BASE_DY       direction to own base Y (broadcast)
+   16  TIME_REMAINING  fraction of match left ∈ [0,1] (broadcast)
 
   Minimap channels (3, 17, 17):
     0  MM_OBSTACLE
@@ -72,10 +75,10 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
 
-OBS_CHANNELS = 14
+OBS_CHANNELS = 17
 OBS_CROP_H   = 25
 OBS_CROP_W   = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8750
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 10625
 
 MM_CHANNELS = 3
 MM_H        = 17
@@ -84,7 +87,7 @@ MM_DIM      = MM_CHANNELS * MM_H * MM_W  # 867
 
 CLUSTER_FEATURES = 12  # 4 clusters × 3 floats
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 9629
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11504
 
 # Action space size — defined here so env files don't need to import action_masks.
 # Must match ACTION_SIZE in src/rl/action.rs.
@@ -114,10 +117,10 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
 class AtbCnnExtractor(BaseFeaturesExtractor):
     """Three-branch extractor for egocentric crop, global minimap, and cluster features.
 
-    Input: flat (OBS_TOTAL,) = (9629,) buffer — split internally.
+    Input: flat (OBS_TOTAL,) = (11504,) buffer — split internally.
 
-    Crop branch  (14, 25, 25):
-      Conv(14→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
+    Crop branch  (17, 25, 25):
+      Conv(17→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
       Conv(32→64, 3×3, pad=1, s=1) → ReLU   # (64, 25, 25)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64, 13, 13)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64,  7,  7)  ← new

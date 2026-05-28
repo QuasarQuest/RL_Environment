@@ -2,23 +2,34 @@
 //
 // Adaptive-radius union-find gold clustering.
 //
-// Algorithm: try radii [3, 5, 8, 12, 20, 50] in ascending order.
-// At each radius, merge any two gold pieces within that Chebyshev distance
-// into the same cluster.  Stop at the first radius that produces at least
-// CLUSTER_K distinct clusters, then return the top-K sorted by centroid
-// position (x primary, y secondary).
+// Algorithm: try radii [3, 5, 8, 12, 20, 50] in ascending order. At each radius,
+// merge any two gold pieces within that Chebyshev distance into the same cluster.
 //
-// Sorted by centroid position rather than gold count so that cluster IDs
-// remain stable across ticks.  Sorting by count causes IDs to shuffle
-// every time the agent picks up a piece and two clusters swap rank —
-// "cluster 0" today becomes "cluster 2" next tick.  Centroid position
-// drifts only slightly as individual pieces are consumed, so the same
-// physical region of the map keeps the same ID throughout the episode.
-// The count is still communicated to the agent via count_norm in the
-// cluster observation feature.
+// Cluster count is monotonically NON-INCREASING as the radius grows (a larger
+// radius can only merge more pairs, never split them). We therefore stop at the
+// first radius that collapses the gold into AT MOST CLUSTER_K clusters — the
+// tightest grouping in which every piece still fits into one of the K slots, so
+// no gold is ever dropped from the observation. The resulting clusters are then
+// sorted by centroid position (x primary, y secondary).
 //
-// Fallback (all gold in one cluster at slot 0) fires when even radius 50
-// doesn't produce enough distinct clusters.
+// NOTE on the previous bug: the stop condition used to be `groups.len() >= K`
+// combined with `truncate(K)` *before* sorting. Because count is non-increasing
+// in radius, `>= K` always returned at radius 3 (or fell through to the
+// fallback), making radii 5..50 dead code; and `truncate` then kept an arbitrary
+// K clusters in HashMap iteration order (randomly seeded per-instance), so the
+// retained set — and thus cluster IDs — reshuffled every tick. The cluster
+// feature was effectively noise. `<= K` fixes both: the radius adapts, and since
+// we keep ≤ K clusters and sort all of them, the result is deterministic and the
+// IDs map to stable spatial regions.
+//
+// Sorting by centroid (not gold count) keeps IDs tied to stable spatial regions:
+// count-rank reshuffles IDs whenever a pickup swaps two clusters' order, whereas
+// a centroid drifts only slightly as pieces are consumed. The count is still
+// communicated to the agent via count_norm in the cluster feature.
+//
+// Because radius 50 >= the maximum Chebyshev distance on a 50x50 grid (49), the
+// loop always succeeds for any non-empty gold set; the single-cluster fallback
+// is retained only as defensive code.
 
 use std::collections::HashMap;
 
@@ -92,8 +103,7 @@ impl UnionFind {
 /// Returns up to CLUSTER_K clusters sorted by centroid position (x, then y).
 /// Empty slots are `None`.
 pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
-    // Workaround: [None; CLUSTER_K] requires Copy, use explicit init instead.
-    let mut result: [Option<GoldCluster>; CLUSTER_K] = [None, None, None, None];
+    let mut result: [Option<GoldCluster>; CLUSTER_K] = std::array::from_fn(|_| None);
     if gold.is_empty() { return result; }
 
     let n = gold.len();
@@ -114,45 +124,36 @@ pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
             groups.entry(uf.find(i)).or_default().push(i);
         }
 
-        if groups.len() >= CLUSTER_K {
-            let mut clusters: Vec<GoldCluster> = groups.values()
-                .map(|indices| GoldCluster {
-                    golds: indices.iter().map(|&i| gold[i]).collect(),
+        // First (tightest) radius that fits every piece into <= CLUSTER_K slots.
+        if groups.len() <= CLUSTER_K {
+            // Build clusters and cache each centroid once (centroid is O(cluster
+            // size); caching avoids recomputing it on every comparator call).
+            let mut clusters: Vec<(f32, f32, GoldCluster)> = groups
+                .into_values()
+                .map(|indices| {
+                    let c = GoldCluster {
+                        golds: indices.iter().map(|&i| gold[i]).collect(),
+                    };
+                    let (cx, cy) = c.centroid();
+                    (cx, cy, c)
                 })
                 .collect();
-            // Sort by centroid position (x primary, y secondary) so cluster IDs
-            // represent stable spatial regions rather than transient gold-count rank.
-            // Centroid is computed once per cluster into a stack array, then an
-            // in-place insertion sort keeps both arrays in sync. Zero heap
-            // allocations and each centroid is computed exactly once (not once
-            // per comparator call as sort_by would do).
-            clusters.truncate(CLUSTER_K);
-            let n = clusters.len();
-            let mut cen = [(0.0f32, 0.0f32); CLUSTER_K];
-            for i in 0..n { cen[i] = clusters[i].centroid(); }
-            for i in 1..n {
-                let mut j = i;
-                while j > 0 {
-                    let (ax, ay) = cen[j - 1];
-                    let (bx, by) = cen[j];
-                    if ax > bx || (ax == bx && ay > by) {
-                        clusters.swap(j - 1, j);
-                        cen.swap(j - 1, j);
-                        j -= 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            for (i, c) in clusters.into_iter().enumerate() {
-                result[i] = Some(c);
+
+            // Sort by centroid (x primary, y secondary) so cluster IDs map to
+            // stable spatial regions and the result is deterministic regardless
+            // of HashMap iteration order. total_cmp avoids the NaN-unwrap; all
+            // centroids here are finite.
+            clusters.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+
+            for (slot, (_, _, c)) in clusters.into_iter().enumerate() {
+                result[slot] = Some(c);
             }
             return result;
         }
     }
 
-    // Fallback: not enough distinct clusters even at max radius — put everything
-    // in slot 0 so the agent always has at least one valid navigation target.
+    // Unreachable for any non-empty gold set (radius 50 >= max grid distance),
+    // kept as defensive fallback so the agent always has one valid target.
     result[0] = Some(GoldCluster { golds: gold.to_vec() });
     result
 }

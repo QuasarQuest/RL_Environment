@@ -3,13 +3,24 @@
 Observation protocol
 --------------------
 Rust returns a flat bytearray of shape (n_envs * OBS_TOTAL * 4 bytes).
-np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 9629) — flat, not (C,H,W).
+np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 11504) — flat, not (C,H,W).
 AtbCnnExtractor in policy.py splits crop + minimap + cluster features internally.
 
 Score tracking
 --------------
 True episode score read from Rust via get_agents() on episode end.
 One FFI call per done env per episode — negligible overhead.
+
+Truncation vs termination
+-------------------------
+Rust ends an episode ONLY when the match timer expires (match_duration_ticks);
+the agent respawns on death rather than terminating. Every `done` is therefore a
+time-limit truncation, not a true MDP terminal. We surface this to SB3 via
+`infos[i]["TimeLimit.truncated"] = True`, which is the flag SB3's PPO checks
+before bootstrapping V(terminal_observation). Without it, the value target at
+every episode boundary is wrongly treated as 0, biasing value estimates low.
+(If a true terminal condition — win/loss — is ever added to the sim, expose a
+per-env `truncated` flag from Rust and set this from that instead of `True`.)
 
 Profiling
 ---------
@@ -43,6 +54,27 @@ _PROFILE_ENABLED = os.environ.get("ATB_PROFILE_STEPS", "0") == "1"
 _PROFILE_INTERVAL = 100
 
 
+def _assert_rust_python_contract(atb_module: Any) -> None:
+    """Fail loudly if the compiled Rust extension and the Python observation
+    layout disagree. Cheap insurance against a stale `maturin develop` build
+    after changing OBS_CHANNELS / minimap / cluster constants on either side —
+    a mismatch would otherwise silently misalign every env's observation.
+    """
+    rust_total = atb_module.PyBatchEnv.obs_total()
+    if rust_total != _OBS_TOTAL:
+        raise RuntimeError(
+            f"Observation size mismatch: Rust exposes OBS_TOTAL={rust_total} but "
+            f"network.extractor expects {_OBS_TOTAL}. Rebuild the atb extension "
+            f"(`maturin develop`) after changing the Rust observation layout."
+        )
+    rust_actions = atb_module.PyBatchEnv.action_size()
+    if rust_actions != ACTION_SIZE:
+        raise RuntimeError(
+            f"Action size mismatch: Rust exposes ACTION_SIZE={rust_actions} but "
+            f"network.extractor expects {ACTION_SIZE}. Rebuild the atb extension."
+        )
+
+
 class BatchVecEnv(VecEnv):
     """Rayon-parallel vectorised env. Drop-in for SubprocVecEnv."""
 
@@ -56,6 +88,8 @@ class BatchVecEnv(VecEnv):
             reward_scale: float = 1.0,
     ) -> None:
         import atb
+
+        _assert_rust_python_contract(atb)
 
         self._batch: Any = atb.PyBatchEnv(n_envs, config_path)
         self._stage = stage
@@ -133,6 +167,10 @@ class BatchVecEnv(VecEnv):
         infos: list[dict[str, Any]] = [{} for _ in range(self.num_envs)]
         for i in np.where(dones)[0]:
             infos[i]["terminal_observation"] = obs[i].copy()
+            # Every episode end is a match-timer truncation (see module docstring),
+            # so flag it as such — SB3 bootstraps V(terminal_observation) only when
+            # this is True; otherwise it treats the boundary as a true terminal.
+            infos[i]["TimeLimit.truncated"] = True
             infos[i]["episode"] = {
                 "r": float(self._ep_rewards[i]),
                 "l": int(self._ep_lengths[i]),

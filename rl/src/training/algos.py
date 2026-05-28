@@ -18,7 +18,7 @@ recurrent_ppo : PPO + LSTM (sb3-contrib). This is the default algo (train.yaml).
 Policy choice
 -------------
 ppo / maskable_ppo use "MlpPolicy"; recurrent_ppo uses "MlpLstmPolicy". In all
-cases the observation space is flat (9629,) and AtbCnnExtractor handles the CNN
+cases the observation space is flat (11504,) and AtbCnnExtractor handles the CNN
 internally — SB3 routes the policy string through the custom
 features_extractor_class set in the policy_kwargs (see network/policy.py).
 
@@ -113,6 +113,7 @@ PPO_SPEC = AlgoSpec(
 
 
 def _make_maskable_spec() -> AlgoSpec:
+    assert MaskablePPO is not None  # only called when _MASKABLE_AVAILABLE
     return AlgoSpec(
         name="maskable_ppo",
         cls=MaskablePPO,
@@ -123,6 +124,7 @@ def _make_maskable_spec() -> AlgoSpec:
 
 
 def _make_recurrent_spec() -> AlgoSpec:
+    assert RecurrentPPO is not None  # only called when _RECURRENT_AVAILABLE
     return AlgoSpec(
         name="recurrent_ppo",
         cls=RecurrentPPO,
