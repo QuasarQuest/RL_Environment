@@ -67,6 +67,15 @@ pub struct SimBridge {
     pub episode_reward: f32,
     pub mode:           PolicyMode,
     policy:             Option<OnnxPolicy>,
+
+    // BT: committed cluster slot — only reselect when this slot becomes empty.
+    // Prevents oscillation when two clusters are equidistant and swap rank each tick.
+    bt_target_cluster: Option<u32>,
+
+    // GOAP: cached first-step action + last known inventory level.
+    // Only replan when gold_carried changes (pickup or deposit).
+    goap_cached_action: Option<u32>,
+    goap_last_carried:  u8,
 }
 
 fn normalize_path(raw: &str) -> std::path::PathBuf {
@@ -89,6 +98,9 @@ impl SimBridge {
             sim: SimCore::new(DEFAULT_CONFIG_PATH), game_over: false, policy,
             last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
+            bt_target_cluster:  None,
+            goap_cached_action: None,
+            goap_last_carried:  0,
         }
     }
 
@@ -207,11 +219,14 @@ pub fn handle_load_request(
         }
     };
 
-    bridge.sim            = SimCore::new(&req.config_path);
-    bridge.game_over      = false;
-    bridge.last_action    = ACTION_WAIT;
-    bridge.action_counts  = [0; ACTION_SIZE];
-    bridge.episode_reward = 0.0;
+    bridge.sim              = SimCore::new(&req.config_path);
+    bridge.game_over        = false;
+    bridge.last_action      = ACTION_WAIT;
+    bridge.action_counts    = [0; ACTION_SIZE];
+    bridge.episode_reward   = 0.0;
+    bridge.bt_target_cluster  = None;
+    bridge.goap_cached_action = None;
+    bridge.goap_last_carried  = 0;
     bridge.mode = if bridge.policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
 
     // Recompute GridOffset — the new config may have different map dimensions.
@@ -238,10 +253,13 @@ pub fn step_sim(
 ) {
     if restart.0 {
         bridge.sim.reset();
-        bridge.game_over      = false;
-        bridge.last_action    = ACTION_WAIT;
-        bridge.action_counts  = [0; ACTION_SIZE];
-        bridge.episode_reward = 0.0;
+        bridge.game_over        = false;
+        bridge.last_action      = ACTION_WAIT;
+        bridge.action_counts    = [0; ACTION_SIZE];
+        bridge.episode_reward   = 0.0;
+        bridge.bt_target_cluster  = None;
+        bridge.goap_cached_action = None;
+        bridge.goap_last_carried  = 0;
         restart.0 = false;
     }
 
@@ -253,7 +271,17 @@ pub fn step_sim(
         let action = match bridge.mode {
             PolicyMode::Onnx => {
                 if let Some(ref p) = bridge.policy {
-                    p.act(&bridge.sim.obs_buf)
+                    let act = p.act(&bridge.sim.obs_buf);
+                    if bridge.sim.tick % 100 == 0 {
+                        let agent = &bridge.sim.agents[0];
+                        debug!(
+                            "[ONNX] tick={} action={} carried={}/{} pos=({},{})",
+                            bridge.sim.tick, act,
+                            agent.gold_carried, atb::config::AGENT_MAX_GOLD,
+                            agent.pos.x, agent.pos.y,
+                        );
+                    }
+                    act
                 } else {
                     ACTION_WAIT
                 }
@@ -269,19 +297,60 @@ pub fn step_sim(
                 if bridge.sim.agents.is_empty() { ACTION_WAIT } else {
                     let agent = &bridge.sim.agents[0];
                     if agent.gold_carried >= AGENT_MAX_GOLD {
+                        bridge.bt_target_cluster = None;
+                        if bridge.sim.tick % 50 == 0 {
+                            debug!("[BT] tick={} full inventory → navigate_to_base", bridge.sim.tick);
+                        }
                         ACTION_NAVIGATE_TO_BASE
                     } else if agent.hearts <= 1
                         && bridge.sim.items.iter().any(|i| i.kind == ItemKind::Health)
                     {
+                        bridge.bt_target_cluster = None;
+                        debug!("[BT] tick={} low HP → navigate_to_health", bridge.sim.tick);
                         ACTION_NAVIGATE_TO_HEALTH
                     } else {
-                        bt_nearest_cluster(&bridge.sim)
+                        // Only reselect cluster when the committed slot becomes empty.
+                        // Prevents oscillation when two clusters are equidistant.
+                        let slot_valid = bridge.bt_target_cluster.map_or(false, |k| {
+                            use atb::engine::clusters::find_clusters;
+                            let golds: Vec<_> = bridge.sim.items.iter()
+                                .filter(|i| i.kind == ItemKind::Gold)
+                                .map(|i| i.pos)
+                                .collect();
+                            find_clusters(&golds).get(k as usize)
+                                .and_then(|c| c.as_ref())
+                                .is_some()
+                        });
+                        if !slot_valid {
+                            let new_k = bt_nearest_cluster(&bridge.sim);
+                            bridge.bt_target_cluster = if new_k != ACTION_WAIT { Some(new_k) } else { None };
+                            let agent = &bridge.sim.agents[0];
+                            debug!(
+                                "[BT] tick={} cluster → {:?}  pos=({},{})",
+                                bridge.sim.tick, bridge.bt_target_cluster,
+                                agent.pos.x, agent.pos.y,
+                            );
+                        }
+                        bridge.bt_target_cluster.unwrap_or(ACTION_WAIT)
                     }
                 }
             }
             PolicyMode::Goap => {
                 if bridge.sim.agents.is_empty() { ACTION_WAIT } else {
-                    goap_action(&bridge.sim)
+                    let carried = bridge.sim.agents[0].gold_carried;
+                    // Replan only when inventory changes (pickup or deposit).
+                    // Prevents the plan from flipping every tick as gold_nearby /
+                    // base_closer world-state bits toggle during navigation.
+                    if bridge.goap_cached_action.is_none() || carried != bridge.goap_last_carried {
+                        let new_act = goap_action(&bridge.sim);
+                        debug!(
+                            "[GOAP] tick={} replan: carried {} → {}  action={}",
+                            bridge.sim.tick, bridge.goap_last_carried, carried, new_act,
+                        );
+                        bridge.goap_cached_action = Some(new_act);
+                        bridge.goap_last_carried  = carried;
+                    }
+                    bridge.goap_cached_action.unwrap_or(ACTION_WAIT)
                 }
             }
         };

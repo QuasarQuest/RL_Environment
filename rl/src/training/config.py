@@ -50,10 +50,13 @@ class PpoConfig:
     vf_coef: float = MISSING
     max_grad_norm: float = MISSING
     target_kl: float = MISSING
-    # pi/vf head depth — override per ppo config to match stage complexity.
+    # pi/vf head depth — ONLY applied when algo=ppo / maskable_ppo.
     # Stages 1-3: [64]  (lean, fast convergence, low overfitting risk)
     # Stages 4-6: [128, 64]  (deeper for enemy/combat decisions)
-    # Ignored for recurrent_ppo (LSTM replaces the MLP head).
+    # NOTE: ignored for recurrent_ppo — train.py uses ATB_RECURRENT_POLICY_KWARGS
+    # which omits net_arch, so SB3-contrib's MlpLstmPolicy falls back to its own
+    # default post-LSTM heads. The default algo is recurrent_ppo, so these
+    # values have no effect unless you explicitly switch to ppo.
     net_arch_pi: list[int] = field(default_factory=lambda: [64])
     net_arch_vf: list[int] = field(default_factory=lambda: [64])
     # LSTM params — only used when algo=recurrent_ppo.

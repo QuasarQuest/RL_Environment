@@ -22,7 +22,11 @@
     // Light scatter only — corridors still plentiful, no walls or blocks.
     obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.10, max_wall_fraction: 0.10 ),
     obstacle_clusters: [
-        ( kind: Scatter, count: 15, size: (1, 1) ),
+        ( kind: Block,   count: 3, size: (4, 5) ),
+        ( kind: Block,   count: 6, size: (2, 3) ),
+        ( kind: Wall,    count: 5, size: (6, 2) ),
+        ( kind: Wall,    count: 15, size: (3, 1) ),
+        ( kind: Scatter, count: 45, size: (1, 1) ),
     ],
 
     // Gold + speed boost. Speed boost lets the agent learn to pick up

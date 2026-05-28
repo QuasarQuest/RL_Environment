@@ -122,13 +122,28 @@ pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
                 .collect();
             // Sort by centroid position (x primary, y secondary) so cluster IDs
             // represent stable spatial regions rather than transient gold-count rank.
-            clusters.sort_by(|a, b| {
-                let (ax, ay) = a.centroid();
-                let (bx, by) = b.centroid();
-                ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
-                    .then(ay.partial_cmp(&by).unwrap_or(std::cmp::Ordering::Equal))
-            });
+            // Centroid is computed once per cluster into a stack array, then an
+            // in-place insertion sort keeps both arrays in sync. Zero heap
+            // allocations and each centroid is computed exactly once (not once
+            // per comparator call as sort_by would do).
             clusters.truncate(CLUSTER_K);
+            let n = clusters.len();
+            let mut cen = [(0.0f32, 0.0f32); CLUSTER_K];
+            for i in 0..n { cen[i] = clusters[i].centroid(); }
+            for i in 1..n {
+                let mut j = i;
+                while j > 0 {
+                    let (ax, ay) = cen[j - 1];
+                    let (bx, by) = cen[j];
+                    if ax > bx || (ax == bx && ay > by) {
+                        clusters.swap(j - 1, j);
+                        cen.swap(j - 1, j);
+                        j -= 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
             for (i, c) in clusters.into_iter().enumerate() {
                 result[i] = Some(c);
             }

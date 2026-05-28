@@ -40,8 +40,6 @@
     safe_zone_fraction: 0.03,
 
     // ── Obstacles ─────────────────────────────────────────────────────────────
-    // Cluster-based layout — mirrors the old config.ron aesthetic.
-    // When obstacle_clusters is non-empty it takes priority over `obstacles`.
     obstacles: (
         density:            0.0,
         profile:            None,

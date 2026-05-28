@@ -326,8 +326,8 @@ def train(cfg: DictConfig) -> None:
             best_model_save_path=eval_best_path,
             log_path=str(run_dir / "eval_log"),
             eval_freq=max(t_cfg.eval_freq // max(e_cfg.n_envs, 1), 1),
-            # FIX: increased from 3 to 20 — with high episode variance
-            # (std ~9 in the previous run) 3 episodes give unreliable signal.
+            # Episode count comes from cfg (default 10) — 3 was too noisy
+            # given high episode variance (std ~9 in the first run).
             n_eval_episodes=t_cfg.eval_episodes,
             deterministic=True,
             render=False,

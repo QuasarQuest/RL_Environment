@@ -7,18 +7,20 @@ training loop.
 
 Algorithms
 ----------
-ppo          : Standard PPO — no action masking.
-maskable_ppo : PPO with per-step action masking (sb3-contrib).
-               Requires the env to expose an `action_masks()` method.
-               Use this for all stages — masks are stage-aware and fall back
-               to all-valid in stage 6, so there is no downside to always
-               using it.
+ppo           : Standard PPO — no action masking.
+maskable_ppo  : PPO with per-step action masking (sb3-contrib). Requires the
+                env to expose an `action_masks()` method. NOTE: stage-aware
+                masks were removed (commit 7b3028e) and factory.py no longer
+                wires action_masks, so this path is currently unused — kept
+                registered in case masking is reintroduced.
+recurrent_ppo : PPO + LSTM (sb3-contrib). This is the default algo (train.yaml).
 
 Policy choice
 -------------
-Both PPO variants use "MlpPolicy" here because our observation space is flat
-(9629,) and AtbCnnExtractor handles the CNN internally. SB3 routes "MlpPolicy"
-through the custom features_extractor_class in ATB_POLICY_KWARGS.
+ppo / maskable_ppo use "MlpPolicy"; recurrent_ppo uses "MlpLstmPolicy". In all
+cases the observation space is flat (9629,) and AtbCnnExtractor handles the CNN
+internally — SB3 routes the policy string through the custom
+features_extractor_class set in the policy_kwargs (see network/policy.py).
 
 Switching back to the legacy flat-vector pipeline:
   - policy.py:   ATB_POLICY_KWARGS = ATB_MLP_POLICY_KWARGS

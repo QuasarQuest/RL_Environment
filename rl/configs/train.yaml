@@ -15,10 +15,10 @@ train:
   total_timesteps: 1_500_000
   checkpoint_freq: 50_000
   eval_freq: 250_000
-  # FIX: increased from 3 to 20 — with high episode variance (std ~9 in
-  # the first run) 3 episodes give an unreliable signal. 20 episodes keep
-  # the eval overhead small (~4s per eval call) while producing a stable
-  # mean that reflects actual policy quality.
+  # Increased from 3 to 10 — with high episode variance (std ~9 in the first
+  # run) 3 episodes give an unreliable signal. 10 episodes keep the eval
+  # overhead small (~a few s per eval call) while producing a stable mean
+  # that reflects actual policy quality.
   eval_episodes: 10
   device: auto
 
