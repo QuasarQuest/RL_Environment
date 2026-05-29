@@ -27,13 +27,13 @@ Usage
 from __future__ import annotations
 
 import os
-import shutil
 import time
 from pathlib import Path
 
 import hydra
 import torch.nn as nn
 from dotenv import load_dotenv
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from rich.columns import Columns
 from rich.console import Console
@@ -90,7 +90,15 @@ def _print_arch(model) -> None:
 
     if hasattr(policy, "lstm_actor"):
         lstm = policy.lstm_actor
-        console.print(f"  [dim]lstm[/dim]             : hidden={lstm.hidden_size}  layers={lstm.num_layers}")
+        console.print(f"  [dim]lstm[/dim]            : hidden={lstm.hidden_size}  layers={lstm.num_layers}")
+        if hasattr(policy, "mlp_extractor"):
+            mlp = policy.mlp_extractor
+            pi_mid = _seq_str(mlp.policy_net)
+            vf_mid = _seq_str(mlp.value_net)
+            if pi_mid:
+                console.print(f"  [dim]pi_mlp[/dim]         : {pi_mid}")
+            if vf_mid:
+                console.print(f"  [dim]vf_mlp[/dim]         : {vf_mid}")
         if hasattr(policy, "action_net"):
             console.print(f"  [dim]pi[/dim]              : Linear(→{policy.action_net.out_features})")
         console.print(f"  [dim]vf[/dim]              : Linear(→1)")
@@ -119,7 +127,8 @@ def _sync_vecnorm_stats(
     """
     if src is None or dst is None:
         return
-    dst.obs_rms = src.obs_rms
+    if src.norm_obs:
+        dst.obs_rms = src.obs_rms
     dst.ret_rms = src.ret_rms
 
 
@@ -153,27 +162,9 @@ load_dotenv()
 console = Console()
 
 _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
-_WORKSPACE_ROOT = _RL_ROOT.parent                         # algorithm_test_bed/
+_WORKSPACE_ROOT = _RL_ROOT.parent  # algorithm_test_bed/
 
 os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
-
-
-def _resolve_dirs(cfg: TrainConfig, run_tag: str) -> tuple[Path, Path]:
-    """Create and return (run_dir, ckpt_dir) for this run.
-
-    Layout inside run_dir:
-        checkpoints/   — step_N and best_rolling snapshots
-        eval_best/     — best model from EvalCallback (created by SB3)
-        tensorboard/   — TensorBoard event files (created by SB3)
-        stats.h5       — per-episode HDF5 stats
-        eval_log/      — EvalCallback's evaluations.npz (created by SB3)
-        final.zip      — model at end of training
-        policy.onnx    — ONNX export of eval-best policy
-    """
-    run_dir = _WORKSPACE_ROOT / cfg.output_dir / run_tag
-    ckpt_dir = run_dir / "checkpoints"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir, ckpt_dir
 
 
 register_configs()
@@ -187,8 +178,10 @@ def train(cfg: DictConfig) -> None:
     e_cfg = EnvConfig(**raw["env"])
 
     algo_spec = get_algo(t_cfg.algo)
-    run_tag = f"{t_cfg.run_name}_s{e_cfg.stage}_{int(time.time())}"
-    run_dir, ckpt_dir = _resolve_dirs(t_cfg, run_tag)
+    run_dir  = Path(HydraConfig.get().runtime.output_dir)
+    ckpt_dir = run_dir / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    run_tag  = run_dir.name
     _dev = get_device(t_cfg.device)
     if _dev.type == "cuda" and _dev.index is None:
         import torch
@@ -219,8 +212,6 @@ def train(cfg: DictConfig) -> None:
         kv_table("env", [
             ("config", Path(e_cfg.config_path).name),
             ("norm_reward", "✓" if e_cfg.normalize_reward else "✗"),
-            ("clip_reward", "✓" if e_cfg.clip_reward else "✗"),
-            ("clip_max", str(e_cfg.clip_reward_max)),
             ("max_steps", str(e_cfg.max_episode_steps or "—")),
         ]),
     ], equal=False, expand=False))
@@ -258,7 +249,8 @@ def train(cfg: DictConfig) -> None:
             # creating a new wrapper around it (which would double-normalize obs).
             # The model's env reference to vec_normalize remains valid.
             _loaded_vn = VecNormalize.load(str(vn_path), vec_normalize.venv)
-            vec_normalize.obs_rms = _loaded_vn.obs_rms
+            if _loaded_vn.norm_obs:
+                vec_normalize.obs_rms = _loaded_vn.obs_rms
             vec_normalize.ret_rms = _loaded_vn.ret_rms
             console.print(f"  vecnorm  ← {vn_path}")
         elif vec_normalize is not None:
@@ -272,6 +264,7 @@ def train(cfg: DictConfig) -> None:
                 **ATB_RECURRENT_POLICY_KWARGS,
                 "lstm_hidden_size": p_cfg.lstm_hidden_size,
                 "n_lstm_layers": p_cfg.n_lstm_layers,
+                "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
             }
         else:
             policy_kwargs = {
@@ -310,6 +303,7 @@ def train(cfg: DictConfig) -> None:
             save_freq=t_cfg.checkpoint_freq,
             ckpt_dir=ckpt_dir,
             vec_normalize=vec_normalize,
+            onnx_export=True,
         ),
         EpisodeStatsCallback(stats_path=run_dir / "stats.h5"),
         RichLogCallback(console),
@@ -331,9 +325,9 @@ def train(cfg: DictConfig) -> None:
             n_eval_episodes=t_cfg.eval_episodes,
             deterministic=True,
             render=False,
+            verbose=0,
             vec_normalize=vec_normalize,
-            onnx_path=run_dir / "policy.onnx",
-            viewer_onnx_path=_WORKSPACE_ROOT / "assets" / "model" / "policy.onnx",
+            onnx_path=run_dir / "models" / "eval_best" / "policy.onnx",
         ),
     ]
 
@@ -368,25 +362,30 @@ def train(cfg: DictConfig) -> None:
     console.print(f"  stats  → {run_dir / 'stats.h5'}")
     console.print(f"  tb     → tensorboard --logdir {run_dir / 'tensorboard'}")
 
-    onnx_path    = run_dir / "policy.onnx"
-    eval_best_zip = Path(eval_best_path) / "best_model.zip"
-    if eval_best_zip.exists():
-        export_src    = Path(eval_best_path) / "best_model"
-        export_vn     = Path(eval_best_path + "_vecnorm.pkl")
-        export_label  = "eval best"
+    # Export the best available policy to models/eval_best/policy.onnx.
+    # The eval callback already writes this on every new best during training;
+    # this is a fallback for when training ended before the first eval ran.
+    onnx_path = run_dir / "models" / "eval_best" / "policy.onnx"
+    if not onnx_path.exists():
+        eval_best_zip = Path(eval_best_path) / "best_model.zip"
+        if eval_best_zip.exists():
+            export_src = Path(eval_best_path) / "best_model"
+            export_vn = Path(eval_best_path + "_vecnorm.pkl")
+            export_label = "eval best"
+        else:
+            export_src = final
+            export_vn = Path(str(final) + "_vecnorm.pkl")
+            export_label = "final (no eval-best yet)"
+        try:
+            best_policy = algo_spec.cls.load(str(export_src)).policy
+            onnx_path.parent.mkdir(parents=True, exist_ok=True)
+            export_to_onnx(best_policy, onnx_path,
+                           vecnorm_path=export_vn if export_vn.exists() else None)
+            console.print(f"  policy → {onnx_path}  ({export_label})")
+        except Exception as exc:
+            console.print(f"  [yellow]ONNX export failed: {exc}[/yellow]")
     else:
-        export_src    = final
-        export_vn     = Path(str(final) + "_vecnorm.pkl")
-        export_label  = "final (no eval-best yet)"
-    try:
-        best_policy = algo_spec.cls.load(str(export_src)).policy
-        export_to_onnx(best_policy, onnx_path, vecnorm_path=export_vn if export_vn.exists() else None)
-        console.print(f"  policy → {onnx_path}  ({export_label})")
-        viewer_path = _WORKSPACE_ROOT / "assets" / "model" / "policy.onnx"
-        shutil.copy2(onnx_path, viewer_path)
-        console.print(f"  viewer → {viewer_path}  (copied)")
-    except Exception as exc:
-        console.print(f"  [yellow]ONNX export failed: {exc}[/yellow]")
+        console.print(f"  policy → {onnx_path}  (written by eval callback)")
 
 
 if __name__ == "__main__":

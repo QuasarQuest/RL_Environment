@@ -1,13 +1,24 @@
 use bevy::prelude::*;
-use atb::rl::action::ACTION_SIZE;
+use atb::rl::action::{int_to_rl_action, RlAction};
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
+use crate::style::color::{CYAN_400, LIME_400, VIOLET_400, AMBER_400, ORANGE_400, RED_500, BLUE_500, GRAY_400};
 
-const ACTION_NAMES: [&str; ACTION_SIZE] = [
-    "Nav Cluster 0", "Nav Cluster 1", "Nav Cluster 2", "Nav Cluster 3",
-    "Nav Base", "Nav Health", "Nav Ammo", "Nav Enemy",
-    "Melee Atk", "Ranged Atk", "Wait",
-];
+fn action_color(action: RlAction) -> Color {
+    match action {
+        RlAction::NavigateToCluster(0) => CYAN_400,
+        RlAction::NavigateToCluster(1) => LIME_400,
+        RlAction::NavigateToCluster(2) => VIOLET_400,
+        RlAction::NavigateToCluster(_) => AMBER_400,
+        RlAction::NavigateToBase       => ORANGE_400,
+        RlAction::NavigateToHealth     => RED_500,
+        RlAction::NavigateToAmmo       => BLUE_500,
+        RlAction::NavigateToEnemy      => RED_500,
+        RlAction::MeleeAttack          => RED_500,
+        RlAction::RangedAttack         => AMBER_400,
+        RlAction::Wait                 => GRAY_400,
+    }
+}
 
 #[derive(Component)] pub struct DebugOverlay;
 #[derive(Component)] pub struct DebugLastAction;
@@ -86,21 +97,26 @@ pub fn toggle_debug_overlay(
 }
 
 pub fn update_debug_overlay(
-    bridge:      Res<SimBridge>,
-    mut action_q: Query<&mut Text, (With<DebugLastAction>, Without<DebugReward>, Without<DebugDist>)>,
+    bridge:       Res<SimBridge>,
+    mut action_q: Query<
+        (&mut Text, &mut TextColor),
+        (With<DebugLastAction>, Without<DebugReward>, Without<DebugDist>),
+    >,
     mut reward_q: Query<&mut Text, (With<DebugReward>, Without<DebugLastAction>, Without<DebugDist>)>,
     mut dist_q:   Query<&mut Text, (With<DebugDist>, Without<DebugLastAction>, Without<DebugReward>)>,
 ) {
     if !bridge.is_changed() { return; }
 
-    // Last action name.
-    let action_name = ACTION_NAMES.get(bridge.last_action as usize).copied().unwrap_or("?");
-    for mut t in action_q.iter_mut() { *t = Text::new(action_name); }
+    let action     = int_to_rl_action(bridge.last_action);
+    let action_col = action_color(action);
 
-    // Cumulative episode reward.
+    for (mut t, mut tc) in action_q.iter_mut() {
+        *t  = Text::new(action.to_string());
+        *tc = TextColor(action_col);
+    }
+
     for mut t in reward_q.iter_mut() { *t = Text::new(format!("{:.3}", bridge.episode_reward)); }
 
-    // Action distribution: top 5 by count.
     let total: u32 = bridge.action_counts.iter().sum();
     if total == 0 { return; }
 
@@ -115,8 +131,9 @@ pub fn update_debug_overlay(
     let lines: String = ranked.iter()
         .take(5)
         .map(|&(idx, count)| {
-            let pct = 100.0 * count as f32 / total as f32;
-            format!("{:<8} {:5.1}%  ({})", ACTION_NAMES[idx], pct, count)
+            let name = int_to_rl_action(idx as u32).to_string();
+            let pct  = 100.0 * count as f32 / total as f32;
+            format!("{name:<14} {pct:5.1}%  ({count})")
         })
         .collect::<Vec<_>>()
         .join("\n");

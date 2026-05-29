@@ -76,14 +76,14 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
 
 OBS_CHANNELS = 17
-OBS_CROP_H   = 25
-OBS_CROP_W   = 25
+OBS_CROP_H = 25
+OBS_CROP_W = 25
 OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 10625
 
 MM_CHANNELS = 3
-MM_H        = 17
-MM_W        = 17
-MM_DIM      = MM_CHANNELS * MM_H * MM_W  # 867
+MM_H = 17
+MM_W = 17
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 867
 
 CLUSTER_FEATURES = 12  # 4 clusters × 3 floats
 
@@ -104,8 +104,8 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
         obs_dim = observation_space.shape[0]
         self.net = nn.Sequential(
             nn.Linear(obs_dim, 256), nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, 256),     nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, features_dim),               nn.ReLU(),
+            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(),
+            nn.Linear(256, features_dim), nn.ReLU(),
         )
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
@@ -145,10 +145,10 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
         # 4 convs: 25×25 → 25×25 → 25×25 → 13×13 → 7×7
         # flat output: 64 × 7 × 7 = 3136
         self.crop_cnn = nn.Sequential(
-            nn.Conv2d(OBS_CHANNELS, 32, kernel_size=3, padding=1),           nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),                     nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),           nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),           nn.ReLU(),
+            nn.Conv2d(OBS_CHANNELS, 32, kernel_size=3, padding=1), nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1), nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1), nn.ReLU(),
             nn.Flatten(),
         )
         with torch.no_grad():
@@ -166,7 +166,7 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
         # stride=2 on 2nd conv: 17×17 → 17×17 → 8×8, flat = 32×8×8 = 2048
         self.mm_cnn = nn.Sequential(
             nn.Conv2d(MM_CHANNELS, 16, kernel_size=3, padding=1), nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2),            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2), nn.ReLU(),
             nn.Flatten(),
         )
         with torch.no_grad():
@@ -191,11 +191,11 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         crop = obs[:, :OBS_CROP_DIM].reshape(-1, OBS_CHANNELS, OBS_CROP_H, OBS_CROP_W)
-        mm   = obs[:, OBS_CROP_DIM:OBS_CROP_DIM + MM_DIM].reshape(-1, MM_CHANNELS, MM_H, MM_W)
-        cl   = obs[:, OBS_CROP_DIM + MM_DIM:]
+        mm = obs[:, OBS_CROP_DIM:OBS_CROP_DIM + MM_DIM].reshape(-1, MM_CHANNELS, MM_H, MM_W)
+        cl = obs[:, OBS_CROP_DIM + MM_DIM:]
 
         crop_feat = self.crop_head(self.crop_cnn(crop))
-        mm_feat   = self.mm_head(self.mm_cnn(mm))
-        cl_feat   = self.cluster_head(cl)
+        mm_feat = self.mm_head(self.mm_cnn(mm))
+        cl_feat = self.cluster_head(cl)
 
         return self.fusion(torch.cat([crop_feat, mm_feat, cl_feat], dim=1))

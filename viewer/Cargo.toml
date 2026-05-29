@@ -8,6 +8,7 @@ name = "atb-view"
 path = "src/main.rs"
 
 [dependencies]
-atb        = { path = "../sim", package = "algorithm_test_bed" }
-bevy       = "0.18"
-tract-onnx = "0.22"
+atb         = { path = "../sim", package = "algorithm_test_bed" }
+bevy        = "0.18"
+tract-onnx  = "0.22"
+serde_json  = "1"

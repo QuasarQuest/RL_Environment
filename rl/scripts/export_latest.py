@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Export the best model from the latest run to ONNX and copy it to the viewer.
+"""Export the best model from the latest run to models/eval_best/policy.onnx.
+
+If the eval callback already wrote models/eval_best/policy.onnx during training,
+this script just reports the path. Otherwise it loads the best available checkpoint
+and generates the file.
 
 Usage
 -----
@@ -10,15 +14,13 @@ Usage
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
-SCRIPT_DIR   = Path(__file__).resolve().parent
-RL_DIR       = SCRIPT_DIR.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+RL_DIR = SCRIPT_DIR.parent
 PROJECT_ROOT = RL_DIR.parent
-RUNS_DIR     = PROJECT_ROOT / "runs"
-VIEWER_ONNX  = PROJECT_ROOT / "assets" / "model" / "policy.onnx"
+RUNS_DIR = PROJECT_ROOT / "runs"
 
 sys.path.insert(0, str(RL_DIR / "src"))
 
@@ -57,40 +59,41 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stage", type=int, default=1)
-    parser.add_argument("--name",  default="seq")
+    parser.add_argument("--name", default="seq")
     args = parser.parse_args()
 
     run_dir = find_latest_run(args.stage, args.name)
-    ckpt    = best_checkpoint(run_dir)
-    # eval_best saves vecnorm as a sibling of the directory (eval_best_vecnorm.pkl),
-    # not inside it (eval_best/best_model_vecnorm.pkl).
+    onnx_out = run_dir / "models" / "eval_best" / "policy.onnx"
+
+    print(f"Run : {run_dir.name}")
+
+    # If the eval callback already wrote it during training, nothing to do.
+    if onnx_out.exists():
+        print(f"ONNX: {onnx_out}  (already present)")
+        return
+
+    # Otherwise generate from the best available checkpoint.
+    ckpt = best_checkpoint(run_dir)
     if ckpt.name == "best_model":
         vn_path = Path(str(ckpt.parent) + "_vecnorm.pkl")
     else:
         vn_path = Path(str(ckpt) + "_vecnorm.pkl")
 
-    print(f"Run       : {run_dir.name}")
     print(f"Checkpoint: {ckpt}")
 
-    from network.export import export_to_onnx
+    from network.export import export_to_onnx  # noqa: PLC0415
 
     try:
         from sb3_contrib import RecurrentPPO
         model = RecurrentPPO.load(str(ckpt))
     except (ImportError, ValueError, RuntimeError, KeyError, TypeError):
-        # Not a recurrent checkpoint (or sb3-contrib missing) — load as plain PPO.
         from stable_baselines3 import PPO
         model = PPO.load(str(ckpt))
 
-    onnx_out = run_dir / "policy.onnx"
-    vecnorm  = vn_path if vn_path and vn_path.exists() else None
+    vecnorm = vn_path if vn_path and vn_path.exists() else None
+    onnx_out.parent.mkdir(parents=True, exist_ok=True)
     export_to_onnx(model.policy, onnx_out, vecnorm_path=vecnorm)
-
-    VIEWER_ONNX.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(onnx_out, VIEWER_ONNX)
-
-    print(f"Exported  : {onnx_out}")
-    print(f"Viewer    : {VIEWER_ONNX}")
+    print(f"Exported: {onnx_out}")
 
 
 if __name__ == "__main__":

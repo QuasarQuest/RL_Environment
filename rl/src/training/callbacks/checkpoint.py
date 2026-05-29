@@ -1,6 +1,7 @@
 """Periodic and rolling-best model checkpointing."""
 from __future__ import annotations
 
+import copy
 from collections import deque
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,11 @@ class CheckpointCallback(BaseCallback):
     than `n_calls` (number of _on_step invocations). With n_envs=48 one
     _on_step call = 48 steps, so an n_calls check would fire ~48x too often
     relative to the configured timestep budget.
+
+    When onnx_export=True a policy.onnx is written to
+    `{run_dir}/models/step_{N}/` alongside every periodic checkpoint so
+    checkpoints are immediately usable in the viewer without a separate
+    export step.
     """
 
     def __init__(
@@ -30,11 +36,14 @@ class CheckpointCallback(BaseCallback):
             vec_normalize: Optional[VecNormalize] = None,
             rolling_window: int = 100,
             verbose: int = 1,
+            onnx_export: bool = False,
     ) -> None:
         super().__init__(verbose)
         self.save_freq = save_freq
         self.ckpt_dir = Path(ckpt_dir)
         self.vec_normalize = vec_normalize
+        self._onnx_export = onnx_export
+        self._models_dir = self.ckpt_dir.parent / "models"
         self._recent_rewards: deque[float] = deque(maxlen=rolling_window)
         self._best_mean: float = -float("inf")
         self._last_save_step: int = 0
@@ -42,7 +51,10 @@ class CheckpointCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.num_timesteps - self._last_save_step >= self.save_freq:
-            self._save(f"step_{self.num_timesteps}")
+            tag = f"step_{self.num_timesteps}"
+            self._save(tag)
+            if self._onnx_export:
+                self._try_export_onnx(tag)
             self._last_save_step = self.num_timesteps
 
         for info in self.locals.get("infos", []):
@@ -67,3 +79,14 @@ class CheckpointCallback(BaseCallback):
         self.model.save(str(path))
         if self.vec_normalize is not None:
             self.vec_normalize.save(str(path) + "_vecnorm.pkl")
+
+    def _try_export_onnx(self, tag: str) -> None:
+        from network.export import export_to_onnx  # noqa: PLC0415
+
+        out_dir = self._models_dir / tag
+        out_dir.mkdir(parents=True, exist_ok=True)
+        onnx_path = out_dir / "policy.onnx"
+        try:
+            export_to_onnx(copy.deepcopy(self.model.policy), onnx_path, vecnorm_path=None)
+        except Exception as exc:
+            print(f"  [ONNX export skipped: {exc}]")

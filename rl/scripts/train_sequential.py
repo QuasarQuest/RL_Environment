@@ -30,7 +30,12 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -42,13 +47,47 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 # ── Per-stage timesteps (override all with --timesteps) ───────────────────────
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
-    1: 1_500_000,
-    2: 1_500_000,
-    3: 1_500_000,
-    4: 2_000_000,
-    5: 2_500_000,
-    6: 2_500_000,
+    1: 2_000_000,
+    2: 2_500_000,
+    3: 2_500_000,
+    4: 3_000_000,
+    5: 3_500_000,
+    6: 4_000_000,
 }
+
+PLOT_SCRIPT = SCRIPT_DIR / "plot_runs.py"
+
+console = Console()
+
+
+def plot_single_stage(run_dir: Path) -> None:
+    """Generate the individual plots for one stage's run directory."""
+    if not PLOT_SCRIPT.exists():
+        return
+    console.print(f"\n  [dim]plotting  {run_dir.name}/plots/[/dim]")
+    subprocess.run([sys.executable, str(PLOT_SCRIPT),
+                    "--dirs", str(run_dir), "--no-show"])
+
+
+def plot_curriculum(run_name: str) -> None:
+    """Generate the combined cross-stage plots for the whole run series."""
+    if not PLOT_SCRIPT.exists():
+        return
+    console.print()
+    console.rule(f"[bold]Curriculum plots[/bold]  [dim]prefix: {run_name}[/dim]")
+    console.print()
+    subprocess.run([sys.executable, str(PLOT_SCRIPT),
+                    "--prefix", run_name, "--no-show"])
+
+
+def _fmt_dur(seconds: float) -> str:
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
 
 
 def find_latest_run(stage: int, run_name: str) -> Path | None:
@@ -70,8 +109,8 @@ def run_stage(
         run_name: str,
         timesteps: int,
         resume: Path | None,
-) -> Path:
-    """Invoke atb-train for *stage* and return the new run directory."""
+) -> tuple[Path, float]:
+    """Invoke atb-train for *stage* and return (run_dir, elapsed_seconds)."""
     cmd = [
         "atb-train",
         f"env=stage{stage}",
@@ -89,24 +128,38 @@ def run_stage(
         # Hydra requires + prefix for keys not in the YAML defaults.
         cmd.append(f"+train.resume={resume}")
 
-    print(f"\n{'=' * 60}")
-    print(f"  Stage {stage}  —  {timesteps:,} steps")
+    console.print()
+    console.rule(f"[bold cyan]Stage {stage}[/bold cyan]  [dim]{timesteps:,} steps[/dim]")
     if resume:
-        print(f"  resume : {resume}")
-    print(f"{'=' * 60}\n")
-    print("CMD:", " ".join(cmd), "\n")
+        console.print(f"  [dim]resume[/dim]  {resume}")
+    console.print(f"  [dim]cmd[/dim]     {cmd[0]}")
+    for arg in cmd[1:]:
+        console.print(f"          {arg}")
+    console.print()
 
+    t0 = time.time()
     result = subprocess.run(cmd, cwd=RL_DIR)
+    elapsed = time.time() - t0
+
     if result.returncode != 0:
-        print(f"\n[ERROR] Stage {stage} failed (exit {result.returncode}). Stopping.")
+        console.print()
+        console.print(
+            f"  [bold red]✗ Stage {stage} failed[/bold red]"
+            f"  exit {result.returncode}  ·  {_fmt_dur(elapsed)}"
+        )
         sys.exit(result.returncode)
 
     run_dir = find_latest_run(stage, run_name)
     if run_dir is None:
-        print(f"[ERROR] Could not find run directory for stage {stage} after training.")
+        console.print(f"  [bold red]✗ Run directory not found for stage {stage}[/bold red]")
         sys.exit(1)
 
-    return run_dir
+    console.print()
+    console.print(
+        f"  [bold green]✓ Stage {stage} complete[/bold green]"
+        f"  [dim]{_fmt_dur(elapsed)}[/dim]  [dim]→[/dim]  {run_dir.name}"
+    )
+    return run_dir, elapsed
 
 
 def main() -> None:
@@ -131,24 +184,46 @@ def main() -> None:
     if prev_dir is None and stages[0] > 1:
         prev_dir = find_latest_run(stages[0] - 1, run_name)
         if prev_dir:
-            print(f"[auto] Using {prev_dir} as resume for stage {stages[0]}")
+            console.print(f"  [dim]auto-resume  stage {stages[0] - 1} → {prev_dir.name}[/dim]")
+
+    console.rule(f"[bold green]Sequential Training — {run_name}[/bold green]  [dim]stages {stages}[/dim]")
+    console.print()
+
+    results: list[tuple[int, str, float]] = []
+    t_total = time.time()
 
     for stage in stages:
         ts = args.timesteps if args.timesteps else DEFAULT_TIMESTEPS[stage]
-        resume = eval_best_path(prev_dir) if prev_dir else None
-        prev_dir = run_stage(stage, run_name, ts, resume)
+        resume = eval_best_path(prev_dir) if prev_dir is not None else None
+        # run_stage always returns a concrete Path; keep it in its own variable
+        # so the type stays Path (not Path | None) for .name and plotting below.
+        run_dir, elapsed = run_stage(stage, run_name, ts, resume)
+        results.append((stage, run_dir.name, elapsed))
 
-    print(f"\n{'=' * 60}")
-    print("  All stages complete.")
-    print(f"{'=' * 60}")
+        # Individual plots after every stage (including the first) so progress
+        # is visible mid-run without waiting for the whole curriculum.
+        if not args.no_plot:
+            plot_single_stage(run_dir)
 
+        prev_dir = run_dir  # hot-start the next stage from this run's eval_best
+
+    total_elapsed = time.time() - t_total
+
+    # Summary table
+    console.print()
+    table = Table(title="Training Summary", box=box.SIMPLE, title_style="bold green", padding=(0, 1))
+    table.add_column("Stage", justify="right", style="bold cyan", no_wrap=True)
+    table.add_column("Run directory", style="dim")
+    table.add_column("Duration", justify="right", no_wrap=True)
+    for s, name, dur in results:
+        table.add_row(str(s), name, _fmt_dur(dur))
+    table.add_section()
+    table.add_row("", "[bold]total[/bold]", f"[bold]{_fmt_dur(total_elapsed)}[/bold]")
+    console.print(table)
+
+    # Combined cross-stage plots once all stages are done.
     if not args.no_plot:
-        plot_script = SCRIPT_DIR / "plot_runs.py"
-        if plot_script.exists():
-            print(f"\nRunning analysis: {plot_script} --prefix {run_name}\n")
-            subprocess.run([sys.executable, str(plot_script), "--prefix", run_name, "--no-show"])
-        else:
-            print("plot_runs.py not found — skipping analysis.")
+        plot_curriculum(run_name)
 
 
 if __name__ == "__main__":

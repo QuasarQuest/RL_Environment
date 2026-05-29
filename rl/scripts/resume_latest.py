@@ -32,10 +32,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT_DIR   = Path(__file__).resolve().parent
-RL_DIR       = SCRIPT_DIR.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+RL_DIR = SCRIPT_DIR.parent
 PROJECT_ROOT = RL_DIR.parent
-RUNS_DIR     = PROJECT_ROOT / "runs"
+RUNS_DIR = PROJECT_ROOT / "runs"
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
     1: 1_000_000,
@@ -78,7 +78,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--stage", type=int, default=1, help="Stage to resume (default: 1)")
-    parser.add_argument("--name",  default="seq",       help="Run-name prefix (default: seq)")
+    parser.add_argument("--name", default="seq", help="Run-name prefix (default: seq)")
     parser.add_argument("--timesteps", type=int, default=None,
                         help="Override total_timesteps (default: per-stage value)")
     parser.add_argument("--dry-run", action="store_true",

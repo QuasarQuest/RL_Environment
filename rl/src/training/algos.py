@@ -38,6 +38,7 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 
 try:
     from sb3_contrib import MaskablePPO
+
     _MASKABLE_AVAILABLE = True
 except ImportError:
     _MASKABLE_AVAILABLE = False
@@ -45,6 +46,7 @@ except ImportError:
 
 try:
     from sb3_contrib import RecurrentPPO
+
     _RECURRENT_AVAILABLE = True
 except ImportError:
     _RECURRENT_AVAILABLE = False
@@ -60,17 +62,17 @@ class SB3AlgoConstructor(Protocol):
     """Structural type for any SB3 on- or off-policy algorithm constructor."""
 
     def __call__(
-        self,
-        policy: str | type,
-        env: GymEnv,
-        *,
-        learning_rate: float | Schedule = 3e-4,
-        policy_kwargs: dict[str, Any] | None = None,
-        tensorboard_log: str | None = None,
-        verbose: int = 0,
-        seed: int | None = None,
-        device: th.device | str = "auto",
-        **kwargs: Any,
+            self,
+            policy: str | type,
+            env: GymEnv,
+            *,
+            learning_rate: float | Schedule = 3e-4,
+            policy_kwargs: dict[str, Any] | None = None,
+            tensorboard_log: str | None = None,
+            verbose: int = 0,
+            seed: int | None = None,
+            device: th.device | str = "auto",
+            **kwargs: Any,
     ) -> BaseAlgorithm: ...
 
 
@@ -78,10 +80,10 @@ class SB3AlgoConstructor(Protocol):
 class AlgoSpec:
     """Static description of an RL algorithm."""
 
-    name:                str
-    cls:                 Type[BaseAlgorithm]
-    policy:              str
-    supports_discrete:   bool
+    name: str
+    cls: Type[BaseAlgorithm]
+    policy: str
+    supports_discrete: bool
     supports_continuous: bool
 
     @property
@@ -96,10 +98,11 @@ class AlgoSpec:
 PPO_SPEC = AlgoSpec(
     name="ppo",
     cls=PPO,
-    policy="MlpPolicy",   # flat obs → AtbCnnExtractor handles CNN internally
+    policy="MlpPolicy",  # flat obs → AtbCnnExtractor handles CNN internally
     supports_discrete=True,
     supports_continuous=True,
 )
+
 
 # ---------------------------------------------------------------------------
 # MaskablePPO — action masking via sb3-contrib.
@@ -128,7 +131,7 @@ def _make_recurrent_spec() -> AlgoSpec:
     return AlgoSpec(
         name="recurrent_ppo",
         cls=RecurrentPPO,
-        policy="MlpLstmPolicy",   # flat obs + LSTM; custom extractor injected via policy_kwargs
+        policy="MlpLstmPolicy",  # flat obs + LSTM; custom extractor injected via policy_kwargs
         supports_discrete=True,
         supports_continuous=False,
     )
@@ -136,7 +139,7 @@ def _make_recurrent_spec() -> AlgoSpec:
 
 ALGOS: dict[str, AlgoSpec] = {
     "ppo": PPO_SPEC,
-    **({"maskable_ppo":  _make_maskable_spec()}  if _MASKABLE_AVAILABLE else {}),
+    **({"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {}),
     **({"recurrent_ppo": _make_recurrent_spec()} if _RECURRENT_AVAILABLE else {}),
 }
 

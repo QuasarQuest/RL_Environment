@@ -26,16 +26,19 @@ impl Default for LoadMenuState {
     }
 }
 
+const WORLD_DIR:     &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/world");
+const DEPLOYED_ONNX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/model/policy.onnx");
+const RUNS_DIR:      &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../runs");
+
 fn scan_configs() -> Vec<(String, String)> {
     let mut entries = vec![];
 
-    // Always list default.ron first so users can return to the viewer default.
-    let default_ron = "assets/world/default.ron";
-    if std::path::Path::new(default_ron).exists() {
-        entries.push(("Default".to_string(), default_ron.to_string()));
+    let default_ron = format!("{WORLD_DIR}/default.ron");
+    if std::path::Path::new(&default_ron).exists() {
+        entries.push(("Default".to_string(), default_ron));
     }
 
-    let Ok(dir) = std::fs::read_dir("assets/world") else { return entries; };
+    let Ok(dir) = std::fs::read_dir(WORLD_DIR) else { return entries; };
     let mut paths: Vec<_> = dir.flatten()
         .map(|e| e.path())
         .filter(|p| {
@@ -59,21 +62,22 @@ fn scan_configs() -> Vec<(String, String)> {
 fn scan_policies() -> Vec<(String, String)> {
     let mut entries = vec![("None  (BT fallback)".to_string(), String::new())];
 
-    // Include the deployed policy so users can switch back to it after selecting a run.
-    let deployed = "assets/model/policy.onnx";
-    if std::path::Path::new(deployed).exists() {
-        entries.push(("Default (assets/model)".to_string(), deployed.to_string()));
+    if std::path::Path::new(DEPLOYED_ONNX).exists() {
+        entries.push(("Default (assets/model)".to_string(), DEPLOYED_ONNX.to_string()));
     }
 
-    let Ok(dir) = std::fs::read_dir("runs") else { return entries; };
+    let Ok(dir) = std::fs::read_dir(RUNS_DIR) else { return entries; };
     let mut paths: Vec<_> = dir.flatten()
-        .filter(|e| e.path().is_dir() && e.path().join("policy.onnx").exists())
+        .filter(|e| {
+            let p = e.path();
+            p.is_dir() && p.join("models/eval_best/policy.onnx").exists()
+        })
         .map(|e| e.path())
         .collect();
     paths.sort();
     for path in paths {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string();
-        let policy_path = path.join("policy.onnx").to_string_lossy().into_owned();
+        let policy_path = path.join("models/eval_best/policy.onnx").to_string_lossy().into_owned();
         entries.push((name, policy_path));
     }
     entries

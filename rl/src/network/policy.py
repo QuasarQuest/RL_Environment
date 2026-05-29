@@ -36,7 +36,7 @@ ATB_MLP_POLICY_KWARGS = dict(
 ATB_CNN_POLICY_KWARGS = dict(
     features_extractor_class=AtbCnnExtractor,
     features_extractor_kwargs=dict(features_dim=256),
-    net_arch=dict(pi=[64], vf=[64]),   # slim: was [128, 64] — LSTM replaces depth
+    net_arch=dict(pi=[64], vf=[64]),  # slim: was [128, 64] — LSTM replaces depth
     normalize_images=False,
 )
 

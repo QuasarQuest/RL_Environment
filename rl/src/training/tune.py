@@ -181,9 +181,6 @@ def tune(
         stage=stage,
         n_envs=n_envs,
         seed=42,
-        clip_reward=True,
-        clip_reward_max=10.0,
-        reward_scale=1.0,
         normalize_obs=True,
         normalize_reward=True,
     )

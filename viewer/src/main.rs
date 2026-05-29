@@ -14,6 +14,7 @@ const ONNX_POLICY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/m
 
 fn main() {
     App::new()
+        .insert_resource(ClearColor(Color::srgb(0.03, 0.04, 0.07)))
         .add_plugins(DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {

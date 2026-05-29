@@ -15,23 +15,17 @@ train:
   total_timesteps: 1_500_000
   checkpoint_freq: 50_000
   eval_freq: 250_000
-  # Increased from 3 to 10 — with high episode variance (std ~9 in the first
-  # run) 3 episodes give an unreliable signal. 10 episodes keep the eval
-  # overhead small (~a few s per eval call) while producing a stable mean
-  # that reflects actual policy quality.
   eval_episodes: 10
   device: auto
-
-  # Root output dir (relative to project root). Each run gets its own subfolder:
-  #   runs/<run_tag>/checkpoints/, eval_best/, tensorboard/, stats.h5, policy.onnx
-  output_dir: runs
 
 hydra:
   job:
     env_set:
       PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True,max_split_size_mb:128,garbage_collection_threshold:0.7,roundup_power2_divisions:16"
   run:
-    dir: ../runs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    # Run dir IS the training output dir — Hydra's .hydra/ config snapshot
+    # lands here alongside checkpoints/, tensorboard/, eval_best/, etc.
+    dir: ../runs/${train.run_name}_s${env.stage}_${now:%s}
   sweep:
-    dir: ../runs/outputs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ../runs/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}

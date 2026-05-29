@@ -41,8 +41,9 @@ class _RichWriter(KVWriter):
         fps = int(kv.get("time/fps", 0))
         elapsed = int(kv.get("time/time_elapsed", 0))
 
-        # elapsed == 0 means this dump came from EvalCallback, not the main
-        # training loop. Skip to avoid duplicating eval metrics in the table.
+        # Skip dumps that carry no useful stats:
+        # - elapsed == 0 and itr == 0 → eval-callback dump, not the main training loop
+        # - train_rows empty (checked below) → partial dump before first rollout completes
         if elapsed == 0 and itr == 0:
             return
 
@@ -72,14 +73,17 @@ class _RichWriter(KVWriter):
             ("fps", f"{fps:,}"),
             ("elapsed", f"{elapsed}s"),
         ]
-        game_rows = [(lbl, _fmt(kv[key])) for lbl, key in game_keys if key in kv]
+        game_rows  = [(lbl, _fmt(kv[key])) for lbl, key in game_keys  if key in kv]
         train_rows = [(lbl, _fmt(kv[key])) for lbl, key in train_keys if key in kv]
 
+        if not train_rows:
+            return  # partial dump before first rollout — superseded by the next full table
+
+        self._console.rule(style="dim")
         tables = [kv_table("time", time_rows)]
         if game_rows:
             tables.append(kv_table("game", game_rows))
-        if train_rows:
-            tables.append(kv_table("train", train_rows))
+        tables.append(kv_table("train", train_rows))
         self._console.print(Columns(tables, equal=False, expand=False))
 
     def close(self) -> None:

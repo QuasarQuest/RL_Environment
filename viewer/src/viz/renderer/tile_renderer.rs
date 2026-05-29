@@ -13,10 +13,10 @@ pub struct TileMarker {
 
 fn tile_color(tile: Tile) -> Color {
     match tile {
-        Tile::Free           => Color::srgb(0.10, 0.10, 0.12),
-        Tile::Obstacle       => Color::srgb(0.28, 0.28, 0.32),
-        Tile::Base(team)     => team_color(team).with_alpha(0.70),
-        Tile::SafeZone(team) => team_color(team).with_alpha(0.18),
+        Tile::Free           => Color::srgb(0.06, 0.08, 0.14),  // dark navy floor
+        Tile::Obstacle       => Color::srgb(0.18, 0.20, 0.24),  // dark stone grey
+        Tile::Base(team)     => team_color(team).with_alpha(0.80),
+        Tile::SafeZone(team) => team_color(team).with_alpha(0.28),
     }
 }
 

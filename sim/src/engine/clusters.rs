@@ -10,7 +10,7 @@
 // first radius that collapses the gold into AT MOST CLUSTER_K clusters — the
 // tightest grouping in which every piece still fits into one of the K slots, so
 // no gold is ever dropped from the observation. The resulting clusters are then
-// sorted by centroid position (x primary, y secondary).
+// sorted by distance from the agent (nearest first).
 //
 // NOTE on the previous bug: the stop condition used to be `groups.len() >= K`
 // combined with `truncate(K)` *before* sorting. Because count is non-increasing
@@ -22,10 +22,10 @@
 // we keep ≤ K clusters and sort all of them, the result is deterministic and the
 // IDs map to stable spatial regions.
 //
-// Sorting by centroid (not gold count) keeps IDs tied to stable spatial regions:
-// count-rank reshuffles IDs whenever a pickup swaps two clusters' order, whereas
-// a centroid drifts only slightly as pieces are consumed. The count is still
-// communicated to the agent via count_norm in the cluster feature.
+// Sorting by distance-to-agent makes Cluster 0 always the nearest cluster.
+// The policy can learn the simple rule "Nav Cluster 0 = go to nearest gold"
+// without needing to understand the spatial meaning of slots 1-3. Slots 1-3
+// serve as ordered fallbacks when the nearest cluster depletes.
 //
 // Because radius 50 >= the maximum Chebyshev distance on a 50x50 grid (49), the
 // loop always succeeds for any non-empty gold set; the single-cluster fallback
@@ -100,9 +100,12 @@ impl UnionFind {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Returns up to CLUSTER_K clusters sorted by centroid position (x, then y).
+/// Returns up to CLUSTER_K clusters sorted by distance from `agent_pos`
+/// (nearest cluster first). Distance is measured as the Chebyshev distance
+/// from `agent_pos` to the cluster's nearest gold piece. Ties are broken by
+/// gold count (more gold first), then centroid X for full determinism.
 /// Empty slots are `None`.
-pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
+pub fn find_clusters(gold: &[GridPos], agent_pos: GridPos) -> [Option<GoldCluster>; CLUSTER_K] {
     let mut result: [Option<GoldCluster>; CLUSTER_K] = std::array::from_fn(|_| None);
     if gold.is_empty() { return result; }
 
@@ -126,26 +129,30 @@ pub fn find_clusters(gold: &[GridPos]) -> [Option<GoldCluster>; CLUSTER_K] {
 
         // First (tightest) radius that fits every piece into <= CLUSTER_K slots.
         if groups.len() <= CLUSTER_K {
-            // Build clusters and cache each centroid once (centroid is O(cluster
-            // size); caching avoids recomputing it on every comparator call).
-            let mut clusters: Vec<(f32, f32, GoldCluster)> = groups
+            let mut clusters: Vec<(i32, usize, f32, GoldCluster)> = groups
                 .into_values()
                 .map(|indices| {
                     let c = GoldCluster {
                         golds: indices.iter().map(|&i| gold[i]).collect(),
                     };
-                    let (cx, cy) = c.centroid();
-                    (cx, cy, c)
+                    let dist = c.nearest_gold(agent_pos)
+                        .map(|g| chebyshev(agent_pos, g))
+                        .unwrap_or(i32::MAX);
+                    let count = c.count();
+                    let (cx, _) = c.centroid();
+                    (dist, count, cx, c)
                 })
                 .collect();
 
-            // Sort by centroid (x primary, y secondary) so cluster IDs map to
-            // stable spatial regions and the result is deterministic regardless
-            // of HashMap iteration order. total_cmp avoids the NaN-unwrap; all
-            // centroids here are finite.
-            clusters.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+            // Sort: nearest first, then most gold, then leftmost centroid for
+            // full determinism regardless of HashMap iteration order.
+            clusters.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then(b.1.cmp(&a.1))
+                    .then(a.2.total_cmp(&b.2))
+            });
 
-            for (slot, (_, _, c)) in clusters.into_iter().enumerate() {
+            for (slot, (_, _, _, c)) in clusters.into_iter().enumerate() {
                 result[slot] = Some(c);
             }
             return result;

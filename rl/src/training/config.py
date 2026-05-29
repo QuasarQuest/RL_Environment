@@ -50,13 +50,11 @@ class PpoConfig:
     vf_coef: float = MISSING
     max_grad_norm: float = MISSING
     target_kl: float = MISSING
-    # pi/vf head depth — ONLY applied when algo=ppo / maskable_ppo.
+    # pi/vf head depth — applied for all algos including recurrent_ppo.
     # Stages 1-3: [64]  (lean, fast convergence, low overfitting risk)
     # Stages 4-6: [128, 64]  (deeper for enemy/combat decisions)
-    # NOTE: ignored for recurrent_ppo — train.py uses ATB_RECURRENT_POLICY_KWARGS
-    # which omits net_arch, so SB3-contrib's MlpLstmPolicy falls back to its own
-    # default post-LSTM heads. The default algo is recurrent_ppo, so these
-    # values have no effect unless you explicitly switch to ppo.
+    # For recurrent_ppo these control the MLP layers inserted between the
+    # LSTM output and the final action/value heads.
     net_arch_pi: list[int] = field(default_factory=lambda: [64])
     net_arch_vf: list[int] = field(default_factory=lambda: [64])
     # LSTM params — only used when algo=recurrent_ppo.
@@ -70,10 +68,7 @@ class EnvConfig:
     n_envs: int = MISSING
     seed: Optional[int] = None
     max_episode_steps: Optional[int] = None
-    clip_reward: bool = MISSING
-    clip_reward_max: float = MISSING
-    clip_obs: float = 10.0              # VecNormalize obs clip — 10.0 is the SB3 default
-    reward_scale: float = MISSING
+    clip_obs: float = 10.0
     normalize_obs: bool = MISSING
     normalize_reward: bool = MISSING
 
@@ -90,7 +85,6 @@ class TrainConfig:
     checkpoint_freq: int = MISSING
     eval_freq: int = MISSING
     eval_episodes: int = MISSING
-    output_dir: str = MISSING           # root dir; each run gets its own subfolder
     device: str = MISSING
     resume: Optional[str] = None        # optional resume path
 

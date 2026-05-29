@@ -16,3 +16,13 @@ lto           = "fat"
 codegen-units = 1
 panic         = "abort"
 strip         = "symbols"
+
+# Fast-linking profile for iterative viewer runs. Inherits release's opt-level=3
+# but swaps fat LTO + codegen-units=1 (a single-threaded ~15 min link on the Bevy
+# binary) for thin LTO + parallel codegen — links in ~1-2 min with ~95-99% of the
+# runtime perf, which is imperceptible for visualization. Use `--release` when you
+# actually want the maximally-optimized build.
+[profile.viewer-fast]
+inherits      = "release"
+lto           = "thin"
+codegen-units = 16

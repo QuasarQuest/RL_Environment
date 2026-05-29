@@ -2,14 +2,11 @@
 # Stage 4: SimpleChaser enemy. 25x25 map, fewer envs due to higher complexity.
 
 stage: 4
-n_envs: 32
+n_envs: 64
 
 seed: null
 max_episode_steps: null
 
-clip_reward: true
-clip_reward_max: 100.0
-reward_scale: 1.0
 
 # obs is already scaled to [0,1]/[-1,1] in sim/src/engine/obs.rs; per-dim
 # VecNormalize over sparse binary CNN planes injects scale noise — keep off.

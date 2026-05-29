@@ -83,9 +83,6 @@ class BatchVecEnv(VecEnv):
             n_envs: int,
             config_path: str,
             stage: int = 1,
-            *,
-            clip_reward: Optional[float] = None,
-            reward_scale: float = 1.0,
     ) -> None:
         import atb
 
@@ -101,9 +98,6 @@ class BatchVecEnv(VecEnv):
         act_space = spaces.Discrete(ACTION_SIZE)
 
         super().__init__(n_envs, obs_space, act_space)
-
-        self._clip_reward = float(clip_reward) if clip_reward is not None else None
-        self._reward_scale = float(reward_scale)
 
         self._ep_rewards = np.zeros(n_envs, dtype=np.float32)
         self._ep_lengths = np.zeros(n_envs, dtype=np.int32)
@@ -122,7 +116,20 @@ class BatchVecEnv(VecEnv):
 
     @staticmethod
     def _ba_to_obs(ba, n: int) -> np.ndarray:
-        """Zero-copy bytearray → (n, OBS_TOTAL) numpy array."""
+        """Zero-copy bytearray → (n, OBS_TOTAL) numpy array.
+
+        The returned array is a *view* over ``ba`` (numpy keeps ``ba`` alive via
+        ``.base``), and ``ba`` is writable since it is a bytearray — so callers
+        may patch reset rows in place (see step_wait's done-env handling).
+
+        Why no defensive copy: the Rust ``step_batch``/``reset_*`` calls hand back
+        a freshly-allocated bytearray every call (PyByteArray::new memcpies out of
+        the reused obs_flat buffer), so each step's view already owns independent,
+        Python-managed memory. SB3's rollout buffer copies obs into its own
+        preallocated storage on ``add()``, so nothing downstream aliases this view
+        across steps. An extra ``.copy()`` here would be a redundant 1.47 MB/step
+        memcpy (n_envs=64 × 11504 × 4 B).
+        """
         return np.frombuffer(ba, dtype=_OBS_DTYPE).reshape(n, _OBS_TOTAL)
 
     def _rust_score(self, env_idx: int) -> float:
@@ -136,7 +143,7 @@ class BatchVecEnv(VecEnv):
         obs_ba = self._batch.reset_all()
         self._ep_rewards[:] = 0.0
         self._ep_lengths[:] = 0
-        return self._ba_to_obs(obs_ba, self.num_envs).copy()
+        return self._ba_to_obs(obs_ba, self.num_envs)
 
     def step_async(self, actions: np.ndarray) -> None:
         self._pending_actions = actions
@@ -156,10 +163,6 @@ class BatchVecEnv(VecEnv):
         obs = self._ba_to_obs(obs_ba, self.num_envs)
         rews = np.array(rews, dtype=np.float32)
         dones = np.array(dones, dtype=bool)
-
-        if self._clip_reward is not None:
-            rews = np.clip(rews, -self._clip_reward, self._clip_reward)
-        rews *= self._reward_scale
 
         self._ep_rewards += rews
         self._ep_lengths += 1
@@ -184,7 +187,9 @@ class BatchVecEnv(VecEnv):
             self._ep_rewards[i] = 0.0
             self._ep_lengths[i] = 0
 
-        result = obs.copy(), rews, dones, infos
+        # No defensive copy — see _ba_to_obs: obs is a view over this step's
+        # freshly-allocated bytearray, and SB3 copies it into the rollout buffer.
+        result = obs, rews, dones, infos
 
         if _PROFILE_ENABLED:
             self._t_total += time.perf_counter() - t_wait_start
@@ -198,7 +203,7 @@ class BatchVecEnv(VecEnv):
                 print(
                     f"[BatchVecEnv profile] "
                     f"step_wait {tot_ms:6.2f}ms  "
-                    f"(sim {sim_ms:6.2f}ms = {ratio*100:5.1f}%, "
+                    f"(sim {sim_ms:6.2f}ms = {ratio * 100:5.1f}%, "
                     f"py-post {py_ms:5.2f}ms)  "
                     f"n_envs={self.num_envs}",
                     flush=True,

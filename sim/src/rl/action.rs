@@ -32,6 +32,21 @@ pub enum RlAction {
     Wait,
 }
 
+impl std::fmt::Display for RlAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NavigateToCluster(k) => write!(f, "Nav Cluster {k}"),
+            Self::NavigateToBase       => write!(f, "Nav Base"),
+            Self::NavigateToHealth     => write!(f, "Nav Health"),
+            Self::NavigateToAmmo       => write!(f, "Nav Ammo"),
+            Self::NavigateToEnemy      => write!(f, "Nav Enemy"),
+            Self::MeleeAttack          => write!(f, "Melee Atk"),
+            Self::RangedAttack         => write!(f, "Ranged Atk"),
+            Self::Wait                 => write!(f, "Wait"),
+        }
+    }
+}
+
 /// Convert a neural-net output integer to an RlAction.
 /// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.
 pub fn int_to_rl_action(action: u32) -> RlAction {

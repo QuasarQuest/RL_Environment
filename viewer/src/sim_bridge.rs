@@ -15,7 +15,7 @@ use crate::viz::renderer::tile_renderer::{TileMarker, do_spawn_tiles};
 const ACTION_NAVIGATE_TO_BASE:   u32 = 4;
 const ACTION_NAVIGATE_TO_HEALTH: u32 = 5;
 
-pub const DEFAULT_CONFIG_PATH: &str = "assets/world/default.ron";
+pub const DEFAULT_CONFIG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/world/default.ron");
 const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
 
 #[derive(Resource, Default)]
@@ -71,11 +71,6 @@ pub struct SimBridge {
     // BT: committed cluster slot — only reselect when this slot becomes empty.
     // Prevents oscillation when two clusters are equidistant and swap rank each tick.
     bt_target_cluster: Option<u32>,
-
-    // GOAP: cached first-step action + last known inventory level.
-    // Only replan when gold_carried changes (pickup or deposit).
-    goap_cached_action: Option<u32>,
-    goap_last_carried:  u8,
 }
 
 fn normalize_path(raw: &str) -> std::path::PathBuf {
@@ -98,9 +93,7 @@ impl SimBridge {
             sim: SimCore::new(DEFAULT_CONFIG_PATH), game_over: false, policy,
             last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
-            bt_target_cluster:  None,
-            goap_cached_action: None,
-            goap_last_carried:  0,
+            bt_target_cluster: None,
         }
     }
 
@@ -224,9 +217,7 @@ pub fn handle_load_request(
     bridge.last_action      = ACTION_WAIT;
     bridge.action_counts    = [0; ACTION_SIZE];
     bridge.episode_reward   = 0.0;
-    bridge.bt_target_cluster  = None;
-    bridge.goap_cached_action = None;
-    bridge.goap_last_carried  = 0;
+    bridge.bt_target_cluster = None;
     bridge.mode = if bridge.policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
 
     // Recompute GridOffset — the new config may have different map dimensions.
@@ -253,13 +244,12 @@ pub fn step_sim(
 ) {
     if restart.0 {
         bridge.sim.reset();
-        bridge.game_over        = false;
-        bridge.last_action      = ACTION_WAIT;
-        bridge.action_counts    = [0; ACTION_SIZE];
-        bridge.episode_reward   = 0.0;
-        bridge.bt_target_cluster  = None;
-        bridge.goap_cached_action = None;
-        bridge.goap_last_carried  = 0;
+        bridge.game_over         = false;
+        bridge.last_action       = ACTION_WAIT;
+        bridge.action_counts     = [0; ACTION_SIZE];
+        bridge.episode_reward    = 0.0;
+        bridge.bt_target_cluster = None;
+        if let Some(ref mut p) = bridge.policy { p.reset(); }
         restart.0 = false;
     }
 
@@ -270,8 +260,9 @@ pub fn step_sim(
     for _ in 0..steps {
         let action = match bridge.mode {
             PolicyMode::Onnx => {
-                if let Some(ref p) = bridge.policy {
-                    let act = p.act(&bridge.sim.obs_buf);
+                let obs = bridge.sim.obs_buf.to_vec();
+                if let Some(ref mut p) = bridge.policy {
+                    let act = p.act(&obs);
                     if bridge.sim.tick % 100 == 0 {
                         let agent = &bridge.sim.agents[0];
                         debug!(
@@ -309,17 +300,35 @@ pub fn step_sim(
                         debug!("[BT] tick={} low HP → navigate_to_health", bridge.sim.tick);
                         ACTION_NAVIGATE_TO_HEALTH
                     } else {
-                        // Only reselect cluster when the committed slot becomes empty.
-                        // Prevents oscillation when two clusters are equidistant.
+                        // Reselect when: (a) committed slot is gone, or (b) another cluster
+                        // has gold that is meaningfully closer (hysteresis of 3 tiles prevents
+                        // oscillation when clusters are equidistant).
                         let slot_valid = bridge.bt_target_cluster.map_or(false, |k| {
-                            use atb::engine::clusters::find_clusters;
+                            use atb::engine::clusters::{chebyshev, find_clusters};
                             let golds: Vec<_> = bridge.sim.items.iter()
                                 .filter(|i| i.kind == ItemKind::Gold)
                                 .map(|i| i.pos)
                                 .collect();
-                            find_clusters(&golds).get(k as usize)
+                            let agent_pos = bridge.sim.agents[0].pos;
+                            let clusters  = find_clusters(&golds, agent_pos);
+                            let committed_dist = clusters.get(k as usize)
                                 .and_then(|c| c.as_ref())
-                                .is_some()
+                                .and_then(|c| c.nearest_gold(agent_pos))
+                                .map(|g| chebyshev(agent_pos, g));
+                            match committed_dist {
+                                None => false,
+                                Some(cd) => {
+                                    let best = clusters.iter().enumerate()
+                                        .filter(|&(i, _)| i != k as usize)
+                                        .filter_map(|(_, c)| {
+                                            c.as_ref()?.nearest_gold(agent_pos)
+                                                .map(|g| chebyshev(agent_pos, g))
+                                        })
+                                        .min()
+                                        .unwrap_or(i32::MAX);
+                                    cd <= best + 3
+                                }
+                            }
                         });
                         if !slot_valid {
                             let new_k = bt_nearest_cluster(&bridge.sim);
@@ -337,20 +346,10 @@ pub fn step_sim(
             }
             PolicyMode::Goap => {
                 if bridge.sim.agents.is_empty() { ACTION_WAIT } else {
-                    let carried = bridge.sim.agents[0].gold_carried;
-                    // Replan only when inventory changes (pickup or deposit).
-                    // Prevents the plan from flipping every tick as gold_nearby /
-                    // base_closer world-state bits toggle during navigation.
-                    if bridge.goap_cached_action.is_none() || carried != bridge.goap_last_carried {
-                        let new_act = goap_action(&bridge.sim);
-                        debug!(
-                            "[GOAP] tick={} replan: carried {} → {}  action={}",
-                            bridge.sim.tick, bridge.goap_last_carried, carried, new_act,
-                        );
-                        bridge.goap_cached_action = Some(new_act);
-                        bridge.goap_last_carried  = carried;
-                    }
-                    bridge.goap_cached_action.unwrap_or(ACTION_WAIT)
+                    // Replan every tick — the planner (8-bit state, 6 actions) is trivially
+                    // fast and caching only on carried-changes caused the agent to hold a
+                    // stale cluster target while nearby gold went uncollected.
+                    goap_action(&bridge.sim)
                 }
             }
         };
@@ -366,10 +365,10 @@ pub fn step_sim(
 }
 
 /// Pick the cluster whose nearest gold is closest to the agent.
-/// Clusters are sorted by centroid position, not gold count, so we must search
-/// all slots to find which one is spatially nearest rather than assuming slot 0.
+/// Cluster 0 is now always the nearest cluster, so the BT just returns 0.
+/// Slots 1-3 are kept as fallbacks in case slot 0 depletes mid-episode.
 fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
-    use atb::engine::clusters::{chebyshev, find_clusters};
+    use atb::engine::clusters::{find_clusters};
 
     let gold: Vec<_> = sim.items.iter()
         .filter(|i| i.kind == ItemKind::Gold)
@@ -378,16 +377,11 @@ fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
 
     if gold.is_empty() { return ACTION_WAIT; }
 
-    let clusters  = find_clusters(&gold);
     let agent_pos = sim.agents[0].pos;
+    let clusters  = find_clusters(&gold, agent_pos);
 
-    clusters.iter().enumerate()
-        .filter_map(|(k, c)| {
-            c.as_ref()?.nearest_gold(agent_pos).map(|g| (k as u32, chebyshev(agent_pos, g)))
-        })
-        .min_by_key(|&(_, d)| d)
-        .map(|(k, _)| k)
-        .unwrap_or(ACTION_WAIT)
+    // Slot 0 is always the nearest cluster after distance-sort.
+    if clusters[0].is_some() { 0 } else { ACTION_WAIT }
 }
 
 fn goap_action(sim: &atb::engine::SimCore) -> u32 {
