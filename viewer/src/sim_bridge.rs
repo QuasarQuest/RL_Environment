@@ -3,7 +3,7 @@ use atb::engine::{SimCore, AgentState, ItemState};
 use atb::world::grid::Grid;
 use atb::entity::item::ItemKind;
 use atb::config::AGENT_MAX_GOLD;
-use atb::rl::action::{ACTION_SIZE, ACTION_WAIT};
+use atb::rl::action::{ACTION_SIZE, ACTION_WAIT, CLUSTER_K};
 use atb::algorithm::behavior::goap;
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
@@ -11,9 +11,10 @@ use crate::viz::events::RestartPending;
 use crate::viz::grid_offset::GridOffset;
 use crate::viz::renderer::tile_renderer::{TileMarker, do_spawn_tiles};
 
-// Action indices — must stay in sync with RlAction ordering in the sim.
-const ACTION_NAVIGATE_TO_BASE:   u32 = 4;
-const ACTION_NAVIGATE_TO_HEALTH: u32 = 5;
+// Action indices — derived from CLUSTER_K so they track the RlAction ordering
+// in the sim (0..CLUSTER_K are region-nav slots; the nav/direct actions follow).
+const ACTION_NAVIGATE_TO_BASE:   u32 = CLUSTER_K as u32;       // 9
+const ACTION_NAVIGATE_TO_HEALTH: u32 = CLUSTER_K as u32 + 1;   // 10
 
 pub const DEFAULT_CONFIG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/world/default.ron");
 const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
@@ -310,7 +311,8 @@ pub fn step_sim(
                                 .map(|i| i.pos)
                                 .collect();
                             let agent_pos = bridge.sim.agents[0].pos;
-                            let clusters  = find_clusters(&golds, agent_pos);
+                            let (gw, gh) = (bridge.sim.grid.width as i32, bridge.sim.grid.height as i32);
+                            let clusters  = find_clusters(&golds, gw, gh);
                             let committed_dist = clusters.get(k as usize)
                                 .and_then(|c| c.as_ref())
                                 .and_then(|c| c.nearest_gold(agent_pos))
@@ -364,11 +366,11 @@ pub fn step_sim(
     }
 }
 
-/// Pick the cluster whose nearest gold is closest to the agent.
-/// Cluster 0 is now always the nearest cluster, so the BT just returns 0.
-/// Slots 1-3 are kept as fallbacks in case slot 0 depletes mid-episode.
+/// Pick the fixed region whose nearest gold piece is closest to the agent.
+/// Regions are now stable 3×3 map cells, so the BT must scan them to find the
+/// one holding the nearest gold (it is no longer always region 0).
 fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
-    use atb::engine::clusters::{find_clusters};
+    use atb::engine::clusters::{chebyshev, find_clusters};
 
     let gold: Vec<_> = sim.items.iter()
         .filter(|i| i.kind == ItemKind::Gold)
@@ -378,10 +380,17 @@ fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
     if gold.is_empty() { return ACTION_WAIT; }
 
     let agent_pos = sim.agents[0].pos;
-    let clusters  = find_clusters(&gold, agent_pos);
+    let (gw, gh) = (sim.grid.width as i32, sim.grid.height as i32);
+    let clusters = find_clusters(&gold, gw, gh);
 
-    // Slot 0 is always the nearest cluster after distance-sort.
-    if clusters[0].is_some() { 0 } else { ACTION_WAIT }
+    clusters.iter().enumerate()
+        .filter_map(|(k, c)| {
+            let g = c.as_ref()?.nearest_gold(agent_pos)?;
+            Some((chebyshev(agent_pos, g), k as u32))
+        })
+        .min()
+        .map(|(_, k)| k)
+        .unwrap_or(ACTION_WAIT)
 }
 
 fn goap_action(sim: &atb::engine::SimCore) -> u32 {

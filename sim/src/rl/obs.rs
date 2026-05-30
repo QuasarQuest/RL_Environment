@@ -35,9 +35,10 @@
 //    Appended after OBS_DIM in the flat buffer.
 //    Channels: 0=obstacles, 1=enemy, 2=gold (all max-pooled over ~3×3 tiles)
 //
-//  Cluster features — 4 clusters × 3 floats = 12 floats:
-//    Appended after MM section: [dx_norm, dy_norm, count_norm] per cluster slot.
-//    Zero-padded when fewer than CLUSTER_K clusters exist.
+//  Cluster features — 9 regions × 3 floats = 27 floats:
+//    Appended after MM section: [dx_norm, dy_norm, count_norm] per region slot.
+//    Region k is a fixed 3×3 grid cell (stable spatial ID, see engine/clusters.rs).
+//    Zero for regions that currently hold no gold.
 
 pub const OBS_CHANNELS: usize = 17;
 
@@ -96,11 +97,11 @@ pub const MM_DIM:   usize                 = MM_CHANNELS * MM_SIZE * MM_SIZE; // 
 pub const MM_SHAPE: (usize, usize, usize) = (MM_CHANNELS, MM_SIZE, MM_SIZE);
 
 // ── Cluster features (appended after minimap) ─────────────────────────────────
-// 4 clusters × (dx_norm, dy_norm, count_norm) = 12 floats.
-// Matches CLUSTER_K in rl/action.rs and engine/clusters.rs.
+// 9 fixed regions × (dx_norm, dy_norm, count_norm) = 27 floats.
+// Matches CLUSTER_K in rl/action.rs and engine/clusters.rs (3×3 region grid).
 
-pub const CLUSTER_K:        usize = 4;
-pub const CLUSTER_FEATURES: usize = CLUSTER_K * 3; // 12 floats
+pub const CLUSTER_K:        usize = 9;
+pub const CLUSTER_FEATURES: usize = CLUSTER_K * 3; // 27 floats
 
 // ── Total flat buffer size ────────────────────────────────────────────────────
 

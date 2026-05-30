@@ -4,18 +4,21 @@
 // The agent picks a navigation goal or a direct action; A* handles movement.
 //
 // Layout:
-//   0..3   NavigateToCluster(0..3)  — top-4 gold clusters by density, largest first
-//   4      NavigateToBase           — return to base and deposit
-//   5      NavigateToHealth         — nearest health pickup
-//   6      NavigateToAmmo           — nearest ammo pickup
-//   7      NavigateToEnemy          — nearest enemy (for hunting / interception)
-//   8      MeleeAttack              — auto-target lowest-HP enemy in melee range
-//   9      RangedAttack             — auto-target lowest-HP enemy in ranged range
-//   10     Wait
+//   0..8   NavigateToCluster(0..8)  — fixed 3×3 map regions (stable spatial slots)
+//   9      NavigateToBase           — return to base and deposit
+//   10     NavigateToHealth         — nearest health pickup
+//   11     NavigateToAmmo           — nearest ammo pickup
+//   12     NavigateToEnemy          — nearest enemy (for hunting / interception)
+//   13     MeleeAttack              — auto-target lowest-HP enemy in melee range
+//   14     RangedAttack             — auto-target lowest-HP enemy in ranged range
+//   15     Wait
+//
+// CLUSTER_K must match engine/clusters.rs and rl/obs.rs.
+// ACTION_SIZE = CLUSTER_K + 7 (Base, Health, Ammo, Enemy, Melee, Ranged, Wait).
 
-pub const ACTION_SIZE: usize = 11;
-pub const ACTION_WAIT: u32   = 10;
-pub const CLUSTER_K:   usize = 4;
+pub const CLUSTER_K:   usize = 9;
+pub const ACTION_SIZE: usize = CLUSTER_K + 7; // 16
+pub const ACTION_WAIT: u32   = (ACTION_SIZE - 1) as u32; // 15
 
 /// High-level action the RL policy selects each tick.
 /// Navigation goals are resolved to a concrete GridPos target and executed via A*.
@@ -49,19 +52,21 @@ impl std::fmt::Display for RlAction {
 
 /// Convert a neural-net output integer to an RlAction.
 /// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.
+///
+/// Indices 0..CLUSTER_K are the fixed region-navigation slots; the remaining
+/// seven are the direct/nav actions, defined relative to CLUSTER_K so the layout
+/// stays correct if the region grid size changes.
 pub fn int_to_rl_action(action: u32) -> RlAction {
+    let k = CLUSTER_K as u32;
     match action {
-        0  => RlAction::NavigateToCluster(0),
-        1  => RlAction::NavigateToCluster(1),
-        2  => RlAction::NavigateToCluster(2),
-        3  => RlAction::NavigateToCluster(3),
-        4  => RlAction::NavigateToBase,
-        5  => RlAction::NavigateToHealth,
-        6  => RlAction::NavigateToAmmo,
-        7  => RlAction::NavigateToEnemy,
-        8  => RlAction::MeleeAttack,
-        9  => RlAction::RangedAttack,
-        10 => RlAction::Wait,
-        _  => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
+        a if a < k       => RlAction::NavigateToCluster(a as u8),
+        a if a == k      => RlAction::NavigateToBase,
+        a if a == k + 1  => RlAction::NavigateToHealth,
+        a if a == k + 2  => RlAction::NavigateToAmmo,
+        a if a == k + 3  => RlAction::NavigateToEnemy,
+        a if a == k + 4  => RlAction::MeleeAttack,
+        a if a == k + 5  => RlAction::RangedAttack,
+        a if a == k + 6  => RlAction::Wait,
+        _ => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
     }
 }

@@ -147,11 +147,12 @@ pub fn build_obs_into(
 
     build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], agents, gold_positions, agent, grid);
 
-    // ── Cluster features (12 floats after minimap) ────────────────────────────
+    // ── Cluster features (CLUSTER_K × 3 floats after minimap) ─────────────────
     //
-    // Per cluster slot: [dx_norm, dy_norm, count_norm]
-    // dx/dy are signed direction from agent to nearest gold in the cluster,
+    // Per region slot k (fixed 3×3 grid): [dx_norm, dy_norm, count_norm]
+    // dx/dy are signed direction from agent to the nearest gold in region k,
     // normalised by map dimensions. count_norm is gold count / CLUSTER_COUNT_NORM.
+    // Region k is a stable spatial address (see engine/clusters.rs).
 
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {

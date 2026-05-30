@@ -109,7 +109,9 @@ impl SimCore {
             .collect();
 
         let mut obs_buf = vec![0.0f32; OBS_TOTAL];
-        let clusters    = find_clusters(&gold_positions, snap.agents[0].pos);
+        let clusters    = find_clusters(
+            &gold_positions, snap.grid.width as i32, snap.grid.height as i32,
+        );
         let no_paths: Vec<&VecDeque<GridPos>> = vec![];
         build_obs_into(
             &mut obs_buf, &snap.agents[0], &snap.items, &snap.agents,
@@ -161,7 +163,9 @@ impl SimCore {
         self.prev_kills  = 0;
         self.prev_pos    = self.agents[0].pos;
 
-        let clusters = find_clusters(&self.gold_positions, self.agents[0].pos);
+        let clusters = find_clusters(
+            &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
+        );
         let no_paths: Vec<&VecDeque<GridPos>> = vec![];
         build_obs_into(
             &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
@@ -192,9 +196,11 @@ impl SimCore {
 
         let carry_speed = self.world_cfg.gold_carry_speed;
 
-        // Gold clusters for this tick — sorted by distance from agent so slot 0
-        // is always the nearest cluster. Used for both obs and action resolution.
-        let clusters = find_clusters(&self.gold_positions, self.agents[0].pos);
+        // Gold regions for this tick — fixed 3×3 spatial grid, so region k is a
+        // stable slot. Used for both obs features and action resolution.
+        let clusters = find_clusters(
+            &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
+        );
 
         // nav_goal (the action's chosen target) is no longer used for shaping —
         // shaping uses a state-defined objective instead (see below).

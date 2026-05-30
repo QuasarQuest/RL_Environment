@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations.
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11504,):
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11519,):
   [0      : 10625)   main egocentric crop  — (17, 25, 25) logically
   [10625  : 11492)   minimap               — ( 3, 17, 17) logically
-  [11492  : 11504)   cluster features      — (12,) = 4 clusters × (dx, dy, count)
+  [11492  : 11519)   cluster features      — (27,) = 9 regions × (dx, dy, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -31,8 +31,9 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     1  MM_ENEMY
     2  MM_GOLD
 
-  Cluster features (12 floats = 4 × [dx_norm, dy_norm, count_norm]):
-    One entry per cluster slot, zero-padded when fewer than 4 clusters exist.
+  Cluster features (27 floats = 9 regions × [dx_norm, dy_norm, count_norm]):
+    One entry per fixed 3×3 map region; zero for regions with no gold.
+    Region k is a stable spatial slot (sim/src/engine/clusters.rs).
 
 Slim architecture (v2)
 ----------------------
@@ -85,13 +86,14 @@ MM_H = 17
 MM_W = 17
 MM_DIM = MM_CHANNELS * MM_H * MM_W  # 867
 
-CLUSTER_FEATURES = 12  # 4 clusters × 3 floats
+CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
+CLUSTER_FEATURES = CLUSTER_K * 3  # 27 — 9 regions × [dx, dy, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11504
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11519
 
 # Action space size — defined here so env files don't need to import action_masks.
-# Must match ACTION_SIZE in src/rl/action.rs.
-ACTION_SIZE = 11
+# Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K + 7 nav/direct actions).
+ACTION_SIZE = CLUSTER_K + 7  # 16
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
@@ -117,7 +119,7 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
 class AtbCnnExtractor(BaseFeaturesExtractor):
     """Three-branch extractor for egocentric crop, global minimap, and cluster features.
 
-    Input: flat (OBS_TOTAL,) = (11504,) buffer — split internally.
+    Input: flat (OBS_TOTAL,) = (11519,) buffer — split internally.
 
     Crop branch  (17, 25, 25):
       Conv(17→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
@@ -131,8 +133,8 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
       Conv(16→32, 3×3, s=2)        → ReLU   # (32,  8,  8)  ← stride-2 added
       Flatten → Linear(2048→128) → LayerNorm(128) → ReLU
 
-    Cluster branch (12,):
-      Linear(12→32) → ReLU
+    Cluster branch (27,):
+      Linear(27→32) → ReLU
 
     Fusion:
       cat([256, 128, 32]) → Linear(416→features_dim) → LayerNorm → ReLU
