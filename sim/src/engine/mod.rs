@@ -230,20 +230,8 @@ impl SimCore {
 
         let just_died = prev_alive && self.agents[0].respawn_timer > 0;
 
-        // State-defined shaping objective (policy-invariant PBRS): head to base
-        // while carrying gold, otherwise to the nearest remaining gold. Resolved
-        // from world state — NOT the chosen action — so shaping can't be farmed.
-        let agent0 = &self.agents[0];
-        let objective = if agent0.gold_carried > 0 {
-            Some(agent0.base_pos)
-        } else {
-            self.gold_positions.iter().copied().min_by_key(|g| {
-                let dx = (g.x - agent0.pos.x) as i64;
-                let dy = (g.y - agent0.pos.y) as i64;
-                dx * dx + dy * dy
-            })
-        };
-
+        // Event-based reward only — no sim-side navigation objective. The agent
+        // must learn where to go from the observation, not from a baked-in hint.
         let rew = reward::compute(
             &self.world_cfg.reward,
             &self.agents[0],
@@ -251,7 +239,6 @@ impl SimCore {
             self.prev_gold,
             self.prev_score,
             self.prev_kills,
-            objective,
             wall_hit,
             just_died,
         );

@@ -48,11 +48,11 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
     1: 2_500_000,
-    2: 3_500_000,
-    3: 3_500_000,
-    4: 4_000_000,
+    2: 2_500_000,
+    3: 2_500_000,
+    4: 3_000_000,
     5: 4_500_000,
-    6: 5_000_000,
+    6: 4_000_000,
 }
 
 PLOT_SCRIPT = SCRIPT_DIR / "plot_runs.py"
