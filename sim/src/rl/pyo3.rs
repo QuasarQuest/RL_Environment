@@ -122,6 +122,13 @@ impl PyBatchEnv {
         (obs, rews_out, dones_out)
     }
 
+    /// Per-env action masks, flattened row-major (n_envs × ACTION_SIZE).
+    /// Python reshapes to (n_envs, ACTION_SIZE) for MaskablePPO. Reflects the
+    /// state after the most recent step_batch / reset.
+    pub fn action_masks(&self) -> Vec<bool> {
+        self.inner.action_masks().to_vec()
+    }
+
     // ── Viewer state queries ──────────────────────────────────────────────────
 
     pub fn grid_size(&self) -> (usize, usize)                           { self.inner.grid_size() }

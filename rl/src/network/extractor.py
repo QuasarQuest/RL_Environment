@@ -1,9 +1,9 @@
-"""Feature extractor networks for ATB observations.
+"""Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11519,):
-  [0      : 10625)   main egocentric crop  — (17, 25, 25) logically
-  [10625  : 11492)   minimap               — ( 3, 17, 17) logically
-  [11492  : 11519)   cluster features      — (27,) = 9 regions × (dx, dy, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (5605,):
+  [0     : 5000)   main egocentric crop  — (8, 25, 25) logically
+  [5000  : 5578)   minimap               — (2, 17, 17) logically
+  [5578  : 5605)   cluster features      — (27,) = 9 regions × (dx, dy, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -11,25 +11,15 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     1  BASE          own base tile
     2  GOLD          gold item
     3  OBSTACLE      impassable wall
-    4  ENEMY         enemy position (binary)
-    5  ITEM_HEALTH   health pickup (one-hot)
-    6  ITEM_AMMO     ammo pickup   (one-hot)
-    7  ITEM_SPEED    speed pickup  (one-hot)
-    8  ENEMY_HP      enemy HP at enemy cell, normalised [0,1]
-    9  ENEMY_AMMO    enemy ammo at enemy cell, normalised [0,1]
-   10  ENEMY_PATH    planned enemy path, decaying [0,1]
   Broadcast:
-   11  CARRYING      gold carried (broadcast)
-   12  HEALTH        agent HP (broadcast)
-   13  AMMO          agent ammo (broadcast)
-   14  BASE_DX       direction to own base X (broadcast)
-   15  BASE_DY       direction to own base Y (broadcast)
-   16  TIME_REMAINING  fraction of match left ∈ [0,1] (broadcast)
+    4  CARRYING      gold carried (broadcast)
+    5  BASE_DX       direction to own base X (broadcast)
+    6  BASE_DY       direction to own base Y (broadcast)
+    7  TIME_REMAINING  fraction of match left ∈ [0,1] (broadcast)
 
-  Minimap channels (3, 17, 17):
+  Minimap channels (2, 17, 17):
     0  MM_OBSTACLE
-    1  MM_ENEMY
-    2  MM_GOLD
+    1  MM_GOLD
 
   Cluster features (27 floats = 9 regions × [dx_norm, dy_norm, count_norm]):
     One entry per fixed 3×3 map region; zero for regions with no gold.
@@ -75,25 +65,26 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
+# Single-agent gold rush only — no enemy/combat/item channels.
 
-OBS_CHANNELS = 17
+OBS_CHANNELS = 8   # OOB, BASE, GOLD, OBSTACLE, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING
 OBS_CROP_H = 25
 OBS_CROP_W = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 10625
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 5000
 
-MM_CHANNELS = 3
+MM_CHANNELS = 2   # obstacle, gold
 MM_H = 17
 MM_W = 17
-MM_DIM = MM_CHANNELS * MM_H * MM_W  # 867
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 578
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
 CLUSTER_FEATURES = CLUSTER_K * 3  # 27 — 9 regions × [dx, dy, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11519
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 5605
 
-# Action space size — defined here so env files don't need to import action_masks.
-# Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K + 7 nav/direct actions).
-ACTION_SIZE = CLUSTER_K + 7  # 16
+# Action space size. Must match ACTION_SIZE in src/rl/action.rs
+# (CLUSTER_K region-nav slots + NavigateToBase + Wait).
+ACTION_SIZE = CLUSTER_K + 2  # 11
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────

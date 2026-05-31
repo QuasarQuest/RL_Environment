@@ -65,23 +65,18 @@ impl OnnxPolicy {
         if let Some(ref mut s) = self.lstm { s.reset(); }
     }
 
-    pub fn act(&mut self, obs: &[f32]) -> u32 {
+    /// Run the policy network and return the raw action logits (length ACTION_SIZE),
+    /// or None on any failure. Updates LSTM state if the model has one.
+    fn logits(&mut self, obs: &[f32]) -> Option<Vec<f32>> {
         debug_assert_eq!(obs.len(), OBS_TOTAL,
             "obs length mismatch: got {}, expected {OBS_TOTAL}", obs.len());
 
-        let obs_arr = match Array2::from_shape_vec([1, OBS_TOTAL], obs.to_vec()) {
-            Ok(a)  => a,
-            Err(_) => return ACTION_WAIT,
-        };
+        let obs_arr = Array2::from_shape_vec([1, OBS_TOTAL], obs.to_vec()).ok()?;
 
         let outputs = if let Some(ref s) = self.lstm {
             let shape = [s.n_layers, 1, s.hidden_size];
-            let h_arr = match Array3::from_shape_vec(shape, s.h.clone()) {
-                Ok(a) => a, Err(_) => return ACTION_WAIT,
-            };
-            let c_arr = match Array3::from_shape_vec(shape, s.c.clone()) {
-                Ok(a) => a, Err(_) => return ACTION_WAIT,
-            };
+            let h_arr = Array3::from_shape_vec(shape, s.h.clone()).ok()?;
+            let c_arr = Array3::from_shape_vec(shape, s.c.clone()).ok()?;
             self.model.run(tvec!(
                 Tensor::from(obs_arr).into(),
                 Tensor::from(h_arr).into(),
@@ -91,10 +86,7 @@ impl OnnxPolicy {
             self.model.run(tvec!(Tensor::from(obs_arr).into()))
         };
 
-        let mut outputs = match outputs {
-            Ok(o)  => o,
-            Err(_) => return ACTION_WAIT,
-        };
+        let outputs = outputs.ok()?;
 
         // Update LSTM state from h_out (index 1) and c_out (index 2).
         if let Some(ref mut s) = self.lstm {
@@ -108,17 +100,33 @@ impl OnnxPolicy {
             }
         }
 
-        let logits: &[f32] = match outputs[0].as_slice() {
-            Ok(s)  => s,
-            Err(_) => return ACTION_WAIT,
-        };
-
-        logits
-            .iter()
-            .copied()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(i, _)| i as u32)
-            .unwrap_or(ACTION_WAIT)
+        outputs[0].as_slice::<f32>().ok().map(|s| s.to_vec())
     }
+
+    /// Greedy action over all logits (no masking). Kept as a fallback API; the
+    /// viewer uses `act_masked` to match the policy's MaskablePPO training.
+    #[allow(dead_code)]
+    pub fn act(&mut self, obs: &[f32]) -> u32 {
+        let logits = match self.logits(obs) { Some(l) => l, None => return ACTION_WAIT };
+        argmax(logits.iter().copied().enumerate())
+    }
+
+    /// Greedy action restricted to valid actions (`mask[i] == true`). Mirrors the
+    /// MaskablePPO inference the policy was trained under — without it the argmax
+    /// could pick a masked, provably-useless action. Falls back to Wait if no
+    /// action is valid.
+    pub fn act_masked(&mut self, obs: &[f32], mask: &[bool]) -> u32 {
+        let logits = match self.logits(obs) { Some(l) => l, None => return ACTION_WAIT };
+        argmax(
+            logits.iter().copied().enumerate()
+                .filter(|(i, _)| mask.get(*i).copied().unwrap_or(false)),
+        )
+    }
+}
+
+/// Index of the max-logit element, or ACTION_WAIT if the iterator is empty.
+fn argmax(it: impl Iterator<Item = (usize, f32)>) -> u32 {
+    it.max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i as u32)
+        .unwrap_or(ACTION_WAIT)
 }

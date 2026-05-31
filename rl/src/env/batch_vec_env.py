@@ -137,6 +137,15 @@ class BatchVecEnv(VecEnv):
         agents = self._batch.get_agents(env_idx)
         return float(agents[_RL_AGENT_IDX][_SCORE_FIELD])
 
+    def _action_masks_all(self) -> np.ndarray:
+        """Per-env action masks as a (n_envs, ACTION_SIZE) bool array.
+
+        Reflects the state after the most recent step_batch / reset (Rust keeps
+        the mask buffer in sync). MaskablePPO reaches this via env_method below.
+        """
+        flat = np.asarray(self._batch.action_masks(), dtype=bool)
+        return flat.reshape(self.num_envs, ACTION_SIZE)
+
     # ── VecEnv ─────────────────────────────────────────────────────────────────
 
     def reset(self) -> np.ndarray:
@@ -239,7 +248,15 @@ class BatchVecEnv(VecEnv):
             **method_kwargs: Any,
     ) -> list[Any]:
         target = self._get_target_indices(indices)
+        # MaskablePPO's get_action_masks(VecEnv) calls env_method("action_masks").
+        if method_name == "action_masks":
+            masks = self._action_masks_all()
+            return [masks[i] for i in target]
         return [None] * len(target)
+
+    def action_masks(self) -> np.ndarray:
+        """Direct accessor (n_envs, ACTION_SIZE) — convenience alongside env_method."""
+        return self._action_masks_all()
 
     def seed(self, seed: Optional[int] = None) -> list[Optional[int]]:
         return [None] * self.num_envs

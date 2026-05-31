@@ -26,6 +26,7 @@
 
 use rayon::prelude::*;
 use crate::entity::item::ItemKind;
+use crate::rl::action::ACTION_SIZE;
 use crate::rl::obs::OBS_TOTAL;
 use crate::engine::SimCore;
 use crate::world::tile::Tile;
@@ -33,6 +34,7 @@ use crate::world::tile::Tile;
 pub struct BatchEnv {
     pub envs:     Vec<SimCore>,
     pub obs_flat: Vec<f32>,    // n_envs * OBS_TOTAL, pre-allocated
+    masks:        Vec<bool>,   // n_envs * ACTION_SIZE, pre-allocated (MaskablePPO)
     rews:         Vec<f32>,    // pre-allocated reward buffer
     dones:        Vec<bool>,   // pre-allocated done buffer
 }
@@ -41,32 +43,50 @@ impl BatchEnv {
     pub fn new(n_envs: usize, config_path: String) -> Self {
         let envs     = (0..n_envs).map(|_| SimCore::new(&config_path)).collect();
         let obs_flat = vec![0.0f32; n_envs * OBS_TOTAL];
+        let masks    = vec![false; n_envs * ACTION_SIZE];
         let rews     = vec![0.0f32; n_envs];
         let dones    = vec![false;  n_envs];
-        Self { envs, obs_flat, rews, dones }
+        let mut this = Self { envs, obs_flat, masks, rews, dones };
+        this.refresh_masks();
+        this
     }
 
     pub fn n_envs(&self) -> usize { self.envs.len() }
 
+    /// Current per-env action masks, flattened (n_envs × ACTION_SIZE row-major).
+    pub fn action_masks(&self) -> &[bool] { &self.masks }
+
+    /// Recompute every env's action mask from its current state.
+    fn refresh_masks(&mut self) {
+        self.envs
+            .par_iter()
+            .zip(self.masks.par_chunks_mut(ACTION_SIZE))
+            .for_each(|(env, slot)| slot.copy_from_slice(&env.action_mask()));
+    }
+
     // ── Reset ──────────────────────────────────────────────────────────────────
 
-    /// Reset all envs in parallel and write obs into obs_flat in the same pass.
+    /// Reset all envs in parallel and write obs + masks into the flat buffers.
     pub fn reset_all(&mut self) {
         self.envs
             .par_iter_mut()
             .zip(self.obs_flat.par_chunks_mut(OBS_TOTAL))
-            .for_each(|(env, slot)| {
+            .zip(self.masks.par_chunks_mut(ACTION_SIZE))
+            .for_each(|((env, obs_slot), mask_slot)| {
                 env.reset();
-                slot.copy_from_slice(&env.obs_buf);
+                obs_slot.copy_from_slice(&env.obs_buf);
+                mask_slot.copy_from_slice(&env.action_mask());
             });
     }
 
-    /// Reset a single env and update its slot in obs_flat.
+    /// Reset a single env and update its slot in obs_flat + masks.
     /// Called serially from Python on individual done envs — no parallelism needed.
     pub fn reset_env(&mut self, i: usize) {
         self.envs[i].reset();
         let start = i * OBS_TOTAL;
         self.obs_flat[start..start + OBS_TOTAL].copy_from_slice(&self.envs[i].obs_buf);
+        let mstart = i * ACTION_SIZE;
+        self.masks[mstart..mstart + ACTION_SIZE].copy_from_slice(&self.envs[i].action_mask());
     }
 
     // ── Step ───────────────────────────────────────────────────────────────────
@@ -91,11 +111,14 @@ impl BatchEnv {
             .par_iter_mut()
             .zip(actions.par_iter())
             .zip(self.obs_flat.par_chunks_mut(OBS_TOTAL))
+            .zip(self.masks.par_chunks_mut(ACTION_SIZE))
             .zip(self.rews.par_iter_mut())
             .zip(self.dones.par_iter_mut())
-            .for_each(|((((env, &a), obs_slot), rew), done)| {
-                let (r, d) = env.step(a);
+            .for_each(|(((((env, &a), obs_slot), mask_slot), rew), done)| {
+                // Temporally-extended option execution (semi-MDP). See SimCore::step_option.
+                let (r, d) = env.step_option(a);
                 obs_slot.copy_from_slice(&env.obs_buf);
+                mask_slot.copy_from_slice(&env.action_mask());
                 *rew  = r;
                 *done = d;
             });

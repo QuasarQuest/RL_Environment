@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use atb::rl::action::{int_to_rl_action, RlAction};
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, TOOLBAR_H};
-use crate::style::color::{CYAN_400, LIME_400, VIOLET_400, AMBER_400, ORANGE_400, RED_500, BLUE_500, GRAY_400};
+use crate::style::color::{CYAN_400, LIME_400, VIOLET_400, AMBER_400, ORANGE_400, GRAY_400};
 
 fn action_color(action: RlAction) -> Color {
     match action {
@@ -11,11 +11,6 @@ fn action_color(action: RlAction) -> Color {
         RlAction::NavigateToCluster(2) => VIOLET_400,
         RlAction::NavigateToCluster(_) => AMBER_400,
         RlAction::NavigateToBase       => ORANGE_400,
-        RlAction::NavigateToHealth     => RED_500,
-        RlAction::NavigateToAmmo       => BLUE_500,
-        RlAction::NavigateToEnemy      => RED_500,
-        RlAction::MeleeAttack          => RED_500,
-        RlAction::RangedAttack         => AMBER_400,
         RlAction::Wait                 => GRAY_400,
     }
 }

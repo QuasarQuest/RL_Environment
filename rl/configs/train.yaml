@@ -11,8 +11,14 @@ defaults:
 
 train:
   run_name: run
-  algo: recurrent_ppo
-  total_timesteps: 1_500_000
+  # MaskablePPO (feedforward) — gold rush is fully observable, so no LSTM.
+  # Action masking forbids provably-useless actions (empty regions, base when
+  # empty-handed); Wait is never masked. See sim/src/engine action_mask().
+  algo: maskable_ppo
+  # NOTE: with temporally-extended options (SimCore::step_option) one timestep is
+  # one high-level DECISION (a full A* traversal), not one sim tick — so this goes
+  # much further than the same count did under per-tick stepping.
+  total_timesteps: 2_000_000
   checkpoint_freq: 50_000
   eval_freq: 250_000
   eval_episodes: 10

@@ -1,9 +1,9 @@
 use bevy::prelude::*;
-use atb::engine::{SimCore, AgentState, ItemState};
+use atb::engine::{SimCore, AgentState, ItemState, MAX_OPTION_TICKS};
 use atb::world::grid::Grid;
 use atb::entity::item::ItemKind;
 use atb::config::AGENT_MAX_GOLD;
-use atb::rl::action::{ACTION_SIZE, ACTION_WAIT, CLUSTER_K};
+use atb::rl::action::{int_to_rl_action, ACTION_SIZE, ACTION_WAIT, CLUSTER_K};
 use atb::algorithm::behavior::goap;
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
@@ -12,9 +12,8 @@ use crate::viz::grid_offset::GridOffset;
 use crate::viz::renderer::tile_renderer::{TileMarker, do_spawn_tiles};
 
 // Action indices — derived from CLUSTER_K so they track the RlAction ordering
-// in the sim (0..CLUSTER_K are region-nav slots; the nav/direct actions follow).
-const ACTION_NAVIGATE_TO_BASE:   u32 = CLUSTER_K as u32;       // 9
-const ACTION_NAVIGATE_TO_HEALTH: u32 = CLUSTER_K as u32 + 1;   // 10
+// in the sim (0..CLUSTER_K are region-nav slots; NavigateToBase then Wait follow).
+const ACTION_NAVIGATE_TO_BASE: u32 = CLUSTER_K as u32;       // 9
 
 pub const DEFAULT_CONFIG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/world/default.ron");
 const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
@@ -72,6 +71,17 @@ pub struct SimBridge {
     // BT: committed cluster slot — only reselect when this slot becomes empty.
     // Prevents oscillation when two clusters are equidistant and swap rank each tick.
     bt_target_cluster: Option<u32>,
+
+    // ONNX: option commitment so the trained agent is shown faithfully. The policy
+    // is trained with temporally-extended options (SimCore::step_option), so the
+    // viewer must keep executing a chosen navigation action until the option ends
+    // (event / arrival / timeout) rather than re-querying every tick — otherwise it
+    // thrashes and looks broken. Mirrors step_option's termination conditions.
+    onnx_action:       Option<u32>,  // committed option action
+    onnx_anchor_gold:  u8,           // gold_carried at option start (event detection)
+    onnx_anchor_score: u32,          // score at option start
+    onnx_option_ticks: u64,
+    onnx_moved:        bool,         // did the agent move on the previous tick
 }
 
 fn normalize_path(raw: &str) -> std::path::PathBuf {
@@ -95,6 +105,11 @@ impl SimBridge {
             last_action: ACTION_WAIT, action_counts: [0; ACTION_SIZE], episode_reward: 0.0,
             mode,
             bt_target_cluster: None,
+            onnx_action: None,
+            onnx_anchor_gold: 0,
+            onnx_anchor_score: 0,
+            onnx_option_ticks: 0,
+            onnx_moved: false,
         }
     }
 
@@ -219,6 +234,7 @@ pub fn handle_load_request(
     bridge.action_counts    = [0; ACTION_SIZE];
     bridge.episode_reward   = 0.0;
     bridge.bt_target_cluster = None;
+    bridge.onnx_action       = None;
     bridge.mode = if bridge.policy.is_some() { PolicyMode::Onnx } else { PolicyMode::BehaviorTree };
 
     // Recompute GridOffset — the new config may have different map dimensions.
@@ -250,6 +266,7 @@ pub fn step_sim(
         bridge.action_counts     = [0; ACTION_SIZE];
         bridge.episode_reward    = 0.0;
         bridge.bt_target_cluster = None;
+        bridge.onnx_action       = None;
         if let Some(ref mut p) = bridge.policy { p.reset(); }
         restart.0 = false;
     }
@@ -261,21 +278,35 @@ pub fn step_sim(
     for _ in 0..steps {
         let action = match bridge.mode {
             PolicyMode::Onnx => {
-                let obs = bridge.sim.obs_buf.to_vec();
-                if let Some(ref mut p) = bridge.policy {
-                    let act = p.act(&obs);
-                    if bridge.sim.tick % 100 == 0 {
-                        let agent = &bridge.sim.agents[0];
-                        debug!(
-                            "[ONNX] tick={} action={} carried={}/{} pos=({},{})",
-                            bridge.sim.tick, act,
-                            agent.gold_carried, atb::config::AGENT_MAX_GOLD,
-                            agent.pos.x, agent.pos.y,
-                        );
-                    }
-                    act
-                } else {
+                if bridge.sim.agents.is_empty() || bridge.policy.is_none() {
                     ACTION_WAIT
+                } else {
+                    // Option commitment: keep executing the committed navigation
+                    // action until the option ends (mirrors SimCore::step_option),
+                    // so the option-trained policy is shown faithfully instead of
+                    // re-querying — and thrashing — every tick.
+                    let agent_gold  = bridge.sim.agents[0].gold_carried;
+                    let agent_score = bridge.sim.agents[0].score;
+                    let need_new = match bridge.onnx_action {
+                        None => true,
+                        Some(a) => {
+                            !int_to_rl_action(a).is_navigation()       // Wait: single tick
+                            || bridge.onnx_option_ticks >= MAX_OPTION_TICKS
+                            || agent_gold  != bridge.onnx_anchor_gold  // pickup event
+                            || agent_score != bridge.onnx_anchor_score // deposit event
+                            || !bridge.onnx_moved                      // arrived / blocked
+                        }
+                    };
+                    if need_new {
+                        let obs  = bridge.sim.obs_buf.to_vec();
+                        let mask = bridge.sim.action_mask();
+                        let act  = bridge.policy.as_mut().unwrap().act_masked(&obs, &mask);
+                        bridge.onnx_action       = Some(act);
+                        bridge.onnx_anchor_gold  = agent_gold;
+                        bridge.onnx_anchor_score = agent_score;
+                        bridge.onnx_option_ticks = 0;
+                    }
+                    bridge.onnx_action.unwrap_or(ACTION_WAIT)
                 }
             }
             PolicyMode::Random => {
@@ -294,12 +325,6 @@ pub fn step_sim(
                             debug!("[BT] tick={} full inventory → navigate_to_base", bridge.sim.tick);
                         }
                         ACTION_NAVIGATE_TO_BASE
-                    } else if agent.hearts <= 1
-                        && bridge.sim.items.iter().any(|i| i.kind == ItemKind::Health)
-                    {
-                        bridge.bt_target_cluster = None;
-                        debug!("[BT] tick={} low HP → navigate_to_health", bridge.sim.tick);
-                        ACTION_NAVIGATE_TO_HEALTH
                     } else {
                         // Reselect when: (a) committed slot is gone, or (b) another cluster
                         // has gold that is meaningfully closer (hysteresis of 3 tiles prevents
@@ -357,7 +382,11 @@ pub fn step_sim(
         };
         bridge.last_action = action;
         bridge.action_counts[action as usize] += 1;
+        // Track movement for the ONNX option-commitment logic (no-op for other modes).
+        let pos_before = bridge.sim.agents[0].pos;
         let (rew, done) = bridge.sim.step(action);
+        bridge.onnx_moved = bridge.sim.agents[0].pos != pos_before;
+        bridge.onnx_option_ticks += 1;
         bridge.episode_reward += rew;
         if done {
             bridge.game_over = true;

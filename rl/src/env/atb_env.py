@@ -112,6 +112,14 @@ class AtbEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
+    def action_masks(self) -> np.ndarray:
+        """Per-step action mask (ACTION_SIZE,) bool for MaskablePPO / MaskableEvalCallback.
+
+        Reflects the state after the most recent step/reset. DummyVecEnv.env_method
+        ("action_masks") routes here for the eval path.
+        """
+        return np.asarray(self._env.action_masks(), dtype=bool)
+
     def render(self):
         return None
 

@@ -3,7 +3,7 @@
 // Simulation core — one independent episode stream. agents[0] is always the RL
 // agent (team 0).
 //
-// Step order:
+// Per-tick step order (`tick_once`):
 //   tick_speed_buffs
 //   → find_clusters (gold clustering for this tick)
 //   → resolve RL action → A* navigate OR direct combat/wait
@@ -11,7 +11,19 @@
 //   → pickup → auto_deposit → spawner
 //   → rebuild gold_positions
 //   → compute reward
-//   → build observation (includes enemy paths + cluster features)
+//
+// Two public entry points wrap `tick_once`:
+//   - `step`         : one tick + observation. Used by the viewer so rendering
+//                      stays one-tile-per-frame and scripted baselines keep their
+//                      per-tick decision cadence.
+//   - `step_option`  : the RL training/eval path. Navigation actions are committed
+//                      and executed via A* until a reward-relevant event (pickup /
+//                      deposit / kill), arrival/blockage, death, episode end, or
+//                      MAX_OPTION_TICKS — turning the per-tick MDP into a semi-MDP
+//                      over high-level decisions (options framework). The agent only
+//                      re-decides at option boundaries, which removes per-tick goal
+//                      thrashing and shortens credit assignment to a few dozen
+//                      decisions per episode. The observation is built once at the end.
 
 pub mod builder;
 pub mod clusters;
@@ -23,22 +35,25 @@ pub mod spawner;
 
 pub use crate::entity::{AgentState, ItemState};
 
-use std::collections::VecDeque;
-
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 
+use crate::config::AGENT_MAX_GOLD;
 use crate::entity::agent::Action;
 use crate::entity::item::ItemKind;
-use crate::rl::action::{RlAction, int_to_rl_action};
+use crate::rl::action::{RlAction, int_to_rl_action, ACTION_SIZE, ACTION_WAIT, CLUSTER_K};
 use crate::rl::obs::OBS_TOTAL;
 use crate::rl::reward;
 use crate::world::{config::{EnemyKind, WorldConfig}, coords::GridPos, grid::Grid, tile::Tile};
-use crate::rl::action::CLUSTER_K;
-use self::clusters::{GoldCluster, find_clusters, chebyshev};
+use self::clusters::{GoldCluster, find_clusters};
 use self::enemy::{compute_action, navigate_action, EnemyPathCache};
 use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
+
+/// Maximum sim ticks a single navigation option runs before control returns to
+/// the policy (see `SimCore::step_option`). Generous enough to cross the map
+/// (50×50, ~50-tile diagonal) with margin; caps wasted ticks on a stuck/empty goal.
+pub const MAX_OPTION_TICKS: u64 = 96;
 
 pub struct SimCore {
     pub grid:    Grid,
@@ -112,10 +127,9 @@ impl SimCore {
         let clusters    = find_clusters(
             &gold_positions, snap.grid.width as i32, snap.grid.height as i32,
         );
-        let no_paths: Vec<&VecDeque<GridPos>> = vec![];
         build_obs_into(
-            &mut obs_buf, &snap.agents[0], &snap.items, &snap.agents,
-            &gold_positions, &snap.grid, &no_paths, &clusters,
+            &mut obs_buf, &snap.agents[0],
+            &gold_positions, &snap.grid, &clusters,
             1.0, // full match remaining at construction
         );
 
@@ -163,23 +177,18 @@ impl SimCore {
         self.prev_kills  = 0;
         self.prev_pos    = self.agents[0].pos;
 
-        let clusters = find_clusters(
-            &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
-        );
-        let no_paths: Vec<&VecDeque<GridPos>> = vec![];
-        build_obs_into(
-            &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
-            &self.gold_positions, &self.grid, &no_paths, &clusters,
-            1.0, // full match remaining after reset
-        );
+        self.build_observation();
     }
 
-    pub fn step(&mut self, action: u32) -> (f32, bool) {
+    /// Advance the simulation by exactly one tick for `rl_action` and return
+    /// `(reward, done)`. Does NOT rebuild the observation — callers invoke
+    /// `build_observation` once they finish advancing (after one tick for the
+    /// viewer, or at the end of an option for the RL path).
+    fn tick_once(&mut self, rl_action: RlAction) -> (f32, bool) {
         self.prev_gold   = self.agents[0].gold_carried;
         self.prev_score  = self.agents[0].score;
         self.prev_kills  = self.agents[0].kills;
         self.prev_pos    = self.agents[0].pos;
-        let prev_alive   = self.agents[0].respawn_timer == 0;
 
         self.tick += 1;
         let done = self.tick >= self.match_ticks;
@@ -197,16 +206,15 @@ impl SimCore {
         let carry_speed = self.world_cfg.gold_carry_speed;
 
         // Gold regions for this tick — fixed 3×3 spatial grid, so region k is a
-        // stable slot. Used for both obs features and action resolution.
+        // stable slot. Used for action resolution and the obs cluster features.
         let clusters = find_clusters(
             &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
         );
 
-        // nav_goal (the action's chosen target) is no longer used for shaping —
-        // shaping uses a state-defined objective instead (see below).
-        let (wall_hit, _nav_goal) = self.apply_rl_action(int_to_rl_action(action), &clusters, carry_speed);
+        let wall_hit = self.apply_rl_action(rl_action, &clusters, carry_speed);
 
-        // Scripted enemies (agents 1+).
+        // Scripted enemies (agents 1+). Dormant in the gold game (no enemy agents);
+        // kept intact for the future combat game mode.
         for idx in 1..self.agents.len() {
             let kind = self.enemy_kinds[idx];
             if kind == EnemyKind::None { continue; }
@@ -228,79 +236,121 @@ impl SimCore {
                 .map(|it| it.pos),
         );
 
-        let just_died = prev_alive && self.agents[0].respawn_timer > 0;
-
-        // Event-based reward only — no sim-side navigation objective. The agent
-        // must learn where to go from the observation, not from a baked-in hint.
+        // Event-based reward only — gold picked up + banked, time cost, wall_hit.
         let rew = reward::compute(
             &self.world_cfg.reward,
             &self.agents[0],
-            self.prev_pos,
             self.prev_gold,
             self.prev_score,
-            self.prev_kills,
             wall_hit,
-            just_died,
-        );
-
-        // Collect path references for alive enemies only (path_caches[0] is the RL agent).
-        let enemy_paths: Vec<&VecDeque<GridPos>> = (1..self.agents.len())
-            .filter(|&i| self.agents[i].respawn_timer == 0)
-            .map(|i| self.path_caches[i].path())
-            .collect();
-
-        // Fraction of the match still to play — fed to CH_TIME_REMAINING so the
-        // value function is time-aware (keeps the truncation bootstrap unbiased).
-        let time_remaining = 1.0 - (self.tick as f32 / self.match_ticks.max(1) as f32);
-        build_obs_into(
-            &mut self.obs_buf, &self.agents[0], &self.items, &self.agents,
-            &self.gold_positions, &self.grid, &enemy_paths, &clusters,
-            time_remaining,
         );
 
         (rew, done)
     }
 
-    /// Resolve the RL action to a navigation goal or direct combat/wait.
-    /// Returns `(wall_hit, nav_goal)` — nav_goal is None for Wait/Attack actions
-    /// or when no valid target exists (e.g. no health pickups on the map).
-    /// nav_goal is no longer used for reward shaping (shaping uses a state-defined
-    /// objective resolved in `step`); it is retained for the agent's A* target.
+    /// Single-tick step (decode + one tick + observation). Used by the viewer so
+    /// rendering stays one-tile-per-frame and scripted baselines keep their
+    /// per-tick decision cadence. The RL training/eval path uses `step_option`.
+    pub fn step(&mut self, action: u32) -> (f32, bool) {
+        let r = self.tick_once(int_to_rl_action(action));
+        self.build_observation();
+        r
+    }
+
+    /// Temporally-extended ("option") step used by the RL training/eval path.
+    ///
+    /// A navigation action is committed and executed via A* until a reward-relevant
+    /// event (pickup / deposit), arrival or blockage (no movement this tick), the
+    /// episode ending, or MAX_OPTION_TICKS — whichever comes first. `Wait` runs for
+    /// a single tick. The accumulated reward over all inner ticks is returned, and
+    /// the observation is built once at the end.
+    ///
+    /// This turns the per-tick MDP into a semi-MDP over high-level decisions: the
+    /// policy only re-decides at option boundaries, which removes per-tick goal
+    /// thrashing and shortens credit assignment from ~match_ticks steps to a few
+    /// dozen decisions per episode (the options-framework / hierarchical-RL split,
+    /// with A* as the low-level controller).
+    pub fn step_option(&mut self, action: u32) -> (f32, bool) {
+        let rl_action = int_to_rl_action(action);
+        let mut total_rew = 0.0f32;
+        let mut option_ticks = 0u64;
+        let done = loop {
+            let (r, d) = self.tick_once(rl_action);
+            total_rew += r;
+            option_ticks += 1;
+
+            if d { break true; }
+            if !rl_action.is_navigation() { break false; }    // Wait: single tick
+            if option_ticks >= MAX_OPTION_TICKS { break false; }
+            if self.agents[0].respawn_timer > 0 { break false; }  // died mid-option (combat only)
+            // A reward-relevant event occurred this tick → return control to the policy.
+            if self.agents[0].gold_carried != self.prev_gold
+                || self.agents[0].score    != self.prev_score
+            { break false; }
+            // No movement this tick → arrived at the goal, blocked, or no valid target.
+            if self.agents[0].pos == self.prev_pos { break false; }
+        };
+        self.build_observation();
+        (total_rew, done)
+    }
+
+    /// Per-decision action mask: `valid[i] == true` iff action `i` is worth taking
+    /// in the current state. Consumed by MaskablePPO. `Wait` is never masked so
+    /// there is always a legal action.
+    ///
+    ///   - cluster k : valid iff region k holds gold AND the agent can carry more
+    ///   - base      : valid iff the agent is carrying gold (something to deposit)
+    ///   - wait      : always valid (fallback)
+    pub fn action_mask(&self) -> [bool; ACTION_SIZE] {
+        let mut mask = [false; ACTION_SIZE];
+        mask[ACTION_WAIT as usize] = true;
+
+        let agent = &self.agents[0];
+        if agent.respawn_timer > 0 { return mask; }  // dormant: combat only
+
+        if agent.gold_carried < AGENT_MAX_GOLD {
+            let clusters = find_clusters(
+                &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
+            );
+            for (k, slot) in mask.iter_mut().take(CLUSTER_K).enumerate() {
+                if clusters[k].is_some() { *slot = true; }
+            }
+        }
+        if agent.gold_carried > 0 {
+            mask[CLUSTER_K] = true;  // NavigateToBase
+        }
+        mask
+    }
+
+    /// Rebuild the observation buffer from the current world state. Cluster features
+    /// are recomputed from the post-step gold positions so they stay consistent with
+    /// the GOLD channel.
+    fn build_observation(&mut self) {
+        let clusters = find_clusters(
+            &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
+        );
+        let time_remaining = 1.0 - (self.tick as f32 / self.match_ticks.max(1) as f32);
+        build_obs_into(
+            &mut self.obs_buf, &self.agents[0],
+            &self.gold_positions, &self.grid, &clusters,
+            time_remaining,
+        );
+    }
+
+    /// Resolve the RL action to a navigation goal and execute one A* step toward it.
+    /// Returns `wall_hit` — true when a Move was attempted but the agent did not
+    /// advance (blocked). `Wait` and goals with no valid target are no-ops.
     fn apply_rl_action(
         &mut self,
         rl_action:   RlAction,
         clusters:    &[Option<GoldCluster>; CLUSTER_K],
         carry_speed: f32,
-    ) -> (bool, Option<GridPos>) {
-        if self.agents[0].respawn_timer > 0 { return (false, None); }
+    ) -> bool {
+        if self.agents[0].respawn_timer > 0 { return false; }
         match rl_action {
-            RlAction::MeleeAttack => {
-                physics::try_melee_attack(
-                    &mut self.agents, 0,
-                    self.world_cfg.melee_range  as i32,
-                    self.world_cfg.melee_damage,
-                    self.world_cfg.melee_cooldown_ticks,
-                    self.world_cfg.respawn_ticks,
-                );
-                (false, None)
-            }
-            RlAction::RangedAttack => {
-                physics::try_ranged_attack(
-                    &mut self.agents, 0,
-                    self.world_cfg.ranged_range  as i32,
-                    self.world_cfg.ranged_damage,
-                    self.world_cfg.ranged_cooldown_ticks,
-                    self.world_cfg.respawn_ticks,
-                );
-                (false, None)
-            }
-            RlAction::Wait => (false, None),
-
+            RlAction::Wait => false,
             nav_action => {
-                // Resolve navigation goal from the action type.
-                let goal = resolve_nav_goal(
-                    &self.agents, &self.items, nav_action, clusters,
-                );
+                let goal = resolve_nav_goal(&self.agents, nav_action, clusters);
                 if let Some(goal) = goal {
                     let prev_pos = self.agents[0].pos;
                     // navigate_action uses the cached path; recomputes only when goal changes.
@@ -308,17 +358,16 @@ impl SimCore {
                         &self.agents[0], goal, &self.grid, &mut self.path_caches[0],
                     );
                     physics::apply_action(&mut self.agents, &self.grid, 0, act, carry_speed);
-                    let wall_hit = matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos;
-                    (wall_hit, Some(goal))
+                    matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos
                 } else {
-                    (false, None)
+                    false
                 }
             }
         }
     }
 
     /// The RL agent's current A* path (remaining waypoints toward the last navigation goal).
-    /// Populated by apply_rl_action every step; empty for Wait/Attack actions.
+    /// Populated by apply_rl_action; empty for Wait.
     pub fn agent_path(&self) -> &std::collections::VecDeque<GridPos> {
         self.path_caches[0].path()
     }
@@ -338,10 +387,9 @@ impl SimCore {
 // ── Navigation goal resolution ────────────────────────────────────────────────
 
 /// Resolve a navigation RlAction to a concrete GridPos target.
-/// Returns None if the target type is unavailable (e.g., no health pickups on map).
+/// Returns None if the target is unavailable (e.g. an empty cluster region).
 fn resolve_nav_goal(
     agents:   &[AgentState],
-    items:    &[ItemState],
     action:   RlAction,
     clusters: &[Option<GoldCluster>; CLUSTER_K],
 ) -> Option<GridPos> {
@@ -353,20 +401,7 @@ fn resolve_nav_goal(
                 .and_then(|c| c.nearest_gold(agent.pos))
         }
         RlAction::NavigateToBase => Some(agent.base_pos),
-        RlAction::NavigateToHealth => items.iter()
-            .filter(|i| i.kind == ItemKind::Health)
-            .min_by_key(|i| chebyshev(agent.pos, i.pos))
-            .map(|i| i.pos),
-        RlAction::NavigateToAmmo => items.iter()
-            .filter(|i| i.kind == ItemKind::Ammo)
-            .min_by_key(|i| chebyshev(agent.pos, i.pos))
-            .map(|i| i.pos),
-        RlAction::NavigateToEnemy => agents.iter()
-            .skip(1)
-            .filter(|a| a.team != agent.team)
-            .min_by_key(|a| chebyshev(agent.pos, a.pos))
-            .map(|a| a.pos),
-        // Direct actions handled in apply_rl_action — never reach here.
-        RlAction::MeleeAttack | RlAction::RangedAttack | RlAction::Wait => None,
+        // Wait is handled in apply_rl_action — never reaches here.
+        RlAction::Wait => None,
     }
 }
