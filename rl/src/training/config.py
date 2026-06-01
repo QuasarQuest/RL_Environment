@@ -51,8 +51,8 @@ class PpoConfig:
     max_grad_norm: float = MISSING
     target_kl: float = MISSING
     # pi/vf head depth — applied for all algos including recurrent_ppo.
-    # Stages 1-3: [64]  (lean, fast convergence, low overfitting risk)
-    # Stages 4-6: [128, 64]  (deeper for enemy/combat decisions)
+    # [64] is lean and converges fast for the single-agent gold rush; raise it if
+    # the richer item set ever needs more head capacity.
     # For recurrent_ppo these control the MLP layers inserted between the
     # LSTM output and the final action/value heads.
     net_arch_pi: list[int] = field(default_factory=lambda: [64])

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use crate::style::ThemeColor;
+use crate::style::color::PANEL_SCRIM;
 
 pub fn spawn_button_group(
     parent:         &mut ChildSpawnerCommands,
@@ -16,7 +17,7 @@ pub fn spawn_button_group(
             border:         UiRect::all(Val::Px(1.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.2)),
+        BackgroundColor(PANEL_SCRIM),
         BorderColor::all(ThemeColor::Border.resolve()),
     )).with_children(build_children);
 }

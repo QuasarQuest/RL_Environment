@@ -1,51 +1,20 @@
-// assets/world/config_stage2.ron — Stage 2
-//
-// Obstacles + speed-boost items added.
-// Agent must navigate around walls while still prioritising gold.
-// Same 20×20 map; match extended to give more exploration time.
-
+// Stage 2 — adds light obstacles and the speed/slow items. 1000-tick episodes.
+// The agent learns to detour for speed boosts (3 rarity tiers) and avoid the
+// slow-down hazard while routing gold around scattered obstacles.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 3000,
+    match_duration_ticks: 1000,
 
-    bases: [
-        ( team: 0, corner: BottomLeft, margin: 0.05 ),
-    ],
+    obstacles: ( density: 0.06, profile: Mixed ),
 
-    agents: [
-        ( team: 0, spawn: NearBase, spawn_offset: 0.10 ),
-    ],
-
-    safe_zone_fraction: 0.03,
-
-    // Light scatter only — corridors still plentiful, no walls or blocks.
-    obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.10, max_wall_fraction: 0.10 ),
-    obstacle_clusters: [
-        ( kind: Block,   count: 3, size: (4, 5) ),
-        ( kind: Block,   count: 6, size: (2, 3) ),
-        ( kind: Wall,    count: 5, size: (6, 2) ),
-        ( kind: Wall,    count: 15, size: (3, 1) ),
-        ( kind: Scatter, count: 45, size: (1, 1) ),
-    ],
-
-    // Gold + speed boost. Speed boost lets the agent learn to pick up
-    // secondary items without them being in the critical path.
     item_density: (
-        gold:        2.0,
-        health:      0.0,
-        ammo:        0.0,
-        speed_boost: 0.5,
+        gold:   2.0,
+        speed1: 0.5,   // common  — 40-tick 2× boost
+        speed2: 0.25,  // uncommon — 80-tick
+        speed3: 0.1,   // rare    — 160-tick
+        slow:   0.4,   // hazard  — 60-tick 0.5× (avoid it)
     ),
 
-    gold_carry_speed: 0.95,
-
-    reward: (
-        tick:          -0.0005,
-        pickup:         0.5,
-        deposit:        5.0,
-        approach:       0.05,
-        kill:           0.0,
-        death_penalty:  0.0,
-    ),
+    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),
 )

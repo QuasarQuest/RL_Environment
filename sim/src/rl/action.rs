@@ -1,21 +1,29 @@
 // src/rl/action.rs
 //
-// High-level action space for the RL agent — single-agent gold rush only.
-// The agent picks a navigation goal; A* handles the movement. There is no
-// combat: enemies/ammo/health were removed from the agent's world (see
-// reward.rs / obs.rs). Combat lives in a separate future game mode.
+// High-level action space for the RL agent — single-agent gold rush.
+// The agent picks a navigation goal; A* (engine/nav.rs) handles the movement.
+// There is no combat. Besides gold regions and the base, the policy can also
+// detour to the nearest speed boost or score multiplier.
 //
 // Layout:
-//   0..8   NavigateToCluster(0..8)  — fixed 3×3 map regions (stable spatial slots)
-//   9      NavigateToBase           — return to base and deposit
-//   10     Wait
+//   0..K     NavigateToCluster(0..K)  — fixed 3×3 map regions (stable spatial slots)
+//   K        NavigateToBase           — return to base and deposit
+//   K+1      NavigateToSpeed          — nearest speed-boost item
+//   K+2      NavigateToMultiplier     — nearest score-multiplier item
+//   K+3      Wait
 //
 // CLUSTER_K must match engine/clusters.rs and rl/obs.rs.
-// ACTION_SIZE = CLUSTER_K + 2 (Base, Wait).
+// ACTION_SIZE = CLUSTER_K + 4.
 
 pub const CLUSTER_K:   usize = 9;
-pub const ACTION_SIZE: usize = CLUSTER_K + 2; // 11
-pub const ACTION_WAIT: u32   = (ACTION_SIZE - 1) as u32; // 10
+pub const ACTION_SIZE: usize = CLUSTER_K + 4; // 13
+
+// Index helpers (kept relative to CLUSTER_K so the layout stays correct if the
+// region grid size changes).
+pub const ACTION_BASE:  u32 = CLUSTER_K as u32;       // 9
+pub const ACTION_SPEED: u32 = CLUSTER_K as u32 + 1;   // 10
+pub const ACTION_MULT:  u32 = CLUSTER_K as u32 + 2;   // 11
+pub const ACTION_WAIT:  u32 = CLUSTER_K as u32 + 3;   // 12
 
 /// High-level action the RL policy selects each decision point.
 /// Navigation goals are resolved to a concrete GridPos target and executed via A*
@@ -25,40 +33,40 @@ pub const ACTION_WAIT: u32   = (ACTION_SIZE - 1) as u32; // 10
 pub enum RlAction {
     NavigateToCluster(u8),
     NavigateToBase,
+    NavigateToSpeed,
+    NavigateToMultiplier,
     Wait,
 }
 
 impl RlAction {
-    /// True for the navigation goals (cluster/base) that are executed via A* and
-    /// run as temporally-extended options (see `SimCore::step_option`). False for
-    /// `Wait`, which is a single-tick action.
+    /// True for the navigation goals executed via A* as temporally-extended
+    /// options (see `SimCore::step_option`). False for `Wait` (single tick).
     pub fn is_navigation(self) -> bool {
-        matches!(self, Self::NavigateToCluster(_) | Self::NavigateToBase)
+        !matches!(self, Self::Wait)
     }
 }
 
 impl std::fmt::Display for RlAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NavigateToCluster(k) => write!(f, "Nav Cluster {k}"),
-            Self::NavigateToBase       => write!(f, "Nav Base"),
-            Self::Wait                 => write!(f, "Wait"),
+            Self::NavigateToCluster(k)  => write!(f, "Nav Cluster {k}"),
+            Self::NavigateToBase        => write!(f, "Nav Base"),
+            Self::NavigateToSpeed       => write!(f, "Nav Speed"),
+            Self::NavigateToMultiplier  => write!(f, "Nav Multiplier"),
+            Self::Wait                  => write!(f, "Wait"),
         }
     }
 }
 
 /// Convert a neural-net output integer to an RlAction.
 /// Panics on out-of-range — Python side must clamp to 0..ACTION_SIZE.
-///
-/// Indices 0..CLUSTER_K are the fixed region-navigation slots; the remaining two
-/// are NavigateToBase and Wait, defined relative to CLUSTER_K so the layout stays
-/// correct if the region grid size changes.
 pub fn int_to_rl_action(action: u32) -> RlAction {
-    let k = CLUSTER_K as u32;
     match action {
-        a if a < k      => RlAction::NavigateToCluster(a as u8),
-        a if a == k     => RlAction::NavigateToBase,
-        a if a == k + 1 => RlAction::Wait,
+        a if a < CLUSTER_K as u32 => RlAction::NavigateToCluster(a as u8),
+        a if a == ACTION_BASE     => RlAction::NavigateToBase,
+        a if a == ACTION_SPEED    => RlAction::NavigateToSpeed,
+        a if a == ACTION_MULT     => RlAction::NavigateToMultiplier,
+        a if a == ACTION_WAIT     => RlAction::Wait,
         _ => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
     }
 }

@@ -22,23 +22,27 @@ pub const DEFAULT_TICKS_PER_SECOND: f32 = 10.0;
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 pub const AGENT_MAX_GOLD:      u8  = 5;
-pub const AGENT_MAX_HEARTS:    u8  = 3;
-pub const AGENT_RESPAWN_TICKS: u8  = 150;
 pub const GOLD_CARRY_SPEED:    f32 = 0.9;
 
-// ── Ammo ─────────────────────────────────────────────────────────────────────
-pub const AGENT_START_AMMO: u8 = 3;
-pub const AGENT_MAX_AMMO:   u8 = 10;
-pub const AMMO_PER_PICKUP:  u8 = 3;
+// ── Item buffs (ticks) ─────────────────────────────────────────────────────────
+// Speed boosts: all give 2× move speed; the three tiers differ only in how long
+// the window lasts (rarer tier → longer). Slow halves move speed; Multiplier
+// doubles deposit value. SPEED_BUFF_MAX is the normaliser for the speed obs channel.
+pub const SPEED1_TICKS: u16 =  40;
+pub const SPEED2_TICKS: u16 =  80;
+pub const SPEED3_TICKS: u16 = 160;
+pub const SLOW_TICKS:   u16 =  60;
+pub const MULT_TICKS:   u16 = 100;
 
-// ── Speed boost ───────────────────────────────────────────────────────────────
-pub const SPEED_BUFF_TICKS: u8 = 15;
+/// Normalisers for the buff-remaining observation channels (longest window per buff).
+pub const SPEED_BUFF_MAX: u16 = SPEED3_TICKS;
+pub const SLOW_BUFF_MAX:  u16 = SLOW_TICKS;
+pub const MULT_BUFF_MAX:  u16 = MULT_TICKS;
 
-// ── Combat — defaults, all overridable via WorldConfig ───────────────────────
-pub const MELEE_RANGE:           u8 = 2;
-pub const RANGED_RANGE:          u8 = 6;
-pub const KILL_REWARD:           u8 = 15;
-pub const MELEE_DAMAGE:          u8 = 1;
-pub const RANGED_DAMAGE:         u8 = 1;
-pub const MELEE_COOLDOWN_TICKS:  u8 = 4;
-pub const RANGED_COOLDOWN_TICKS: u8 = 6;
+/// Score multiplier applied to a deposit while `mult_buff > 0`.
+pub const DEPOSIT_MULTIPLIER: u32 = 2;
+
+// ── Viewer-compat constant ──────────────────────────────────────────────────────
+// Combat is gone, but the agent's inert `hearts` field (read only by the viewer's
+// GOAP fallback) is initialised "full" so it never reads as low-health.
+pub const AGENT_MAX_HEARTS: u8 = 3;

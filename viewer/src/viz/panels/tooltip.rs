@@ -90,29 +90,24 @@ pub fn update_tooltip(
         if let Some(agent) = bridge.agents().get(idx) {
             let label = format!("Agent {} — {}", idx, crate::team::Team(agent.team).name());
 
-            // Hearts as pips, ammo fraction, gold, score.
-            let hearts = "♥".repeat(agent.hearts as usize)
-                       + &"♡".repeat((config::AGENT_MAX_HEARTS - agent.hearts) as usize);
+            // Gold + score.
             let stats = format!(
-                "{}  Ammo {}/{}  Gold {}/{}  Score {}",
-                hearts,
-                agent.ammo, config::AGENT_MAX_AMMO,
+                "Gold {}/{}  Score {}",
                 agent.gold_carried, config::AGENT_MAX_GOLD,
                 agent.score,
             );
 
-            // Position + optional speed buff + policy mode for agent 0.
-            let speed_str = if agent.speed_buff > 0 {
-                format!("  ⚡Speed +{}", agent.speed_buff)
-            } else {
-                String::new()
-            };
+            // Position + active buff timers (ticks remaining) + policy mode for agent 0.
+            let mut buffs = String::new();
+            if agent.speed_buff > 0 { buffs += &format!("  ⚡{}", agent.speed_buff); }
+            if agent.slow_buff  > 0 { buffs += &format!("  🐌{}", agent.slow_buff); }
+            if agent.mult_buff  > 0 { buffs += &format!("  ×2:{}", agent.mult_buff); }
             let mode_str = if idx == 0 {
                 format!("  [{}]", bridge.mode.label())
             } else {
                 String::new()
             };
-            let extra = format!("({}, {}){}{}", agent.pos.x, agent.pos.y, speed_str, mode_str);
+            let extra = format!("({}, {}){}{}", agent.pos.x, agent.pos.y, buffs, mode_str);
 
             for mut t in texts.p0().iter_mut() { *t = Text::new(&label); }
             for mut t in texts.p1().iter_mut() { *t = Text::new(&stats); }

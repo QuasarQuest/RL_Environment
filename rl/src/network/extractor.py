@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (5605,):
-  [0     : 5000)   main egocentric crop  — (8, 25, 25) logically
-  [5000  : 5578)   minimap               — (2, 17, 17) logically
-  [5578  : 5605)   cluster features      — (27,) = 9 regions × (dx, dy, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10222,):
+  [0     : 8750)   main egocentric crop  — (14, 25, 25) logically
+  [8750  : 10195)  minimap               — (5, 17, 17) logically
+  [10195 : 10222)  cluster features      — (27,) = 9 regions × (dx, dy, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -11,15 +11,20 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     1  BASE          own base tile
     2  GOLD          gold item
     3  OBSTACLE      impassable wall
+    4  SPEED         speed-boost item (tier-encoded 0.33/0.66/1.0)
+    5  HAZARD        slow-down hazard item
+    6  MULT          score-multiplier item
   Broadcast:
-    4  CARRYING      gold carried (broadcast)
-    5  BASE_DX       direction to own base X (broadcast)
-    6  BASE_DY       direction to own base Y (broadcast)
-    7  TIME_REMAINING  fraction of match left ∈ [0,1] (broadcast)
+    7  CARRYING        gold carried
+    8  BASE_DX         direction to own base X
+    9  BASE_DY         direction to own base Y
+    10 TIME_REMAINING  fraction of match left ∈ [0,1]
+    11 SPEED_REMAINING speed buff ticks left ∈ [0,1]
+    12 SLOW_REMAINING  slow  buff ticks left ∈ [0,1]
+    13 MULT_REMAINING  mult  buff ticks left ∈ [0,1]
 
-  Minimap channels (2, 17, 17):
-    0  MM_OBSTACLE
-    1  MM_GOLD
+  Minimap channels (5, 17, 17):
+    0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_SLOW   4  MM_MULT
 
   Cluster features (27 floats = 9 regions × [dx_norm, dy_norm, count_norm]):
     One entry per fixed 3×3 map region; zero for regions with no gold.
@@ -65,26 +70,27 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
-# Single-agent gold rush only — no enemy/combat/item channels.
+# Single-agent gold rush. Crop channels: OOB, BASE, GOLD, OBSTACLE, SPEED, HAZARD,
+# MULT, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, SLOW_REM, MULT_REM.
 
-OBS_CHANNELS = 8   # OOB, BASE, GOLD, OBSTACLE, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING
+OBS_CHANNELS = 14
 OBS_CROP_H = 25
 OBS_CROP_W = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 5000
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8750
 
-MM_CHANNELS = 2   # obstacle, gold
+MM_CHANNELS = 5   # obstacle, gold, speed, slow, mult
 MM_H = 17
 MM_W = 17
-MM_DIM = MM_CHANNELS * MM_H * MM_W  # 578
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1445
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
 CLUSTER_FEATURES = CLUSTER_K * 3  # 27 — 9 regions × [dx, dy, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 5605
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10222
 
 # Action space size. Must match ACTION_SIZE in src/rl/action.rs
-# (CLUSTER_K region-nav slots + NavigateToBase + Wait).
-ACTION_SIZE = CLUSTER_K + 2  # 11
+# (CLUSTER_K region-nav slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + Wait).
+ACTION_SIZE = CLUSTER_K + 4  # 13
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
@@ -110,7 +116,7 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
 class AtbCnnExtractor(BaseFeaturesExtractor):
     """Three-branch extractor for egocentric crop, global minimap, and cluster features.
 
-    Input: flat (OBS_TOTAL,) = (11519,) buffer — split internally.
+    Input: flat (OBS_TOTAL,) = (10222,) buffer — split internally.
 
     Crop branch  (17, 25, 25):
       Conv(17→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
@@ -185,7 +191,11 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         crop = obs[:, :OBS_CROP_DIM].reshape(-1, OBS_CHANNELS, OBS_CROP_H, OBS_CROP_W)
         mm = obs[:, OBS_CROP_DIM:OBS_CROP_DIM + MM_DIM].reshape(-1, MM_CHANNELS, MM_H, MM_W)
-        cl = obs[:, OBS_CROP_DIM + MM_DIM:]
+        # Bounded end (…+ CLUSTER_FEATURES, == OBS_TOTAL) rather than an open `[X:]`
+        # slice: the open form traces to an ONNX Slice with ends=INT64_MAX, leaving
+        # the cluster_head Gemm's input dim symbolic so tract (the viewer's runtime)
+        # fails graph analysis. A concrete end keeps the shape static for tract.
+        cl = obs[:, OBS_CROP_DIM + MM_DIM:OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES]
 
         crop_feat = self.crop_head(self.crop_cnn(crop))
         mm_feat = self.mm_head(self.mm_cnn(mm))

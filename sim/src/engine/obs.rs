@@ -3,7 +3,9 @@
 // Builds the CNN observation for the RL agent.
 // Writes into a caller-supplied buffer — no per-step heap allocation.
 //
-// Single-agent gold rush: only the agent, gold, base and obstacles are observed.
+// Single-agent gold rush: the agent observes gold, the base, obstacles and the
+// three flavour items (speed boost, slow hazard, score multiplier), plus its own
+// carried gold and active buff timers.
 //
 // Buffer layout (OBS_TOTAL floats):
 //   [0 .. OBS_DIM)                  egocentric crop  (OBS_CHANNELS × 25 × 25)
@@ -12,15 +14,17 @@
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use crate::config::AGENT_MAX_GOLD;
+use crate::config::{AGENT_MAX_GOLD, MULT_BUFF_MAX, SLOW_BUFF_MAX, SPEED_BUFF_MAX};
 use crate::entity::AgentState;
+use crate::entity::item::{ItemKind, ItemState};
 use crate::engine::clusters::GoldCluster;
 use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
-    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD,
-    CH_OBSTACLE, CH_OOB, CH_TIME_REMAINING,
-    MM_CH_GOLD, MM_CH_OBSTACLE, MM_CHANNELS, MM_DIM, MM_SIZE,
-    OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
+    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_HAZARD, CH_MULT,
+    CH_MULT_REMAINING, CH_OBSTACLE, CH_OOB, CH_SLOW_REMAINING, CH_SPEED,
+    CH_SPEED_REMAINING, CH_TIME_REMAINING,
+    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SLOW, MM_CH_SPEED,
+    MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
 use crate::world::coords::GridPos;
 use crate::world::grid::Grid;
@@ -29,10 +33,21 @@ use crate::world::tile::Tile;
 // Normaliser for cluster gold count (agent rarely sees more than this in one cluster).
 const CLUSTER_COUNT_NORM: f32 = 25.0;
 
+/// Crop-channel value for a speed item, encoding the tier in [0,1].
+fn speed_tier_value(kind: ItemKind) -> f32 {
+    match kind {
+        ItemKind::Speed1 => 1.0 / 3.0,
+        ItemKind::Speed2 => 2.0 / 3.0,
+        ItemKind::Speed3 => 1.0,
+        _ => 0.0,
+    }
+}
+
 pub fn build_obs_into(
     buf:            &mut [f32],
     agent:          &AgentState,
     gold_positions: &[GridPos],
+    items:          &[ItemState],
     grid:           &Grid,
     clusters:       &[Option<GoldCluster>; CLUSTER_K],
     time_remaining: f32,
@@ -51,17 +66,21 @@ pub fn build_obs_into(
     buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane]
         .fill(agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
 
-    // ── Broadcast: base direction ─────────────────────────────────────────────
-
     let base_dx = (agent.base_pos.x - ax) as f32 / gw as f32;
     let base_dy = (agent.base_pos.y - ay) as f32 / gh as f32;
     buf[CH_BASE_DX * plane..(CH_BASE_DX + 1) * plane].fill(base_dx);
     buf[CH_BASE_DY * plane..(CH_BASE_DY + 1) * plane].fill(base_dy);
 
-    // ── Broadcast: episode progress ───────────────────────────────────────────
-
     buf[CH_TIME_REMAINING * plane..(CH_TIME_REMAINING + 1) * plane]
         .fill(time_remaining.clamp(0.0, 1.0));
+
+    // Active buff timers, normalised by their longest possible window.
+    buf[CH_SPEED_REMAINING * plane..(CH_SPEED_REMAINING + 1) * plane]
+        .fill((agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
+    buf[CH_SLOW_REMAINING * plane..(CH_SLOW_REMAINING + 1) * plane]
+        .fill((agent.slow_buff as f32 / SLOW_BUFF_MAX as f32).min(1.0));
+    buf[CH_MULT_REMAINING * plane..(CH_MULT_REMAINING + 1) * plane]
+        .fill((agent.mult_buff as f32 / MULT_BUFF_MAX as f32).min(1.0));
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 
@@ -75,15 +94,15 @@ pub fn build_obs_into(
             } else {
                 let tile = unsafe { grid.get_unchecked(wx, wy) };
                 match tile {
-                    Tile::Base(t) if t == agent.team => buf[pixel(CH_BASE,     cx, cy)] = 1.0,
-                    Tile::Obstacle                    => buf[pixel(CH_OBSTACLE, cx, cy)] = 1.0,
+                    Tile::Base(_)  => buf[pixel(CH_BASE,     cx, cy)] = 1.0,
+                    Tile::Obstacle => buf[pixel(CH_OBSTACLE, cx, cy)] = 1.0,
                     _ => {}
                 }
             }
         }
     }
 
-    // ── Gold ──────────────────────────────────────────────────────────────────
+    // ── Gold (crop) ────────────────────────────────────────────────────────────
 
     for &gpos in gold_positions {
         let cx = gpos.x - ax + centre;
@@ -93,16 +112,26 @@ pub fn build_obs_into(
         }
     }
 
+    // ── Flavour items (crop): speed / hazard / multiplier ────────────────────
+
+    for it in items {
+        let cx = it.pos.x - ax + centre;
+        let cy = it.pos.y - ay + centre;
+        if !in_crop(cx, cy) { continue; }
+        match it.kind {
+            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 =>
+                buf[pixel(CH_SPEED, cx, cy)] = speed_tier_value(it.kind),
+            ItemKind::Slow       => buf[pixel(CH_HAZARD, cx, cy)] = 1.0,
+            ItemKind::Multiplier => buf[pixel(CH_MULT,   cx, cy)] = 1.0,
+            ItemKind::Gold       => {} // already drawn from gold_positions
+        }
+    }
+
     // ── Minimap (17×17 cells, ~3×3 tiles/cell for 50×50 map) ─────────────────
 
-    build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], gold_positions, grid);
+    build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], gold_positions, items, grid);
 
     // ── Cluster features (CLUSTER_K × 3 floats after minimap) ─────────────────
-    //
-    // Per region slot k (fixed 3×3 grid): [dx_norm, dy_norm, count_norm]
-    // dx/dy are signed direction from agent to the nearest gold in region k,
-    // normalised by map dimensions. count_norm is gold count / CLUSTER_COUNT_NORM.
-    // Region k is a stable spatial address (see engine/clusters.rs).
 
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
@@ -114,7 +143,6 @@ pub fn build_obs_into(
             }
             buf[base + 2] = (c.count() as f32 / CLUSTER_COUNT_NORM).min(1.0);
         }
-        // Unreachable slots stay 0.0.
     }
 }
 
@@ -123,6 +151,7 @@ pub fn build_obs_into(
 fn build_minimap(
     mm:             &mut [f32],
     gold_positions: &[GridPos],
+    items:          &[ItemState],
     grid:           &Grid,
 ) {
     debug_assert_eq!(mm.len(), MM_CHANNELS * MM_SIZE * MM_SIZE);
@@ -153,6 +182,18 @@ fn build_minimap(
     for &gpos in gold_positions {
         let (mx, my) = to_mm(gpos.x, gpos.y);
         mm[mm_pixel(MM_CH_GOLD, mx, my)] = 1.0;
+    }
+
+    // Flavour items.
+    for it in items {
+        let ch = match it.kind {
+            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 => MM_CH_SPEED,
+            ItemKind::Slow       => MM_CH_SLOW,
+            ItemKind::Multiplier => MM_CH_MULT,
+            ItemKind::Gold       => continue,
+        };
+        let (mx, my) = to_mm(it.pos.x, it.pos.y);
+        mm[mm_pixel(ch, mx, my)] = 1.0;
     }
 }
 

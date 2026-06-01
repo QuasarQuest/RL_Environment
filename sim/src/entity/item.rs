@@ -1,11 +1,28 @@
 use crate::world::coords::GridPos;
 
+/// Pickups that appear on the map. Single-agent gold rush only — no combat
+/// items (health/ammo). Gold is the objective; the rest are temporary buffs the
+/// policy can choose to detour for, plus one hazard it should avoid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
+    /// The objective — carry to base to score.
     Gold,
-    Health,
-    Ammo,
-    SpeedBoost,
+    /// Speed boost, three rarity tiers (rarer = longer 2× window). All give the
+    /// same 2× move speed; only the buff duration differs (see config buff consts).
+    Speed1,
+    Speed2,
+    Speed3,
+    /// Slow-down hazard — halves move speed for a window. The agent should avoid it.
+    Slow,
+    /// Score multiplier — deposits are worth 2× while active.
+    Multiplier,
+}
+
+impl ItemKind {
+    /// True for the beneficial speed buffs the policy may deliberately navigate toward.
+    pub fn is_speed(self) -> bool {
+        matches!(self, ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3)
+    }
 }
 
 /// How many of a given item kind are allowed on the map simultaneously.

@@ -3,7 +3,7 @@ use bevy::color::Alpha;
 use atb::{config, world::tile::Tile};
 use crate::sim_bridge::SimBridge;
 use crate::viz::grid_offset::GridOffset;
-use crate::style::color::team_color;
+use crate::style::color::{team_color, TILE_FREE, TILE_OBSTACLE};
 
 #[derive(Component)]
 pub struct TileMarker {
@@ -13,8 +13,8 @@ pub struct TileMarker {
 
 fn tile_color(tile: Tile) -> Color {
     match tile {
-        Tile::Free           => Color::srgb(0.06, 0.08, 0.14),  // dark navy floor
-        Tile::Obstacle       => Color::srgb(0.18, 0.20, 0.24),  // dark stone grey
+        Tile::Free           => TILE_FREE,
+        Tile::Obstacle       => TILE_OBSTACLE,
         Tile::Base(team)     => team_color(team).with_alpha(0.80),
         Tile::SafeZone(team) => team_color(team).with_alpha(0.28),
     }

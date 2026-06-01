@@ -23,7 +23,8 @@ impl Dir {
 }
 
 /// Internal movement action used by both the RL agent (via A* goal navigation)
-/// and scripted enemies. Combat is handled separately via physics::try_melee/ranged_attack.
+/// Internal movement action used by the RL agent via A* goal navigation.
+/// Single-agent gold rush — no combat actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Move one cell in the given direction.
@@ -32,23 +33,27 @@ pub enum Action {
     Wait,
 }
 
+/// Single-agent gold-rush state: gold carry/score plus three temporary buff
+/// timers (ticks remaining). Combat is gone — there are no enemies, no teams and
+/// no damage. `team`/`hearts`/`ammo` are retained as inert single-agent values
+/// (team 0, full hearts, no ammo) only so the existing viewer panels keep
+/// rendering; the simulation never mutates them.
 #[derive(Clone)]
 pub struct AgentState {
     pub pos:          GridPos,
-    pub team:         u8,
     pub gold_carried: u8,
     pub score:        u32,
-    pub hearts:       u8,
-    pub ammo:         u8,
-    pub speed_buff:   u8,
+    /// Ticks of 2× move speed remaining (0 = none). Set by Speed{1,2,3} pickups.
+    pub speed_buff:   u16,
+    /// Ticks of 0.5× move speed remaining (0 = none). Set by the Slow hazard.
+    pub slow_buff:    u16,
+    /// Ticks of 2× deposit value remaining (0 = none). Set by the Multiplier pickup.
+    pub mult_buff:    u16,
     pub spawn_pos:    GridPos,
     pub base_pos:     GridPos,
-    /// Ticks until melee attack is ready again (0 = ready).
-    pub melee_cooldown:  u8,
-    /// Ticks until ranged attack is ready again (0 = ready).
-    pub ranged_cooldown: u8,
-    /// Dead-and-respawning countdown: 0 = alive, >0 = respawning.
-    pub respawn_timer:   u8,
-    /// Cumulative kill count — used for kill-reward tracking.
-    pub kills:           u32,
+
+    // ── Inert viewer-compat fields (never mutated by the sim) ──────────────────
+    pub team:   u8,
+    pub hearts: u8,
+    pub ammo:   u8,
 }

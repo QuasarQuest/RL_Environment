@@ -159,7 +159,10 @@ def _resolve_resume(model_path: str) -> tuple[str, Path]:
 
 load_dotenv()
 
-console = Console()
+# force_terminal keeps Rich colour/styling when PyCharm runs this as a Python
+# config (stdout is not a TTY there, so auto-detection would strip ANSI).
+# NO_COLOR still wins for plain piping / redirection.
+console = Console(force_terminal=None if os.environ.get("NO_COLOR") else True)
 
 _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
 _WORKSPACE_ROOT = _RL_ROOT.parent  # algorithm_test_bed/

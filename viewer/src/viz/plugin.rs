@@ -3,10 +3,13 @@ use bevy::prelude::*;
 use super::camera::{spawn_camera, fit_camera_to_grid, init_pan_state, camera_controls};
 use super::grid_offset::compute_grid_offset;
 use super::renderer::tile_renderer::{spawn_tiles, sync_tile_colors};
-use super::renderer::agent_renderer::{sync_agent_transforms, sync_item_transforms};
+use super::renderer::agent_renderer::{
+    sync_agent_transforms, sync_item_transforms,
+    spawn_spawn_pocket_overlay, sync_spawn_pocket_overlay,
+};
 use super::renderer::debug_gizmos::{
-    DebugGizmoFlags, toggle_path_viz, toggle_range_viz,
-    draw_path_gizmo, draw_range_gizmos,
+    DebugGizmoFlags, toggle_path_viz,
+    draw_path_gizmo, draw_spawn_pocket_border,
 };
 use super::hud::{
     spawn_hud,
@@ -20,6 +23,7 @@ use super::panels::scoreboard::{
 };
 use super::panels::debug_overlay::{spawn_debug_overlay, toggle_debug_overlay, update_debug_overlay};
 use super::panels::help_overlay::{spawn_help_overlay, toggle_help_overlay};
+use super::panels::legend_overlay::{spawn_legend_overlay, toggle_legend_overlay};
 use super::panels::load_menu::{
     LoadMenuState,
     spawn_load_menu, toggle_load_menu, sync_load_menu_visibility,
@@ -48,6 +52,7 @@ impl Plugin for VizPlugin {
                 spawn_camera,
                 compute_grid_offset,
                 spawn_tiles,
+                spawn_spawn_pocket_overlay,
                 fit_camera_to_grid,
             ).chain())
             .add_systems(Startup, (
@@ -55,6 +60,7 @@ impl Plugin for VizPlugin {
                 spawn_tab_scoreboard,
                 spawn_tooltip,
                 spawn_help_overlay,
+                spawn_legend_overlay,
                 spawn_debug_overlay,
                 spawn_end_screen,
                 spawn_load_menu,
@@ -65,6 +71,7 @@ impl Plugin for VizPlugin {
                 sync_tile_colors,
                 sync_agent_transforms,
                 sync_item_transforms,
+                sync_spawn_pocket_overlay,
             ))
             .add_systems(Update, (
                 update_tooltip,
@@ -79,12 +86,12 @@ impl Plugin for VizPlugin {
                 handle_policy_key,
                 sync_policy_mode_label,
                 toggle_help_overlay,
+                toggle_legend_overlay,
                 toggle_debug_overlay,
                 update_debug_overlay,
                 toggle_path_viz,
-                toggle_range_viz,
                 draw_path_gizmo,
-                draw_range_gizmos,
+                draw_spawn_pocket_border,
             ))
             .add_systems(Update, (
                 toggle_load_menu,

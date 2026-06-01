@@ -11,6 +11,8 @@ fn action_color(action: RlAction) -> Color {
         RlAction::NavigateToCluster(2) => VIOLET_400,
         RlAction::NavigateToCluster(_) => AMBER_400,
         RlAction::NavigateToBase       => ORANGE_400,
+        RlAction::NavigateToSpeed      => LIME_400,
+        RlAction::NavigateToMultiplier => VIOLET_400,
         RlAction::Wait                 => GRAY_400,
     }
 }

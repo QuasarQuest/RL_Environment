@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sequential curriculum training — stages 1 through 6.
+Sequential curriculum training — stages 1 through 3.
 
 Each stage hot-starts from the eval_best checkpoint of the previous stage,
 transferring policy weights and VecNormalize running stats.
@@ -14,7 +14,7 @@ Usage
     python rl/scripts/train_sequential.py --timesteps 500000
 
 # Only specific stages:
-    python rl/scripts/train_sequential.py --stages 3 4 5
+    python rl/scripts/train_sequential.py --stages 2 3
 
 # Provide an explicit stage-1 checkpoint to start from:
     python rl/scripts/train_sequential.py --from-run runs/run_seq_s1_XYZ
@@ -47,12 +47,9 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 # ── Per-stage timesteps (override all with --timesteps) ───────────────────────
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
-    1: 2_500_000,
-    2: 2_500_000,
+    1: 1_500_000,
+    2: 2_000_000,
     3: 2_500_000,
-    4: 3_000_000,
-    5: 4_500_000,
-    6: 4_000_000,
 }
 
 PLOT_SCRIPT = SCRIPT_DIR / "plot_runs.py"
@@ -118,12 +115,6 @@ def run_stage(
         f"train.total_timesteps={timesteps}",
     ]
 
-    if stage in (4, 5, 6):
-        # Deeper heads for combat stages — only applied by train.py when
-        # algo != recurrent_ppo (RecurrentPPO ignores net_arch; LSTM depth
-        # is controlled by n_lstm_layers instead).
-        cmd += ["ppo.net_arch_pi=[128,64]", "ppo.net_arch_vf=[128,64]"]
-
     if resume is not None:
         # Hydra requires + prefix for keys not in the YAML defaults.
         cmd.append(f"+train.resume={resume}")
@@ -164,8 +155,8 @@ def run_stage(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--stages", nargs="+", type=int, default=list(range(1, 7)),
-                        metavar="N", help="Stages to run (default: 1 2 3 4 5 6)")
+    parser.add_argument("--stages", nargs="+", type=int, default=list(range(1, 4)),
+                        metavar="N", help="Stages to run (default: 1 2 3)")
     parser.add_argument("--timesteps", type=int, default=None,
                         help="Override timesteps for every stage")
     parser.add_argument("--name", default="seq",

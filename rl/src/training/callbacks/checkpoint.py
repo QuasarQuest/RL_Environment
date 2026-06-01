@@ -37,12 +37,18 @@ class CheckpointCallback(BaseCallback):
             rolling_window: int = 100,
             verbose: int = 1,
             onnx_export: bool = False,
+            min_improvement: float = 2.0,
     ) -> None:
         super().__init__(verbose)
         self.save_freq = save_freq
         self.ckpt_dir = Path(ckpt_dir)
         self.vec_normalize = vec_normalize
         self._onnx_export = onnx_export
+        # Only treat a rolling-mean uptick as a "new best" when it clears the
+        # previous best by this margin. Without it, the monotonic early-training
+        # climb fires a save + log line on every sub-reward improvement, flooding
+        # the console and rewriting best_rolling.zip dozens of times per second.
+        self._min_improvement = min_improvement
         self._models_dir = self.ckpt_dir.parent / "models"
         self._recent_rewards: deque[float] = deque(maxlen=rolling_window)
         self._best_mean: float = -float("inf")
@@ -63,7 +69,7 @@ class CheckpointCallback(BaseCallback):
 
         if len(self._recent_rewards) == self._recent_rewards.maxlen:
             mean_r = float(np.mean(self._recent_rewards))
-            if mean_r > self._best_mean:
+            if mean_r > self._best_mean + self._min_improvement:
                 self._best_mean = mean_r
                 self._save("best_rolling")
                 if self.verbose:

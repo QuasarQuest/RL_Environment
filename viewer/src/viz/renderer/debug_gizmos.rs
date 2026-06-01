@@ -1,24 +1,18 @@
-// Gizmo overlays: A* path polyline and combat-range rings.
+// Gizmo overlays: A* path polyline and the spawn-pocket border.
 //
 // Keys:
 //   V — toggle path gizmo (BT / GOAP modes only)
-//   R — toggle melee + ranged range rings around every agent
 
 use bevy::prelude::*;
-use atb::config::{MELEE_RANGE, RANGED_RANGE, TILE_SIZE};
-use crate::sim_bridge::{SimBridge, PolicyMode, AgentIndex, AgentMarker};
-use crate::style::color::{RED_500, GOLD_500};
+use atb::config::TILE_SIZE;
+use atb::world::config::SPAWN_POCKET_RADIUS;
+use crate::sim_bridge::{SimBridge, PolicyMode};
+use crate::style::color::{PATH_GOAL, PATH_LINE, SPAWN_POCKET_BORDER};
 use crate::viz::grid_offset::GridOffset;
-
-const PATH_COLOR:   Color = Color::srgba(0.20, 0.90, 0.60, 0.85);
-const GOAL_COLOR:   Color = Color::srgba(0.20, 0.90, 0.60, 0.45);
-const MELEE_ALPHA:  f32   = 0.18;
-const RANGED_ALPHA: f32   = 0.13;
 
 #[derive(Resource, Default)]
 pub struct DebugGizmoFlags {
-    pub show_path:   bool,
-    pub show_ranges: bool,
+    pub show_path: bool,
 }
 
 pub fn toggle_path_viz(
@@ -27,15 +21,6 @@ pub fn toggle_path_viz(
 ) {
     if keys.just_pressed(KeyCode::KeyV) {
         flags.show_path = !flags.show_path;
-    }
-}
-
-pub fn toggle_range_viz(
-    keys:     Res<ButtonInput<KeyCode>>,
-    mut flags: ResMut<DebugGizmoFlags>,
-) {
-    if keys.just_pressed(KeyCode::KeyR) {
-        flags.show_ranges = !flags.show_ranges;
     }
 }
 
@@ -63,7 +48,7 @@ pub fn draw_path_gizmo(
     }
 
     for w in pts.windows(2) {
-        gizmos.line_2d(w[0], w[1], PATH_COLOR);
+        gizmos.line_2d(w[0], w[1], PATH_LINE);
     }
 
     // Goal marker at the last waypoint.
@@ -72,36 +57,25 @@ pub fn draw_path_gizmo(
         gizmos.rect_2d(
             Isometry2d::from_translation(dest),
             Vec2::splat(half * 2.0),
-            GOAL_COLOR,
+            PATH_GOAL,
         );
     }
 }
 
-/// Draw melee and ranged rings centred on every agent.
-pub fn draw_range_gizmos(
-    flags:     Res<DebugGizmoFlags>,
-    offset:    Res<GridOffset>,
-    agents_q:  Query<(&AgentIndex, &Transform), With<AgentMarker>>,
+/// Draw the border around the obstacle-free spawn pocket (7×7 around the base).
+/// Pairs with the translucent fill sprite in `agent_renderer`. Always on; follows
+/// the per-episode randomised base.
+pub fn draw_spawn_pocket_border(
+    bridge: Res<SimBridge>,
+    offset: Res<GridOffset>,
     mut gizmos: Gizmos,
 ) {
-    if !flags.show_ranges { return; }
-
-    let step = offset.step;
-
-    for (_, tf) in agents_q.iter() {
-        let world = tf.translation.truncate();
-        let iso   = Isometry2d::from_translation(world);
-
-        gizmos.circle_2d(
-            iso,
-            MELEE_RANGE as f32 * step + step * 0.5,
-            RED_500.with_alpha(MELEE_ALPHA),
-        );
-
-        gizmos.circle_2d(
-            iso,
-            RANGED_RANGE as f32 * step + step * 0.5,
-            GOLD_500.with_alpha(RANGED_ALPHA),
-        );
-    }
+    let Some(agent) = bridge.agents().first() else { return };
+    let centre = offset.world_pos(agent.base_pos.x, agent.base_pos.y);
+    let side   = (2 * SPAWN_POCKET_RADIUS + 1) as f32 * offset.step;
+    gizmos.rect_2d(
+        Isometry2d::from_translation(centre),
+        Vec2::splat(side),
+        SPAWN_POCKET_BORDER,
+    );
 }

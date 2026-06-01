@@ -1,98 +1,26 @@
 // src/world/config.rs
 //
 // WorldConfig — declarative map description loaded from config.ron.
-// All coordinates are fractions of grid dimensions; layout.rs resolves them
-// to tile coords. Unknown fields in the RON file are silently ignored.
+// Single-agent gold rush: no teams, no enemies, no combat. The base position is
+// randomised per episode inside a fixed spawn pocket (see engine/builder.rs), so
+// the config no longer declares base corners or agents.
+// Unknown fields in the RON file are silently ignored (serde default behaviour),
+// so viewer-only keys like `game_mode` / `sim_speed` are harmless here.
 
 use serde::Deserialize;
-use std::collections::HashSet;
 use crate::entity::item::{ItemKind, ItemSpawnConfig};
 use crate::config as global;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_BASE_MARGIN:        f32 = 0.08;
-const DEFAULT_SPAWN_OFFSET:       f32 = 0.05;
-const DEFAULT_SAFE_ZONE_FRACTION: f32 = 0.06;
 const DEFAULT_OBSTACLE_DENSITY:   f32 = 0.08;
 const DEFAULT_MAX_BLOCK_FRACTION: f32 = 0.12;
 const DEFAULT_MAX_WALL_FRACTION:  f32 = 0.14;
 const DEFAULT_GOLD_DENSITY:       f32 = 0.8;
 
-// ── Corner ────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum Corner {
-    BottomLeft,
-    BottomRight,
-    TopLeft,
-    TopRight,
-}
-
-impl Corner {
-    pub fn resolve(self, width: usize, height: usize, margin: f32) -> (i32, i32) {
-        let inset = ((width.min(height) as f32) * margin).round() as i32;
-        let inset = inset.max(1);
-        let max_x = width  as i32 - 1;
-        let max_y = height as i32 - 1;
-        match self {
-            Corner::BottomLeft  => (inset,         inset),
-            Corner::BottomRight => (max_x - inset, inset),
-            Corner::TopLeft     => (inset,         max_y - inset),
-            Corner::TopRight    => (max_x - inset, max_y - inset),
-        }
-    }
-}
-
-// ── Base placement ────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct BaseConfig {
-    pub team:   u8,
-    pub corner: Corner,
-    #[serde(default = "default_base_margin")]
-    pub margin: f32,
-}
-
-// ── Agent spawn intent ────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum SpawnIntent {
-    NearBase,
-    Centre,
-}
-
-impl Default for SpawnIntent {
-    fn default() -> Self { SpawnIntent::NearBase }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct AgentConfig {
-    pub team: u8,
-    #[serde(default)]
-    pub spawn: SpawnIntent,
-    #[serde(default = "default_spawn_offset")]
-    pub spawn_offset: f32,
-    /// For non-RL agents (team != 0): scripted behaviour used in stages 4+.
-    /// Ignored for team 0 (always RL-controlled).
-    #[serde(default)]
-    pub enemy_kind: EnemyKind,
-    // strategy and planner fields in config.ron are ignored — handled by SimCore
-}
-
-// ── Enemy kind ────────────────────────────────────────────────────────────────
-
-/// Scripted behaviour for non-RL agents.  `None` means the agent stands still.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EnemyKind {
-    #[default]
-    None,
-    /// Greedy direction: moves one step toward the nearest gold (or base),
-    /// no pathfinding — easy to trap against walls.
-    SimpleChaser,
-    /// A* pathfinding — finds optimal routes; acts as the hard enemy in s5+.
-    BehaviorTree,
-}
+/// Half-width of the square spawn pocket carved around the (randomised) base.
+/// 3 → a 7×7 pocket; kept ≥1 tile from every border (see builder.rs).
+pub const SPAWN_POCKET_RADIUS: i32 = 3;
 
 // ── Obstacle generation ───────────────────────────────────────────────────────
 
@@ -145,22 +73,30 @@ impl Default for ObstacleConfig {
 }
 
 // ── Item density ──────────────────────────────────────────────────────────────
+//
+// Per-kind spawn density, expressed as items per 100 free tiles. Gold is the
+// objective; the three speed tiers, the slow hazard and the multiplier are the
+// gold-rush flavour items. Rarer tiers simply get a lower density.
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemDensityConfig {
     #[serde(default = "default_gold_density")]
     pub gold: f32,
     #[serde(default)]
-    pub health: f32,
+    pub speed1: f32,
     #[serde(default)]
-    pub ammo: f32,
+    pub speed2: f32,
     #[serde(default)]
-    pub speed_boost: f32,
+    pub speed3: f32,
+    #[serde(default)]
+    pub slow: f32,
+    #[serde(default)]
+    pub multiplier: f32,
 }
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, health: 0.0, ammo: 0.0, speed_boost: 0.0 }
+        Self { gold: DEFAULT_GOLD_DENSITY, speed1: 0.0, speed2: 0.0, speed3: 0.0, slow: 0.0, multiplier: 0.0 }
     }
 }
 
@@ -174,17 +110,19 @@ impl ItemDensityConfig {
             }
         };
         push(ItemKind::Gold,       self.gold);
-        push(ItemKind::Health,     self.health);
-        push(ItemKind::Ammo,       self.ammo);
-        push(ItemKind::SpeedBoost, self.speed_boost);
+        push(ItemKind::Speed1,     self.speed1);
+        push(ItemKind::Speed2,     self.speed2);
+        push(ItemKind::Speed3,     self.speed3);
+        push(ItemKind::Slow,       self.slow);
+        push(ItemKind::Multiplier, self.multiplier);
         out
     }
 }
 
 // ── Reward config ─────────────────────────────────────────────────────────────
 
-/// Per-stage reward weights.  Serde defaults match the stage-1 constants in
-/// `rl/reward.rs` so omitting this section from a RON file is always safe.
+/// Per-stage reward weights. Serde defaults match the stage-1 constants below so
+/// omitting this section from a RON file is always safe.
 #[derive(Debug, Deserialize, Clone)]
 pub struct RewardConfig {
     #[serde(default = "default_reward_tick")]
@@ -198,14 +136,6 @@ pub struct RewardConfig {
     /// Small penalty when a Move action is blocked by a wall (no position change).
     #[serde(default)]
     pub wall_hit: f32,
-    /// Reward on killing an enemy agent.  0 in stages 1–5.
-    #[serde(default)]
-    pub kill: f32,
-    /// Reward applied once on the tick the agent dies.  Added directly to the
-    /// step reward, so it must be stored with its sign: use a NEGATIVE value to
-    /// penalise death (e.g. -2.0).  0 in stages 1–5.
-    #[serde(default)]
-    pub death_penalty: f32,
     /// Discount used by the potential-based approach shaping (F = γΦ(s') − Φ(s)).
     /// Must match the PPO `gamma` so the shaping stays policy-invariant.
     #[serde(default = "default_shaping_gamma")]
@@ -228,8 +158,6 @@ impl Default for RewardConfig {
             deposit:       Self::DEFAULT_DEPOSIT,
             approach:      Self::DEFAULT_APPROACH,
             wall_hit:      0.0,
-            kill:          0.0,
-            death_penalty: 0.0,
             shaping_gamma: Self::DEFAULT_SHAPING_GAMMA,
         }
     }
@@ -243,11 +171,6 @@ pub struct WorldConfig {
     pub height: usize,
     pub match_duration_ticks: u64,
 
-    pub bases:  Vec<BaseConfig>,
-    pub agents: Vec<AgentConfig>,
-
-    #[serde(default = "default_safe_zone_fraction")]
-    pub safe_zone_fraction: f32,
     #[serde(default)]
     pub obstacles: ObstacleConfig,
     /// If non-empty, cluster-based placement is used instead of `obstacles`.
@@ -259,46 +182,20 @@ pub struct WorldConfig {
     pub gold_carry_speed: f32,
     #[serde(default)]
     pub reward: RewardConfig,
-
-    // ── Combat ────────────────────────────────────────────────────────────────
-    #[serde(default = "default_melee_range")]
-    pub melee_range: u8,
-    #[serde(default = "default_ranged_range")]
-    pub ranged_range: u8,
-    #[serde(default = "default_melee_damage")]
-    pub melee_damage: u8,
-    #[serde(default = "default_ranged_damage")]
-    pub ranged_damage: u8,
-    #[serde(default = "default_melee_cooldown_ticks")]
-    pub melee_cooldown_ticks: u8,
-    #[serde(default = "default_ranged_cooldown_ticks")]
-    pub ranged_cooldown_ticks: u8,
-    #[serde(default = "default_respawn_ticks")]
-    pub respawn_ticks: u8,
 }
 
 // ── Serde default fns ────────────────────────────────────────────────────────
 
-fn default_base_margin()        -> f32 { DEFAULT_BASE_MARGIN }
-fn default_spawn_offset()       -> f32 { DEFAULT_SPAWN_OFFSET }
-fn default_safe_zone_fraction() -> f32 { DEFAULT_SAFE_ZONE_FRACTION }
 fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
 fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
-fn default_gold_carry_speed()       -> f32 { global::GOLD_CARRY_SPEED }
-fn default_reward_tick()            -> f32 { RewardConfig::DEFAULT_TICK }
-fn default_reward_pickup()          -> f32 { RewardConfig::DEFAULT_PICKUP }
-fn default_reward_deposit()         -> f32 { RewardConfig::DEFAULT_DEPOSIT }
-fn default_reward_approach()        -> f32 { RewardConfig::DEFAULT_APPROACH }
-fn default_shaping_gamma()          -> f32 { RewardConfig::DEFAULT_SHAPING_GAMMA }
-fn default_melee_range()            -> u8  { global::MELEE_RANGE }
-fn default_ranged_range()           -> u8  { global::RANGED_RANGE }
-fn default_melee_damage()           -> u8  { global::MELEE_DAMAGE }
-fn default_ranged_damage()          -> u8  { global::RANGED_DAMAGE }
-fn default_melee_cooldown_ticks()   -> u8  { global::MELEE_COOLDOWN_TICKS }
-fn default_ranged_cooldown_ticks()  -> u8  { global::RANGED_COOLDOWN_TICKS }
-fn default_respawn_ticks()          -> u8  { global::AGENT_RESPAWN_TICKS }
+fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
+fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
+fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
+fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
+fn default_reward_approach()    -> f32 { RewardConfig::DEFAULT_APPROACH }
+fn default_shaping_gamma()      -> f32 { RewardConfig::DEFAULT_SHAPING_GAMMA }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 
@@ -316,30 +213,11 @@ impl WorldConfig {
     fn validate(&self) {
         let mut errors: Vec<String> = Vec::new();
 
-        if self.width < 4  { errors.push(format!("width must be ≥ 4 (got {})",  self.width));  }
-        if self.height < 4 { errors.push(format!("height must be ≥ 4 (got {})", self.height)); }
-
-        if self.bases.is_empty()  { errors.push("at least one base is required".into()); }
-        if self.agents.is_empty() { errors.push("at least one agent is required".into()); }
-
-        let base_teams: HashSet<u8> = self.bases.iter().map(|b| b.team).collect();
-        for agent in &self.agents {
-            if !base_teams.contains(&agent.team) {
-                errors.push(format!(
-                    "agent on team {} has no matching base",
-                    agent.team
-                ));
-            }
-        }
-
-        for base in &self.bases {
-            if base.margin <= 0.0 || base.margin >= 0.5 {
-                errors.push(format!(
-                    "base team {} margin {:.3} must be in (0.0, 0.5)",
-                    base.team, base.margin
-                ));
-            }
-        }
+        // The base sits in a SPAWN_POCKET_RADIUS pocket kept ≥1 tile from the
+        // border, so the map must be wide/tall enough to hold it with margin.
+        let min_dim = (SPAWN_POCKET_RADIUS * 2 + 3) as usize; // pocket + border + slack
+        if self.width  < min_dim { errors.push(format!("width must be ≥ {min_dim} (got {})",  self.width));  }
+        if self.height < min_dim { errors.push(format!("height must be ≥ {min_dim} (got {})", self.height)); }
 
         if self.obstacles.density > 0.4 {
             errors.push(format!(
@@ -372,17 +250,7 @@ impl WorldConfig {
         }
     }
 
-    pub fn diagonal(&self) -> f32 {
-        let w = self.width  as f32;
-        let h = self.height as f32;
-        (w * w + h * h).sqrt()
-    }
-
     pub fn short_side(&self) -> usize {
         self.width.min(self.height)
-    }
-
-    pub fn safe_zone_radius(&self) -> i32 {
-        ((self.diagonal() * self.safe_zone_fraction).round() as i32).max(1)
     }
 }

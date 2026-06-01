@@ -1,49 +1,21 @@
-// assets/world/config_stage3.ron — Stage 3
-//
-// Full item set: gold + health + ammo + speed boost.
-// Mixed obstacles (blocks and walls) increase navigational complexity.
-// The agent must learn to weigh item utility against route cost.
-
+// Stage 3 — full item mix + denser obstacles + slightly scarcer gold (−10%).
+// 1500-tick episodes. Adds the score multiplier (2× deposits while active) on top
+// of the speed/slow items from stage 2.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 4000,
+    match_duration_ticks: 1500,
 
-    bases: [
-        ( team: 0, corner: BottomLeft, margin: 0.05 ),
-    ],
-
-    agents: [
-        ( team: 0, spawn: NearBase, spawn_offset: 0.10 ),
-    ],
-
-    safe_zone_fraction: 0.04,
-
-    // Scatter + small blocks — routing must detour around solid objects.
-    obstacles: ( density: 0.0, profile: None, max_block_fraction: 0.12, max_wall_fraction: 0.14 ),
-    obstacle_clusters: [
-        ( kind: Block,   count: 3, size: (4, 5) ),
-        ( kind: Block,   count: 6, size: (2, 3) ),
-        ( kind: Wall,    count: 5, size: (6, 2) ),
-        ( kind: Wall,    count: 15, size: (3, 1) ),
-        ( kind: Scatter, count: 45, size: (1, 1) ),
-    ],
+    obstacles: ( density: 0.12, profile: Mixed ),
 
     item_density: (
-        gold:        2.0,
-        health:      0.5,
-        ammo:        0.5,
-        speed_boost: 0.5,
+        gold:       1.8,   // 10% scarcer than stages 1–2
+        speed1:     0.5,
+        speed2:     0.25,
+        speed3:     0.1,
+        slow:       0.4,
+        multiplier: 0.2,   // uncommon — 100-tick 2× deposits
     ),
 
-    gold_carry_speed: 0.95,
-
-    reward: (
-        tick:          -0.0005,
-        pickup:         0.5,
-        deposit:        5.0,
-        approach:       0.05,
-        kill:           0.0,
-        death_penalty:  0.0,
-    ),
+    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),
 )

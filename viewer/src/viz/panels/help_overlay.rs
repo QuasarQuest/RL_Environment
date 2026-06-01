@@ -7,11 +7,11 @@ pub struct HelpOverlay;
 const SHORTCUTS: &[(&str, &str)] = &[
     ("TAB",          "Hold — scoreboard"),
     ("H",            "Toggle this help"),
+    ("I",            "Toggle legend"),
     ("L",            "Load config & policy"),
     ("D",            "Toggle policy debug"),
     ("P",            "Cycle policy  ONNX › RANDOM › BT › GOAP"),
     ("V",            "Toggle A* path gizmo  (BT / GOAP)"),
-    ("R",            "Toggle melee + ranged range rings"),
     ("Space",        "Pause / Resume"),
     ("Up",           "Speed up"),
     ("Down",         "Speed down"),

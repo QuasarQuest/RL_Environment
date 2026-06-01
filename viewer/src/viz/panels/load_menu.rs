@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_MD, SIZE_LG};
+use crate::style::color::{SELECTED_BG, SELECTED_BORDER};
 use crate::sim_bridge::{LoadRequest, DEFAULT_CONFIG_PATH};
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -90,9 +91,6 @@ fn scan_policies() -> Vec<(String, String)> {
 #[derive(Component)] pub(crate) struct PolicyEntryBtn(usize);
 #[derive(Component)] pub struct LoadConfirmBtn;
 #[derive(Component)] pub struct LoadCancelBtn;
-
-const SELECTED_BG:     Color = Color::srgba(0.60, 0.45, 0.05, 0.40);
-const SELECTED_BORDER: Color = Color::srgb(0.85, 0.65, 0.10);
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 

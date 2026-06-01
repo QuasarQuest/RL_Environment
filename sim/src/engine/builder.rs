@@ -1,23 +1,25 @@
 // src/engine/builder.rs
 //
-// Constructs a fresh episode: grid, agents, items.
-// Called once on SimCore::new() and (items only) on SimCore::reset().
+// Constructs a fresh episode: grid, agent, items. Called on SimCore::new() and on
+// every SimCore::reset(), both via the env RNG so episodes are seed-reproducible.
 //
-// Item placement uses shuffle+take instead of rejection sampling:
-//   O(free_tiles) instead of O(target²), always places exactly `target` items.
+// Single-agent gold rush: the base is placed at a RANDOM tile each episode, kept
+// inside a 7×7 spawn pocket that is ≥1 tile from every border and free of
+// obstacles. The agent starts on its base. Randomising the base each episode
+// stops the policy overfitting to one corner.
 
+use rand::RngExt;
 use rand::seq::SliceRandom;
-use rand::SeedableRng;
-use rand::rngs::{SmallRng, SysRng};
+use rand::rngs::SmallRng;
 use rustc_hash::FxHashSet;
 
 use crate::config;
 use crate::entity::{AgentState, ItemState};
 use crate::world::{
-    config::WorldConfig,
+    config::{WorldConfig, SPAWN_POCKET_RADIUS},
     coords::GridPos,
     grid::Grid,
-    layout::{self, item_configs_for_free_count, place_obstacles},
+    layout::{item_configs_for_free_count, place_obstacles},
     tile::Tile,
 };
 
@@ -27,64 +29,45 @@ pub struct WorldSnapshot {
     pub items:  Vec<ItemState>,
 }
 
-/// Full build — used once on SimCore::new().
-pub fn build(cfg: &WorldConfig) -> WorldSnapshot {
-    let layout   = layout::resolve(cfg);
+/// Build one full episode (grid + agent + items) with a randomised base.
+pub fn build_episode(cfg: &WorldConfig, rng: &mut SmallRng) -> WorldSnapshot {
+    let (w, h) = (cfg.width as i32, cfg.height as i32);
+
+    // Base centre: anywhere such that the 7×7 pocket stays ≥1 tile from the border.
+    let lo = SPAWN_POCKET_RADIUS + 1;
+    let bx = rng.random_range(lo..=(w - 1 - lo));
+    let by = rng.random_range(lo..=(h - 1 - lo));
+    let base = GridPos::new(bx, by);
+
+    // Obstacles on a scratch tile buffer (pocket around base is protected), then
+    // commit to the grid and stamp the base tile on top.
     let mut grid = Grid::new(cfg.width, cfg.height);
-    let safe_r   = cfg.safe_zone_radius();
-
-    for base in &layout.bases {
-        for dy in -safe_r..=safe_r {
-            for dx in -safe_r..=safe_r {
-                if dx == 0 && dy == 0 { continue; }
-                let (x, y) = (base.x + dx, base.y + dy);
-                if grid.in_bounds(x, y) && grid.get(x, y) == Some(Tile::Free) {
-                    grid.set(x, y, Tile::SafeZone(base.team));
-                }
-            }
-        }
-        grid.set(base.x, base.y, Tile::Base(base.team));
-    }
-
-    let mut tiles: Vec<Tile> = {
-        let g = &grid;
-        (0..cfg.height)
-            .flat_map(|y| (0..cfg.width).map(move |x| g.get(x as i32, y as i32).unwrap_or(Tile::Free)))
-            .collect()
-    };
-    place_obstacles(&mut tiles, cfg, &layout);
+    let mut tiles: Vec<Tile> = vec![Tile::Free; cfg.width * cfg.height];
+    place_obstacles(&mut tiles, cfg, (bx, by), rng);
     for y in 0..cfg.height {
         for x in 0..cfg.width {
             grid.set(x as i32, y as i32, tiles[y * cfg.width + x]);
         }
     }
+    grid.set(bx, by, Tile::Base(0));
 
-    // agents[0] is always team 0 (the RL agent).
-    let mut agents: Vec<AgentState> = layout.agents.iter().map(|ra| {
-        let base = layout.bases.iter()
-            .find(|b| b.team == ra.team)
-            .map(|b| GridPos::new(b.x, b.y))
-            .unwrap_or_else(|| GridPos::new(ra.x, ra.y));
-        AgentState {
-            pos:          GridPos::new(ra.x, ra.y),
-            team:         ra.team,
-            gold_carried: 0,
-            score:        0,
-            hearts:       config::AGENT_MAX_HEARTS,
-            ammo:         config::AGENT_START_AMMO,
-            speed_buff:   0,
-            spawn_pos:    GridPos::new(ra.x, ra.y),
-            base_pos:     base,
-            melee_cooldown:  0,
-            ranged_cooldown: 0,
-            respawn_timer:   0,
-            kills:           0,
-        }
-    }).collect();
-    agents.sort_by_key(|a| a.team);
+    let agent = AgentState {
+        pos:          base,
+        gold_carried: 0,
+        score:        0,
+        speed_buff:   0,
+        slow_buff:    0,
+        mult_buff:    0,
+        spawn_pos:    base,
+        base_pos:     base,
+        // Inert viewer-compat fields (see entity/agent.rs).
+        team:   0,
+        hearts: config::AGENT_MAX_HEARTS,
+        ammo:   0,
+    };
+    let agents = vec![agent];
 
-    let mut rng = SmallRng::try_from_rng(&mut SysRng).expect("SysRng failed");
-    let items = spawn_items_internal(cfg, &grid, &agents.iter().map(|a| a.pos).collect::<Vec<_>>(), &mut rng);
+    let items = spawn_items_internal(cfg, &grid, &[base], rng);
     WorldSnapshot { grid, agents, items }
 }
 
@@ -105,11 +88,20 @@ fn spawn_items_internal(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridP
     let item_cfgs  = item_configs_for_free_count(cfg, free_count);
     let mut items  = Vec::new();
 
+    // Place each kind on its own shuffled prefix of free tiles. Reshuffling per
+    // kind lets kinds overlap in candidate space without colliding (swap_remove
+    // would be O(n²)); duplicates across kinds are avoided by removing taken tiles.
+    let mut taken: FxHashSet<GridPos> = FxHashSet::default();
     for ic in &item_cfgs {
         let target = (ic.max_on_map / 2).max(1);
         free_tiles.shuffle(rng);
-        for &pos in free_tiles.iter().take(target) {
+        let mut placed = 0;
+        for &pos in free_tiles.iter() {
+            if placed >= target { break; }
+            if taken.contains(&pos) { continue; }
+            taken.insert(pos);
             items.push(ItemState { pos, kind: ic.kind });
+            placed += 1;
         }
     }
 

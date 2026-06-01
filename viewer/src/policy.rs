@@ -130,3 +130,22 @@ fn argmax(it: impl Iterator<Item = (usize, f32)>) -> u32 {
         .map(|(i, _)| i as u32)
         .unwrap_or(ACTION_WAIT)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard: tract must be able to analyse + optimise the exported
+    /// graph. An open-ended cluster slice in the extractor used to leave the
+    /// cluster_head Gemm's input dim symbolic, failing `into_optimized()` and
+    /// forcing the viewer onto the BT-agent fallback.
+    #[test]
+    fn loads_exported_policy() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/model/policy.onnx");
+        if !std::path::Path::new(path).exists() {
+            eprintln!("skipping: no exported policy at {path}");
+            return;
+        }
+        OnnxPolicy::load(path).expect("tract should analyse + load the exported policy");
+    }
+}

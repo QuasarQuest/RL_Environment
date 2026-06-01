@@ -8,6 +8,14 @@ from rich.table import Table
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import KVWriter
 
+# Per-table accent colours — title, border and key column share each hue so the
+# three panels read as distinct blocks at a glance.
+_ACCENT = {
+    "time": "cyan",
+    "game": "green",
+    "train": "magenta",
+}
+
 
 def _fmt(v: object) -> str:
     if isinstance(v, float):
@@ -17,13 +25,55 @@ def _fmt(v: object) -> str:
     return str(v)
 
 
-def kv_table(title: str, rows: list[tuple[str, str]]) -> Table:
-    t = Table(title=title, box=box.SIMPLE, show_header=False,
-              title_style="bold cyan", padding=(0, 1))
-    t.add_column(style="dim", no_wrap=True)
+def _band(value: float, *, good: float, warn: float, higher_is_better: bool = True) -> str:
+    """Map a metric to green / yellow / red by how it compares to thresholds."""
+    if not higher_is_better:
+        value = -value
+        good, warn = -good, -warn
+    if value >= good:
+        return "bold green"
+    if value >= warn:
+        return "yellow"
+    return "bold red"
+
+
+# Fixed colours that don't depend on the value's magnitude.
+_STATIC_STYLE = {
+    "ep_reward": "bold green", "score": "bold green",
+    "loss": "blue", "value_loss": "blue", "policy_loss": "blue", "entropy_loss": "blue",
+    "lr": "dim", "ent_coef": "dim",
+    "step": "bold white", "iter": "bold white", "elapsed": "bold white",
+    "fps": "bold green",
+}
+
+
+def _value_style(label: str, raw: object) -> str:
+    """Semantic colour for a metric value; falls back to a neutral bright tone."""
+    if label in _STATIC_STYLE:
+        return _STATIC_STYLE[label]
+    # Threshold-banded metrics need the numeric value (time rows are pre-formatted strings).
+    if isinstance(raw, (int, float)):
+        v = float(raw)
+        if label == "win_rate":
+            return "bold green" if v > 0 else "dim"
+        if label == "exp_variance":  # 1.0 = perfect value fit, <0 = worse than mean
+            return _band(v, good=0.9, warn=0.5)
+        if label == "approx_kl":  # target_kl is 0.02 — flag drift past it
+            return _band(v, good=0.01, warn=0.02, higher_is_better=False)
+        if label == "clip_frac":  # lots of clipping → steps too large
+            return _band(v, good=0.1, warn=0.2, higher_is_better=False)
+    return "white"
+
+
+def kv_table(title: str, rows: list[tuple[str, object]]) -> Table:
+    accent = _ACCENT.get(title, "cyan")
+    t = Table(title=title, box=box.ROUNDED, show_header=False,
+              title_style=f"bold {accent}", border_style=f"dim {accent}",
+              padding=(0, 1))
+    t.add_column(style=accent, no_wrap=True)
     t.add_column(justify="right", no_wrap=True)
-    for k, v in rows:
-        t.add_row(k, v)
+    for label, raw in rows:
+        t.add_row(label, f"[{_value_style(label, raw)}]{_fmt(raw)}[/]")
     return t
 
 
@@ -47,8 +97,6 @@ class _RichWriter(KVWriter):
         if elapsed == 0 and itr == 0:
             return
 
-        self._console.rule(style="dim")
-
         game_keys = [
             ("ep_reward", "game/episode_reward"),
             ("ep_length", "game/episode_length"),
@@ -67,14 +115,15 @@ class _RichWriter(KVWriter):
             ("ent_coef", "train/ent_coef"),
         ]
 
-        time_rows = [
+        # Raw values are kept (not pre-formatted) so kv_table can colour by magnitude.
+        time_rows: list[tuple[str, object]] = [
             ("step", f"{steps:,}"),
             ("iter", str(itr)),
             ("fps", f"{fps:,}"),
             ("elapsed", f"{elapsed}s"),
         ]
-        game_rows  = [(lbl, _fmt(kv[key])) for lbl, key in game_keys  if key in kv]
-        train_rows = [(lbl, _fmt(kv[key])) for lbl, key in train_keys if key in kv]
+        game_rows  = [(lbl, kv[key]) for lbl, key in game_keys  if key in kv]
+        train_rows = [(lbl, kv[key]) for lbl, key in train_keys if key in kv]
 
         if not train_rows:
             return  # partial dump before first rollout — superseded by the next full table

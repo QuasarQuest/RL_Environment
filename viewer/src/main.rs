@@ -14,7 +14,7 @@ const ONNX_POLICY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/m
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.03, 0.04, 0.07)))
+        .insert_resource(ClearColor(style::color::APP_BACKGROUND))
         .add_plugins(DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
@@ -26,6 +26,14 @@ fn main() {
             })
             .set(bevy::asset::AssetPlugin {
                 file_path: ASSET_PATH.to_string(),
+                ..default()
+            })
+            // sctk-adwaita (Wayland client-side decorations) spams a WARN for every
+            // title-bar button token it can't parse from the GNOME button-layout
+            // gsetting. Harmless and out of our control, so drop it to error level
+            // while keeping Bevy's other defaults.
+            .set(bevy::log::LogPlugin {
+                filter: format!("{},sctk_adwaita=error", bevy::log::DEFAULT_FILTER),
                 ..default()
             })
         )
