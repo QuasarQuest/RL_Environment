@@ -179,13 +179,26 @@ impl SimCore {
     }
 
     /// Temporally-extended ("option") step used by the RL training/eval path.
+    ///
+    /// The option's return is the DISCOUNTED sum of its per-tick rewards,
+    /// Σ γᵗ rₜ (semi-MDP option return, γ = `reward.option_gamma`). Discounting
+    /// within the option is what makes a nearer reward worth more than a farther
+    /// one: the same +pickup/+deposit earned after 50 ticks is scaled by ~γ⁵⁰,
+    /// after 5 ticks by ~γ⁵. Without it every successful option looks equally good
+    /// regardless of distance, so the policy has no incentive to prefer close gold.
+    /// (Cross-option bootstrapping still uses the learner's per-step γ rather than a
+    /// full γ^k jump — a further SMDP refinement — but the intra-option discount
+    /// captures the dominant near-vs-far signal.)
     pub fn step_option(&mut self, action: u32) -> (f32, bool) {
         let rl_action = int_to_rl_action(action);
+        let gamma = self.world_cfg.reward.option_gamma;
         let mut total_rew = 0.0f32;
+        let mut discount = 1.0f32;
         let mut option_ticks = 0u64;
         let done = loop {
             let (r, d) = self.tick_once(rl_action);
-            total_rew += r;
+            total_rew += discount * r;
+            discount *= gamma;
             option_ticks += 1;
 
             if d { break true; }
@@ -266,7 +279,9 @@ impl SimCore {
                     let act = navigate_action(
                         &self.agents[0], goal, &self.grid, &mut self.nav_cache,
                     );
-                    physics::apply_action(&mut self.agents, &self.grid, 0, act, carry_speed, self.tick);
+                    physics::apply_action(
+                        &mut self.agents, &self.grid, 0, act, carry_speed, self.tick, Some(goal),
+                    );
                     matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos
                 } else {
                     false

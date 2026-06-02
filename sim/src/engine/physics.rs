@@ -4,7 +4,7 @@
 
 use crate::config::DEPOSIT_MULTIPLIER;
 use crate::entity::agent::{Action, AgentState, Dir};
-use crate::world::{grid::Grid, tile::Tile};
+use crate::world::{coords::GridPos, grid::Grid, tile::Tile};
 
 // ── Per-tick passive buff decay ─────────────────────────────────────────────────
 
@@ -19,6 +19,10 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
 
 // ── Movement ──────────────────────────────────────────────────────────────────
 
+/// `stop_at` is the agent's navigation target this tick: a multi-tile (speed-buff)
+/// move halts the instant it lands on that tile rather than sailing past it. Without
+/// this a 2-tile move steps OVER its goal — pickup/auto_deposit check only the final
+/// position, so the agent would skip its gold/base and oscillate around it forever.
 pub fn apply_action(
     agents:      &mut Vec<AgentState>,
     grid:        &Grid,
@@ -26,9 +30,10 @@ pub fn apply_action(
     action:      Action,
     carry_speed: f32,
     tick:        u64,
+    stop_at:     Option<GridPos>,
 ) {
     match action {
-        Action::Move(dir) => apply_move(agents, grid, idx, dir, carry_speed, tick),
+        Action::Move(dir) => apply_move(agents, grid, idx, dir, carry_speed, tick, stop_at),
         Action::Wait      => {}
     }
 }
@@ -40,15 +45,18 @@ fn apply_move(
     dir:         Dir,
     carry_speed: f32,
     tick:        u64,
+    stop_at:     Option<GridPos>,
 ) {
     let moves = movement_tiles(&agents[idx], carry_speed, tick);
     if moves == 0 { return; }
 
     let (dx, dy) = dir.delta();
     for _ in 0..moves {
+        if stop_at == Some(agents[idx].pos) { break; }
         let next = agents[idx].pos.apply_delta(dx, dy);
         if !grid.is_walkable(next.x, next.y) { break; }
         agents[idx].pos = next;
+        if stop_at == Some(next) { break; }
     }
 }
 

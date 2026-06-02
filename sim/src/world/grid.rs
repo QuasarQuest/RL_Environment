@@ -46,16 +46,6 @@ impl Grid {
         })
     }
 
-    /// Snapshot access for fast reset: copy current tiles into a Vec.
-    pub(crate) fn clone_tiles(&self) -> Vec<Tile> {
-        self.tiles.clone()
-    }
-
-    /// Fast reset: overwrite tiles from a snapshot (must have same length).
-    pub(crate) fn restore_tiles(&mut self, snapshot: &[Tile]) {
-        self.tiles.copy_from_slice(snapshot);
-    }
-
     /// Direct tile read without bounds check — caller must guarantee in-bounds.
     #[inline]
     pub(crate) unsafe fn get_unchecked(&self, x: i32, y: i32) -> Tile {

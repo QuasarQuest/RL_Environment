@@ -128,16 +128,145 @@ pub fn navigate_action(
     grid:   &Grid,
     cache:  &mut NavCache,
 ) -> Action {
-    if cache.cached_goal != Some(target) || cache.path.is_empty() {
-        cache.path        = astar(grid, agent.pos, target);
-        cache.cached_goal = Some(target);
-    }
     // Pop stale front nodes (agent already there after a multi-tile move).
     while cache.path.front() == Some(&agent.pos) {
         cache.path.pop_front();
     }
+
+    // Recompute A* when the goal changed, the path is exhausted, OR the agent has
+    // drifted off the cached path. The drift case matters: a 2-tile speed move can
+    // overshoot a turn in the path and land the agent on a tile the next waypoint
+    // is no longer adjacent to. Without this check `path_next_dir` returns None →
+    // Wait, but the goal (nearest gold) is unchanged so the cache never refreshes —
+    // the agent freezes mid-map, re-selecting the same nav goal forever (the
+    // "valid A* path but agent never moves" bug).
+    let off_path = cache.path.front()
+        .map_or(false, |&n| chebyshev(agent.pos, n) != 1);
+    if cache.cached_goal != Some(target) || cache.path.is_empty() || off_path {
+        cache.path        = astar(grid, agent.pos, target);
+        cache.cached_goal = Some(target);
+        while cache.path.front() == Some(&agent.pos) {
+            cache.path.pop_front();
+        }
+    }
+
     match path_next_dir(agent.pos, &cache.path) {
         Some(dir) => { cache.path.pop_front(); Action::Move(dir) }
         None      => Action::Wait,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::tile::Tile;
+
+    fn agent_at(pos: GridPos) -> AgentState {
+        AgentState {
+            pos,
+            gold_carried: 0,
+            score:        0,
+            speed_buff:   0,
+            slow_buff:    0,
+            mult_buff:    0,
+            spawn_pos:    pos,
+            base_pos:     pos,
+            team:         0,
+            hearts:       1,
+            ammo:         0,
+        }
+    }
+
+    /// Replicate engine::physics movement for `moves` tiles in one direction,
+    /// stopping at walls or on the navigation target `stop_at` (mirrors
+    /// physics::apply_move, which halts on the goal so it never overshoots it).
+    fn step_move(agent: &mut AgentState, grid: &Grid, dir: Dir, moves: u32, stop_at: GridPos) {
+        let (dx, dy) = dir.delta();
+        for _ in 0..moves {
+            if agent.pos == stop_at { break; }
+            let next = agent.pos.apply_delta(dx, dy);
+            if !grid.is_walkable(next.x, next.y) { break; }
+            agent.pos = next;
+            if next == stop_at { break; }
+        }
+    }
+
+    /// Regression for the "valid A* path but the agent never moves" freeze.
+    ///
+    /// A 2-tile speed move can overshoot a turn in the cached path, leaving the
+    /// agent on a tile the next waypoint is no longer adjacent to. The cache used
+    /// to recompute ONLY on a goal change or an empty path, so with the goal
+    /// unchanged the stale, non-adjacent path persisted: `path_next_dir` returned
+    /// None → Wait, the agent didn't move, the goal stayed identical, and it froze
+    /// forever. navigate_action must instead detect the divergence and recompute.
+    #[test]
+    fn diverged_cached_path_recomputes_instead_of_freezing() {
+        let grid  = Grid::new(12, 12); // all walkable
+        let agent = agent_at(GridPos::new(5, 5));
+        let goal  = GridPos::new(9, 5);
+
+        // Seed the cache as if a previous multi-tile move overshot a turn: the
+        // front waypoint (5,7) is two tiles from the agent (Chebyshev 2), so it is
+        // NOT a legal single step — the exact frozen state.
+        let mut cache = NavCache::new();
+        cache.path = VecDeque::from(vec![
+            GridPos::new(5, 7), GridPos::new(7, 6), goal,
+        ]);
+        cache.cached_goal = Some(goal);
+
+        let act = navigate_action(&agent, goal, &grid, &mut cache);
+
+        // Pre-fix this returned Action::Wait (frozen). It must now recompute and
+        // step toward the goal (eastward, the +x direction).
+        match act {
+            Action::Move(dir) => {
+                let (dx, _) = dir.delta();
+                assert!(dx > 0, "expected an eastward step toward the goal, got {dir:?}");
+            }
+            Action::Wait => panic!("navigate_action froze on a diverged cached path"),
+        }
+    }
+
+    /// End-to-end: with a permanent 2-tile (speed-buff) move the agent must still
+    /// reach the goal — overshoots are re-synced, never a permanent stall.
+    #[test]
+    fn speed_buffed_navigation_reaches_goal() {
+        let grid  = Grid::new(20, 20);
+        let mut agent = agent_at(GridPos::new(1, 1));
+        let goal  = GridPos::new(17, 12); // off-axis → the path turns
+        let mut cache = NavCache::new();
+
+        let mut ticks = 0;
+        while agent.pos != goal && ticks < 500 {
+            match navigate_action(&agent, goal, &grid, &mut cache) {
+                Action::Move(dir) => step_move(&mut agent, &grid, dir, 2, goal), // 2 = speed buff
+                Action::Wait      => {}
+            }
+            ticks += 1;
+        }
+        assert_eq!(agent.pos, goal, "agent failed to reach goal within {ticks} ticks (frozen?)");
+    }
+
+    /// Sanity: ordinary single-tile navigation around an obstacle still arrives.
+    #[test]
+    fn single_step_navigation_reaches_goal_around_obstacle() {
+        let mut grid = Grid::new(12, 12);
+        // A vertical wall with a gap, forcing the path to turn.
+        for y in 0..10 {
+            grid.set(6, y, Tile::Obstacle);
+        }
+        let mut agent = agent_at(GridPos::new(2, 2));
+        let goal  = GridPos::new(10, 2);
+        let mut cache = NavCache::new();
+
+        let mut ticks = 0;
+        while agent.pos != goal && ticks < 500 {
+            match navigate_action(&agent, goal, &grid, &mut cache) {
+                Action::Move(dir) => step_move(&mut agent, &grid, dir, 1, goal),
+                Action::Wait      => break,
+            }
+            ticks += 1;
+        }
+        assert_eq!(agent.pos, goal, "agent failed to reach goal around the wall");
     }
 }

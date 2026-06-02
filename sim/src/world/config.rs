@@ -131,34 +131,34 @@ pub struct RewardConfig {
     pub pickup: f32,
     #[serde(default = "default_reward_deposit")]
     pub deposit: f32,
-    #[serde(default = "default_reward_approach")]
-    pub approach: f32,
     /// Small penalty when a Move action is blocked by a wall (no position change).
     #[serde(default)]
     pub wall_hit: f32,
-    /// Discount used by the potential-based approach shaping (F = γΦ(s') − Φ(s)).
-    /// Must match the PPO `gamma` so the shaping stays policy-invariant.
-    #[serde(default = "default_shaping_gamma")]
-    pub shaping_gamma: f32,
+    /// Per-tick discount applied WITHIN a navigation option: the option's return is
+    /// Σ γᵗ rₜ over the ticks it ran (semi-MDP option return). This is what makes a
+    /// nearer reward worth more than a farther one — a pickup that takes 50 ticks is
+    /// discounted to ~γ⁵⁰ of its value, a 5-tick pickup to ~γ⁵ — so the policy learns
+    /// to prefer closer/efficient targets. Must match the PPO `gamma` so the
+    /// intra-option discounting is consistent with the learner's cross-step discount.
+    #[serde(default = "default_option_gamma")]
+    pub option_gamma: f32,
 }
 
 impl RewardConfig {
-    pub const DEFAULT_TICK:          f32 = -0.0005;
-    pub const DEFAULT_PICKUP:        f32 =  0.5;
-    pub const DEFAULT_DEPOSIT:       f32 =  5.0;
-    pub const DEFAULT_APPROACH:      f32 =  0.05;
-    pub const DEFAULT_SHAPING_GAMMA: f32 =  0.99;
+    pub const DEFAULT_TICK:         f32 = -0.0005;
+    pub const DEFAULT_PICKUP:       f32 =  0.5;
+    pub const DEFAULT_DEPOSIT:      f32 =  5.0;
+    pub const DEFAULT_OPTION_GAMMA: f32 =  0.99;
 }
 
 impl Default for RewardConfig {
     fn default() -> Self {
         Self {
-            tick:          Self::DEFAULT_TICK,
-            pickup:        Self::DEFAULT_PICKUP,
-            deposit:       Self::DEFAULT_DEPOSIT,
-            approach:      Self::DEFAULT_APPROACH,
-            wall_hit:      0.0,
-            shaping_gamma: Self::DEFAULT_SHAPING_GAMMA,
+            tick:         Self::DEFAULT_TICK,
+            pickup:       Self::DEFAULT_PICKUP,
+            deposit:      Self::DEFAULT_DEPOSIT,
+            wall_hit:     0.0,
+            option_gamma: Self::DEFAULT_OPTION_GAMMA,
         }
     }
 }
@@ -194,8 +194,7 @@ fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
 fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
 fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
 fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
-fn default_reward_approach()    -> f32 { RewardConfig::DEFAULT_APPROACH }
-fn default_shaping_gamma()      -> f32 { RewardConfig::DEFAULT_SHAPING_GAMMA }
+fn default_option_gamma()       -> f32 { RewardConfig::DEFAULT_OPTION_GAMMA }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 
