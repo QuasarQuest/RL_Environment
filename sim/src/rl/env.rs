@@ -17,8 +17,8 @@
 // All three are now absorbed into the single parallel step pass.
 //
 // Scaling note: gather was O(n_envs × OBS_TOTAL) serial memcpy. With
-// OBS_TOTAL = 11504 (10625 crop + 867 minimap + 12 cluster) at n_envs = 256
-// that is ~2.95M f32 copies (~11.8MB) per step. The obs copy is now distributed
+// OBS_TOTAL = 10222 (8750 crop + 1445 minimap + 27 cluster) at n_envs = 256
+// that is ~2.6M f32 copies (~10.5MB) per step. The obs copy is now distributed
 // across Rayon threads, each writing its own non-overlapping OBS_TOTAL-float
 // slice of obs_flat (well above a cache line, so no false sharing on obs; the
 // adjacent single-element writes into rews/dones can share a line only at the
@@ -37,6 +37,18 @@ pub struct BatchEnv {
     masks:        Vec<bool>,   // n_envs * ACTION_SIZE, pre-allocated (MaskablePPO)
     rews:         Vec<f32>,    // pre-allocated reward buffer
     dones:        Vec<bool>,   // pre-allocated done buffer
+
+    // Per-env decision telemetry from the most recent step_batch (see
+    // SimCore::DecisionTelem). Gathered serially after the parallel step — n_envs
+    // is small, so this is negligible vs the sim work.
+    dec_dist:         Vec<i32>,
+    dec_is_cluster:   Vec<bool>,
+    dec_own_has_gold: Vec<bool>,
+    dec_skipped:      Vec<bool>,
+
+    // Per-env option length (sim ticks) from the most recent step — drives the
+    // SMDP γ^k cross-option discount on the Python side.
+    option_ticks: Vec<u64>,
 }
 
 impl BatchEnv {
@@ -46,7 +58,14 @@ impl BatchEnv {
         let masks    = vec![false; n_envs * ACTION_SIZE];
         let rews     = vec![0.0f32; n_envs];
         let dones    = vec![false;  n_envs];
-        let mut this = Self { envs, obs_flat, masks, rews, dones };
+        let mut this = Self {
+            envs, obs_flat, masks, rews, dones,
+            dec_dist:         vec![-1; n_envs],
+            dec_is_cluster:   vec![false; n_envs],
+            dec_own_has_gold: vec![false; n_envs],
+            dec_skipped:      vec![false; n_envs],
+            option_ticks:     vec![1; n_envs],
+        };
         this.refresh_masks();
         this
     }
@@ -123,8 +142,28 @@ impl BatchEnv {
                 *done = d;
             });
 
+        // Gather per-env decision telemetry + option length from this step
+        // (serial; n_envs small).
+        for (i, env) in self.envs.iter().enumerate() {
+            let t = env.last_decision();
+            self.dec_dist[i]         = t.chosen_dist;
+            self.dec_is_cluster[i]   = t.is_cluster;
+            self.dec_own_has_gold[i] = t.own_has_gold;
+            self.dec_skipped[i]      = t.skipped_own;
+            self.option_ticks[i]     = env.last_option_ticks();
+        }
+
         (&self.rews, &self.dones)
     }
+
+    /// Per-env decision telemetry from the most recent `step_batch`:
+    /// (chosen_gold_distance, is_cluster_action, own_region_had_gold, skipped_own_region).
+    pub fn decision_telemetry(&self) -> (&[i32], &[bool], &[bool], &[bool]) {
+        (&self.dec_dist, &self.dec_is_cluster, &self.dec_own_has_gold, &self.dec_skipped)
+    }
+
+    /// Per-env option length (sim ticks) from the most recent `step_batch`.
+    pub fn option_ticks(&self) -> &[u64] { &self.option_ticks }
 
     // ── Viewer state queries ───────────────────────────────────────────────────
 

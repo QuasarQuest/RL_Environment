@@ -1,15 +1,15 @@
 # configs/ppo/default.yaml
 # @package ppo
 #
-# PPO Hyperparameters — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=11504
+# PPO Hyperparameters — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=10222
 # Slim architecture v2: ~1.47M params total (was 13.9M, 9.1× reduction)
 #
 # VRAM budget (slim, 32 envs, n_steps=256):
-#   Rollout buffer : 32 × 256 steps × 11504 floats × 4 bytes ≈ 377 MB
+#   Rollout buffer : 32 × 256 steps × 10222 floats × 4 bytes ≈ 335 MB
 #   Policy + Adam  : ~10 MB   (was ~30 MB)
 #   Activations    : ~60 MB   (was ~250 MB)
 #   ─────────────────────────────────────────────────────────────────
-#   Total          : ~447 MB  ✓  (was ~1.2 GB)
+#   Total          : ~405 MB  ✓  (was ~1.2 GB)
 
 # ── Rollout ───────────────────────────────────────────────────────────────────
 n_steps: 256
@@ -27,7 +27,7 @@ clip_range:       0.2
 clip_range_final: 0.2
 
 # ── Entropy ───────────────────────────────────────────────────────────────────
-# 11-action space: 0.01 starting ent_coef is sufficient.
+# 13-action space: 0.01 starting ent_coef is sufficient.
 ent_coef:       0.01
 ent_coef_final: 0.001
 
@@ -46,7 +46,7 @@ target_kl: 0.02
 
 # ── Network Architecture ──────────────────────────────────────────────────────
 # Lean pi/vf heads — LSTM already provides rich temporal representation.
-# Deep heads add cost without benefit for an 11-action discrete space.
+# Deep heads add cost without benefit for a 13-action discrete space.
 net_arch_pi: [64]
 net_arch_vf: [64]
 

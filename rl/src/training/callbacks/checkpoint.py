@@ -92,7 +92,13 @@ class CheckpointCallback(BaseCallback):
         out_dir = self._models_dir / tag
         out_dir.mkdir(parents=True, exist_ok=True)
         onnx_path = out_dir / "policy.onnx"
+        # Bake the matching VecNormalize stats (written by _save as
+        # {tag}_vecnorm.pkl) so checkpoint ONNX models are deployable on raw obs.
+        # export_to_onnx no-ops the baking when norm_obs is off, so this is safe
+        # regardless of the normalize_obs setting.
+        vn_path = self.ckpt_dir / f"{tag}_vecnorm.pkl"
+        bake_vn = vn_path if (self.vec_normalize is not None and vn_path.exists()) else None
         try:
-            export_to_onnx(copy.deepcopy(self.model.policy), onnx_path, vecnorm_path=None)
+            export_to_onnx(copy.deepcopy(self.model.policy), onnx_path, vecnorm_path=bake_vn)
         except Exception as exc:
             print(f"  [ONNX export skipped: {exc}]")

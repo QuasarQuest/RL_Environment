@@ -87,6 +87,9 @@ class TrainConfig:
     eval_episodes: int = MISSING
     device: str = MISSING
     resume: Optional[str] = None        # optional resume path
+    # Regenerate this run's plots every N env steps during training (0 = only at
+    # stage end). Non-blocking; see callbacks/plotting.py.
+    plot_freq: int = 0
 
 
 # ---------------------------------------------------------------------------

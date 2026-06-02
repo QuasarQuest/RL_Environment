@@ -231,7 +231,9 @@ def export_to_onnx(
 def export_onnx(
     model_path: Path = typer.Option(..., "--model"),
     out_path: Path = typer.Option(..., "--out"),
-    opset: int = typer.Option(17, "--opset"),
+    # Match export_to_onnx's default (12) — the opset the eval/checkpoint callbacks
+    # bake into the deployed policy.onnx that the viewer (tract) loads.
+    opset: int = typer.Option(12, "--opset"),
     tolerance: float = typer.Option(1e-5, "--tolerance"),
     vecnorm_path: Optional[Path] = typer.Option(None, "--vecnorm"),
     algo: str = typer.Option("recurrent_ppo", "--algo", help="ppo, maskable_ppo, or recurrent_ppo"),

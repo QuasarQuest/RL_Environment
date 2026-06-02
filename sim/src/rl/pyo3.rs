@@ -129,6 +129,21 @@ impl PyBatchEnv {
         self.inner.action_masks().to_vec()
     }
 
+    /// Per-env decision telemetry from the most recent step_batch:
+    /// (chosen_gold_distance, is_cluster_action, own_region_had_gold, skipped_own_region).
+    /// Used by PolicyTelemetryCallback to log chosen-region distance and own-region
+    /// skip rate to TensorBoard.
+    pub fn decision_telemetry(&self) -> (Vec<i32>, Vec<bool>, Vec<bool>, Vec<bool>) {
+        let (d, c, o, s) = self.inner.decision_telemetry();
+        (d.to_vec(), c.to_vec(), o.to_vec(), s.to_vec())
+    }
+
+    /// Per-env option length (sim ticks) from the most recent step_batch.
+    /// Used by the SMDP rollout buffer to apply a γ^k cross-option discount.
+    pub fn option_ticks(&self) -> Vec<u64> {
+        self.inner.option_ticks().to_vec()
+    }
+
     // ── Viewer state queries ──────────────────────────────────────────────────
 
     pub fn grid_size(&self) -> (usize, usize)                           { self.inner.grid_size() }

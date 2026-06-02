@@ -22,7 +22,6 @@ pub const DEFAULT_TICKS_PER_SECOND: f32 = 10.0;
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 pub const AGENT_MAX_GOLD:      u8  = 5;
-pub const GOLD_CARRY_SPEED:    f32 = 0.9;
 
 // ── Item buffs (ticks) ─────────────────────────────────────────────────────────
 // Speed boosts: all give 2× move speed; the three tiers differ only in how long

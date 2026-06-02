@@ -8,17 +8,20 @@ training loop.
 Algorithms
 ----------
 ppo           : Standard PPO — no action masking.
-maskable_ppo  : PPO with per-step action masking (sb3-contrib). Requires the
-                env to expose an `action_masks()` method. NOTE: stage-aware
-                masks were removed (commit 7b3028e) and factory.py no longer
-                wires action_masks, so this path is currently unused — kept
-                registered in case masking is reintroduced.
-recurrent_ppo : PPO + LSTM (sb3-contrib). This is the default algo (train.yaml).
+maskable_ppo  : PPO with per-step action masking (sb3-contrib). This is the
+                DEFAULT algo (configs/train.yaml). The env exposes action_masks()
+                (AtbEnv / BatchVecEnv) and MaskablePPO consumes them via
+                env_method, so provably-useless actions (empty regions, base when
+                empty-handed) are forbidden; Wait is never masked.
+recurrent_ppo : PPO + LSTM (sb3-contrib). Optional — for partially-observable
+                variants where temporal memory helps. NOTE: eval must use the
+                standard (non-maskable) EvalCallback for this algo — see
+                training/callbacks/eval.py:make_eval_callback.
 
 Policy choice
 -------------
 ppo / maskable_ppo use "MlpPolicy"; recurrent_ppo uses "MlpLstmPolicy". In all
-cases the observation space is flat (11504,) and AtbCnnExtractor handles the CNN
+cases the observation space is flat (10222,) and AtbCnnExtractor handles the CNN
 internally — SB3 routes the policy string through the custom
 features_extractor_class set in the policy_kwargs (see network/policy.py).
 
@@ -110,8 +113,8 @@ PPO_SPEC = AlgoSpec(
 # Install: pip install sb3-contrib
 #
 # The env must implement action_masks() returning np.ndarray[bool] of shape
-# (action_size,) for AtbEnv / (n_envs, action_size) for BatchVecEnv.
-# Stage-aware masks are defined in env/action_masks.py.
+# (action_size,) for AtbEnv / (n_envs, action_size) for BatchVecEnv. The mask is
+# computed in Rust (SimCore::action_mask) and surfaced through the env wrappers.
 # ---------------------------------------------------------------------------
 
 

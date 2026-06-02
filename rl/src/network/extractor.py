@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10222,):
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
   [0     : 8750)   main egocentric crop  — (14, 25, 25) logically
   [8750  : 10195)  minimap               — (5, 17, 17) logically
-  [10195 : 10222)  cluster features      — (27,) = 9 regions × (dx, dy, count)
+  [10195 : 10231)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -26,8 +26,10 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
   Minimap channels (5, 17, 17):
     0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_SLOW   4  MM_MULT
 
-  Cluster features (27 floats = 9 regions × [dx_norm, dy_norm, count_norm]):
-    One entry per fixed 3×3 map region; zero for regions with no gold.
+  Cluster features (36 floats = 9 regions × [dx_norm, dy_norm, pathdist_norm, count_norm]):
+    One entry per fixed 3×3 map region; zero for regions with no gold. dx/dy point to
+    the region's PATH-nearest gold (BFS around walls) and pathdist_norm is that true
+    travel distance — so distance perception stays correct around obstacles.
     Region k is a stable spatial slot (sim/src/engine/clusters.rs).
 
 Slim architecture (v2)
@@ -84,13 +86,13 @@ MM_W = 17
 MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1445
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
-CLUSTER_FEATURES = CLUSTER_K * 3  # 27 — 9 regions × [dx, dy, count]
+CLUSTER_FEATURES = CLUSTER_K * 4  # 36 — 9 regions × [dx, dy, pathdist, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10222
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10231
 
-# Action space size. Must match ACTION_SIZE in src/rl/action.rs
-# (CLUSTER_K region-nav slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + Wait).
-ACTION_SIZE = CLUSTER_K + 4  # 13
+# Action space size. Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K region-nav
+# slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + NavigateToNearestGold + Wait).
+ACTION_SIZE = CLUSTER_K + 5  # 14
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
@@ -118,20 +120,20 @@ class AtbCnnExtractor(BaseFeaturesExtractor):
 
     Input: flat (OBS_TOTAL,) = (10222,) buffer — split internally.
 
-    Crop branch  (17, 25, 25):
-      Conv(17→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
+    Crop branch  (14, 25, 25):
+      Conv(14→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
       Conv(32→64, 3×3, pad=1, s=1) → ReLU   # (64, 25, 25)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64, 13, 13)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64,  7,  7)  ← new
       Flatten → Linear(3136→256) → LayerNorm(256) → ReLU
 
-    Minimap branch (3, 17, 17):
-      Conv(3→16,  3×3, pad=1, s=1) → ReLU   # (16, 17, 17)
+    Minimap branch (5, 17, 17):
+      Conv(5→16,  3×3, pad=1, s=1) → ReLU   # (16, 17, 17)
       Conv(16→32, 3×3, s=2)        → ReLU   # (32,  8,  8)  ← stride-2 added
       Flatten → Linear(2048→128) → LayerNorm(128) → ReLU
 
-    Cluster branch (27,):
-      Linear(27→32) → ReLU
+    Cluster branch (36,):
+      Linear(36→32) → ReLU
 
     Fusion:
       cat([256, 128, 32]) → Linear(416→features_dim) → LayerNorm → ReLU

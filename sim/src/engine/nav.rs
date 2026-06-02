@@ -96,6 +96,55 @@ fn astar(grid: &Grid, start: GridPos, goal: GridPos) -> VecDeque<GridPos> {
     VecDeque::new() // no path found
 }
 
+/// Breadth-first true-movement distance from `start` to every walkable tile, using
+/// the agent's own 8-connected movement (diagonals require both adjacent cardinals
+/// clear, matching `astar`). Returns a row-major `width × height` buffer of step
+/// counts; unreachable tiles (and the start tile if blocked) are `-1`.
+///
+/// Movement cost is uniform 1 per step (a diagonal costs the same as a cardinal),
+/// so a plain BFS gives exact shortest path lengths. This is the "path-aware"
+/// distance the policy sees in its cluster features — unlike Chebyshev it accounts
+/// for walls, so a region that is near in straight-line but walled off reads as far.
+pub fn dist_field(grid: &Grid, start: GridPos) -> Vec<i32> {
+    let (w, h) = (grid.width as i32, grid.height as i32);
+    let mut dist = vec![-1i32; (w * h) as usize];
+    if !is_walkable(grid, start.x, start.y) {
+        return dist;
+    }
+    let idx = |x: i32, y: i32| (y as usize) * grid.width + x as usize;
+    let mut q = VecDeque::new();
+    dist[idx(start.x, start.y)] = 0;
+    q.push_back(start);
+    while let Some(c) = q.pop_front() {
+        let d = dist[idx(c.x, c.y)];
+        for &(dx, dy, _) in &DIRS {
+            let (nx, ny) = (c.x + dx, c.y + dy);
+            if dx != 0 && dy != 0 && !diagonal_clear(grid, c.x, c.y, dx, dy) {
+                continue;
+            }
+            if !is_walkable(grid, nx, ny) {
+                continue;
+            }
+            let ni = idx(nx, ny);
+            if dist[ni] == -1 {
+                dist[ni] = d + 1;
+                q.push_back(GridPos::new(nx, ny));
+            }
+        }
+    }
+    dist
+}
+
+/// Path distance (from a `dist_field`) to `p`, or `None` if `p` is OOB/unreachable.
+#[inline]
+pub fn dist_at(dist: &[i32], grid: &Grid, p: GridPos) -> Option<i32> {
+    if !grid.in_bounds(p.x, p.y) {
+        return None;
+    }
+    let d = dist[p.y as usize * grid.width + p.x as usize];
+    if d < 0 { None } else { Some(d) }
+}
+
 fn path_next_dir(current: GridPos, path: &VecDeque<GridPos>) -> Option<Dir> {
     let next = path.front()?;
     let dx = next.x - current.x;

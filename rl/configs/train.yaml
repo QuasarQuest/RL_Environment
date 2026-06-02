@@ -23,6 +23,10 @@ train:
   eval_freq: 250_000
   eval_episodes: 10
   device: auto
+  # Regenerate plots every N env steps during training (0 = only at stage end).
+  # Rendering runs in a non-blocking subprocess, so training never stalls on it.
+  # Lower to e.g. 25_000 for more frequent refreshes.
+  plot_freq: 100_000
 
 hydra:
   job:

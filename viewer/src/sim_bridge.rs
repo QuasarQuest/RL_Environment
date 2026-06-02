@@ -383,9 +383,9 @@ pub fn step_sim(
         bridge.last_action = action;
         bridge.action_counts[action as usize] += 1;
         // Track movement for the ONNX option-commitment logic (no-op for other modes).
-        let pos_before = bridge.sim.agents[0].pos;
+        let pos_before = bridge.sim.agents.first().map(|a| a.pos);
         let (rew, done) = bridge.sim.step(action);
-        bridge.onnx_moved = bridge.sim.agents[0].pos != pos_before;
+        bridge.onnx_moved = bridge.sim.agents.first().map(|a| a.pos) != pos_before;
         bridge.onnx_option_ticks += 1;
         bridge.episode_reward += rew;
         if done {
@@ -423,20 +423,14 @@ fn bt_nearest_cluster(sim: &atb::engine::SimCore) -> u32 {
 }
 
 fn goap_action(sim: &atb::engine::SimCore) -> u32 {
-    let agent  = &sim.agents[0];
-    let agents = &sim.agents;
-    let items  = &sim.items;
+    let agent = &sim.agents[0];
+    let items = &sim.items;
 
-    const NEAR_SQ:           i32 = 10 * 10;
-    const LOW_HEALTH_THRESH:  u8 = 1;
+    const NEAR_SQ: i32 = 10 * 10;
 
     let gold_nearby = items.iter()
         .filter(|i| i.kind == ItemKind::Gold)
         .any(|i| agent.pos.dist_sq(i.pos) <= NEAR_SQ);
-
-    let enemy_nearby = agents.iter()
-        .filter(|a| a.team != agent.team)
-        .any(|a| agent.pos.dist_sq(a.pos) <= NEAR_SQ);
 
     let dist_to_base = {
         let dx = agent.pos.x - agent.base_pos.x;
@@ -453,6 +447,10 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
         .min()
         .unwrap_or(i32::MAX);
 
+    // Combat-era world bits (enemy-nearby, low-health) are gone in the single-agent
+    // gold rush, so only the gold/inventory/base bits are set here. The GOAP planner
+    // still defines the combat bits/actions (it's a reusable library); they simply
+    // never fire without those preconditions.
     let ws = {
         let mut bits = 0u64;
         if agent.gold_carried > 0                    { bits |= goap::BIT_HAS_GOLD; }
@@ -460,9 +458,7 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
         if agent.gold_carried >= AGENT_MAX_GOLD / 2  { bits |= goap::BIT_INVENTORY_HALF; }
         if agent.pos == agent.base_pos               { bits |= goap::BIT_ON_OWN_BASE; }
         if gold_nearby                               { bits |= goap::BIT_GOLD_NEARBY; }
-        if enemy_nearby                              { bits |= goap::BIT_ENEMY_NEARBY; }
         if dist_to_base < dist_to_gold               { bits |= goap::BIT_BASE_CLOSER; }
-        if agent.hearts <= LOW_HEALTH_THRESH         { bits |= goap::BIT_LOW_HEALTH; }
         goap::WorldState(bits)
     };
 
@@ -475,7 +471,7 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
 
     match first_step.as_deref() {
         Some(goap::ACT_NAVIGATE_TO_GOLD) | Some(goap::ACT_COLLECT_GOLD) => bt_nearest_cluster(sim),
-        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) | Some(goap::ACT_FLEE) => ACTION_NAVIGATE_TO_BASE,
+        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) => ACTION_NAVIGATE_TO_BASE,
         _ => ACTION_WAIT,
     }
 }

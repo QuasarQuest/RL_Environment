@@ -31,8 +31,11 @@
 //  Minimap — 17×17 cells, ~3×3 tiles/cell for a 50×50 grid (5 channels):
 //    0 obstacle, 1 gold, 2 speed, 3 slow, 4 mult (max-pooled over ~3×3 tiles).
 //
-//  Cluster features — 9 gold regions × 3 floats = 27 floats:
-//    [dx_norm, dy_norm, count_norm] per fixed 3×3 region slot (see engine/clusters.rs).
+//  Cluster features — 9 gold regions × 4 floats = 36 floats:
+//    [dx_norm, dy_norm, pathdist_norm, count_norm] per fixed 3×3 region slot.
+//    dx/dy point to the region's PATH-nearest gold (BFS around walls, not Chebyshev);
+//    pathdist_norm is that true travel distance / (w+h) ∈ [0,1] (1.0 = unreachable).
+//    See engine/clusters.rs and engine/nav.rs::dist_field.
 
 pub const OBS_CHANNELS: usize = 14;
 
@@ -80,14 +83,15 @@ pub const MM_DIM:   usize                 = MM_CHANNELS * MM_SIZE * MM_SIZE;
 pub const MM_SHAPE: (usize, usize, usize) = (MM_CHANNELS, MM_SIZE, MM_SIZE);
 
 // ── Cluster features (appended after minimap) ─────────────────────────────────
-// 9 fixed gold regions × (dx_norm, dy_norm, count_norm) = 27 floats.
+// 9 fixed gold regions × (dx_norm, dy_norm, pathdist_norm, count_norm) = 36 floats.
 // Matches CLUSTER_K in rl/action.rs and engine/clusters.rs (3×3 region grid).
 
-pub const CLUSTER_K:        usize = 9;
-pub const CLUSTER_FEATURES: usize = CLUSTER_K * 3; // 27 floats
+pub const CLUSTER_K:           usize = 9;
+pub const CLUSTER_FEATURE_DIM: usize = 4; // dx, dy, pathdist, count
+pub const CLUSTER_FEATURES:    usize = CLUSTER_K * CLUSTER_FEATURE_DIM; // 36 floats
 
 // ── Total flat buffer size ────────────────────────────────────────────────────
 
 /// OBS_DIM (crop) + MM_DIM (minimap) + CLUSTER_FEATURES — written by build_obs_into.
-/// 14·625 + 5·289 + 27 = 8750 + 1445 + 27 = 10222.
+/// 14·625 + 5·289 + 36 = 8750 + 1445 + 36 = 10231.
 pub const OBS_TOTAL: usize = OBS_DIM + MM_DIM + CLUSTER_FEATURES;

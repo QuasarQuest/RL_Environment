@@ -19,58 +19,64 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
 
 // ── Movement ──────────────────────────────────────────────────────────────────
 
+/// Apply a movement action. Returns `true` only when the agent walked straight
+/// into a wall — a `Move` whose first step is blocked by a non-walkable tile, so
+/// the agent made no progress this tick. Stalls for any other reason (slowed this
+/// tick, `Wait`) are NOT wall hits, so they incur no wall penalty.
+///
 /// `stop_at` is the agent's navigation target this tick: a multi-tile (speed-buff)
 /// move halts the instant it lands on that tile rather than sailing past it. Without
 /// this a 2-tile move steps OVER its goal — pickup/auto_deposit check only the final
 /// position, so the agent would skip its gold/base and oscillate around it forever.
 pub fn apply_action(
-    agents:      &mut Vec<AgentState>,
-    grid:        &Grid,
-    idx:         usize,
-    action:      Action,
-    carry_speed: f32,
-    tick:        u64,
-    stop_at:     Option<GridPos>,
-) {
+    agents:  &mut Vec<AgentState>,
+    grid:    &Grid,
+    idx:     usize,
+    action:  Action,
+    tick:    u64,
+    stop_at: Option<GridPos>,
+) -> bool {
     match action {
-        Action::Move(dir) => apply_move(agents, grid, idx, dir, carry_speed, tick, stop_at),
-        Action::Wait      => {}
+        Action::Move(dir) => apply_move(agents, grid, idx, dir, tick, stop_at),
+        Action::Wait      => false,
     }
 }
 
+/// Returns `true` iff the agent stepped directly into a wall (first step blocked,
+/// no progress made this tick).
 fn apply_move(
-    agents:      &mut Vec<AgentState>,
-    grid:        &Grid,
-    idx:         usize,
-    dir:         Dir,
-    carry_speed: f32,
-    tick:        u64,
-    stop_at:     Option<GridPos>,
-) {
-    let moves = movement_tiles(&agents[idx], carry_speed, tick);
-    if moves == 0 { return; }
+    agents:  &mut Vec<AgentState>,
+    grid:    &Grid,
+    idx:     usize,
+    dir:     Dir,
+    tick:    u64,
+    stop_at: Option<GridPos>,
+) -> bool {
+    let moves = movement_tiles(&agents[idx], tick);
+    if moves == 0 { return false; } // couldn't move this tick (e.g. slowed) — not a wall hit
 
     let (dx, dy) = dir.delta();
+    let mut moved = false;
     for _ in 0..moves {
         if stop_at == Some(agents[idx].pos) { break; }
         let next = agents[idx].pos.apply_delta(dx, dy);
-        if !grid.is_walkable(next.x, next.y) { break; }
+        if !grid.is_walkable(next.x, next.y) {
+            // Blocked by a wall — a wall hit only if no progress was made at all
+            // this tick (the agent stepped straight into the wall).
+            return !moved;
+        }
         agents[idx].pos = next;
+        moved = true;
         if stop_at == Some(next) { break; }
     }
+    false
 }
 
 /// How many tiles the agent moves this tick.
-///   base                 : 1 tile
-///   speed_buff active    : 2 tiles
-///   slow_buff active     : 0.5 tiles → 1 tile on even ticks, 0 on odd (slow wins over speed)
-///   carrying gold        : carry_speed^gold_carried; halts (0) once that drops below 0.5
-fn movement_tiles(a: &AgentState, carry_speed: f32, tick: u64) -> u32 {
-    // Load check first: a heavily-laden agent can't move regardless of buffs.
-    if a.gold_carried > 0 {
-        let eff = carry_speed.powi(a.gold_carried as i32).clamp(0.0, 1.0);
-        if eff < 0.5 { return 0; }
-    }
+///   base              : 1 tile
+///   speed_buff active : 2 tiles
+///   slow_buff active  : 0.5 tiles → 1 tile on even ticks, 0 on odd (slow wins over speed)
+fn movement_tiles(a: &AgentState, tick: u64) -> u32 {
     if a.slow_buff > 0 {
         // Half speed: move on even ticks only. Slow dominates an active speed buff.
         return if tick % 2 == 0 { 1 } else { 0 };

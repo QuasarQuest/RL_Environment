@@ -34,18 +34,18 @@ pub use crate::entity::{AgentState, ItemState};
 
 use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
+use rustc_hash::FxHashSet;
 
 use crate::config::AGENT_MAX_GOLD;
-use crate::entity::agent::Action;
 use crate::entity::item::ItemKind;
 use crate::rl::action::{
-    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_SIZE, ACTION_SPEED, ACTION_WAIT,
-    CLUSTER_K,
+    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_NEAREST, ACTION_SIZE,
+    ACTION_SPEED, ACTION_WAIT, CLUSTER_K,
 };
 use crate::rl::obs::OBS_TOTAL;
 use crate::rl::reward;
 use crate::world::{config::WorldConfig, coords::GridPos, grid::Grid};
-use self::clusters::{GoldCluster, find_clusters};
+use self::clusters::{GoldCluster, find_clusters, region_of, chebyshev};
 use self::nav::{navigate_action, NavCache};
 use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
@@ -53,6 +53,29 @@ use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
 /// Maximum sim ticks a single navigation option runs before control returns to
 /// the policy. Generous enough to cross the map with margin.
 pub const MAX_OPTION_TICKS: u64 = 96;
+
+/// Per-decision telemetry, captured at each option boundary (the moment the policy
+/// commits to a high-level action). Used to answer "does the agent skip nearby gold
+/// and range far?" — surfaced to Python and logged to TensorBoard during training.
+#[derive(Clone, Copy)]
+pub struct DecisionTelem {
+    /// The chosen action was a `NavigateToCluster` (going to collect gold).
+    pub is_cluster: bool,
+    /// The agent's own region held collectible gold at the decision (and it could
+    /// carry more) — i.e. there was local gold to grab.
+    pub own_has_gold: bool,
+    /// `own_has_gold` AND the agent chose a *different* gold region instead.
+    pub skipped_own: bool,
+    /// Chebyshev distance to the gold the agent committed to collect, or -1 when the
+    /// decision was not a gold-collection action (base / buff / wait / empty region).
+    pub chosen_dist: i32,
+}
+
+impl Default for DecisionTelem {
+    fn default() -> Self {
+        Self { is_cluster: false, own_has_gold: false, skipped_own: false, chosen_dist: -1 }
+    }
+}
 
 pub struct SimCore {
     pub grid:    Grid,
@@ -65,8 +88,15 @@ pub struct SimCore {
     prev_score:  u32,
     prev_pos:    GridPos,
 
+    /// Telemetry for the most recent high-level decision (option boundary).
+    last_decision: DecisionTelem,
+    /// Sim ticks the most recent option ran (for SMDP γ^k cross-option discounting).
+    last_option_ticks: u64,
+
     gold_positions: Vec<GridPos>,
     spawn_budgets:  Vec<SpawnBudget>,
+    /// Spawn pocket around the base — items never spawn here (kept in sync on reset).
+    spawn_block:    FxHashSet<GridPos>,
 
     /// The RL agent's A* path cache.
     nav_cache: NavCache,
@@ -95,6 +125,9 @@ impl SimCore {
         let initial_pos    = snap.agents[0].pos;
         let gold_positions = gold_positions_of(&snap.items);
         let spawn_budgets  = build_spawn_budgets(&snap.items);
+        let spawn_block    = builder::spawn_pocket(
+            initial_pos, snap.grid.width as i32, snap.grid.height as i32,
+        ).into_iter().collect();
 
         let mut obs_buf = vec![0.0f32; OBS_TOTAL];
         let clusters    = find_clusters(
@@ -109,7 +142,9 @@ impl SimCore {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
-            gold_positions, spawn_budgets,
+            last_decision: DecisionTelem::default(),
+            last_option_ticks: 1,
+            gold_positions, spawn_budgets, spawn_block,
             nav_cache: NavCache::new(),
             rng,
             obs_buf,
@@ -125,12 +160,16 @@ impl SimCore {
 
         self.gold_positions = gold_positions_of(&self.items);
         self.spawn_budgets  = build_spawn_budgets(&self.items);
+        self.spawn_block    = builder::spawn_pocket(
+            self.agents[0].pos, self.grid.width as i32, self.grid.height as i32,
+        ).into_iter().collect();
         self.nav_cache = NavCache::new();
 
         self.tick       = 0;
         self.prev_gold  = 0;
         self.prev_score = 0;
         self.prev_pos   = self.agents[0].pos;
+        self.last_decision = DecisionTelem::default();
 
         self.build_observation();
     }
@@ -145,18 +184,16 @@ impl SimCore {
 
         physics::tick_buffs(&mut self.agents);
 
-        let carry_speed = self.world_cfg.gold_carry_speed;
-
         // Gold regions for this tick — fixed 3×3 spatial grid (stable slots).
         let clusters = find_clusters(
             &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
         );
 
-        let wall_hit = self.apply_rl_action(rl_action, &clusters, carry_speed);
+        let wall_hit = self.apply_rl_action(rl_action, &clusters);
 
         pickup::pickup(&mut self.agents, &mut self.items);
         physics::auto_deposit(&mut self.agents, &self.grid);
-        tick_spawns(&mut self.items, &self.agents, &self.grid, &self.spawn_budgets, &mut self.rng);
+        tick_spawns(&mut self.items, &self.agents, &self.grid, &self.spawn_budgets, &self.spawn_block, &mut self.rng);
 
         self.gold_positions = gold_positions_of(&self.items);
 
@@ -191,6 +228,8 @@ impl SimCore {
     /// captures the dominant near-vs-far signal.)
     pub fn step_option(&mut self, action: u32) -> (f32, bool) {
         let rl_action = int_to_rl_action(action);
+        // Capture decision telemetry at the option boundary (before stepping).
+        self.last_decision = self.decision_telem(rl_action);
         let gamma = self.world_cfg.reward.option_gamma;
         let mut total_rew = 0.0f32;
         let mut discount = 1.0f32;
@@ -211,9 +250,14 @@ impl SimCore {
             // No movement this tick → arrived at the goal, blocked, or no valid target.
             if self.agents[0].pos == self.prev_pos { break false; }
         };
+        self.last_option_ticks = option_ticks;
         self.build_observation();
         (total_rew, done)
     }
+
+    /// Sim ticks the most recent option ran (≥1). The SMDP cross-option discount is
+    /// γ^k for an option of length k — see the Python SmdpRolloutBuffer.
+    pub fn last_option_ticks(&self) -> u64 { self.last_option_ticks }
 
     /// Per-decision action mask: `valid[i] == true` iff action `i` is worth taking.
     /// `Wait` is never masked so there is always a legal action.
@@ -246,6 +290,10 @@ impl SimCore {
         if self.items.iter().any(|it| it.kind == ItemKind::Multiplier) {
             mask[ACTION_MULT as usize] = true;
         }
+        // Nearest-gold: valid whenever any gold exists and the agent can carry more.
+        if agent.gold_carried < AGENT_MAX_GOLD && !self.gold_positions.is_empty() {
+            mask[ACTION_NEAREST as usize] = true;
+        }
         mask
     }
 
@@ -266,23 +314,21 @@ impl SimCore {
     /// advance (blocked). `Wait` and goals with no valid target are no-ops.
     fn apply_rl_action(
         &mut self,
-        rl_action:   RlAction,
-        clusters:    &[Option<GoldCluster>; CLUSTER_K],
-        carry_speed: f32,
+        rl_action: RlAction,
+        clusters:  &[Option<GoldCluster>; CLUSTER_K],
     ) -> bool {
         match rl_action {
             RlAction::Wait => false,
             nav_action => {
                 let goal = self.resolve_nav_goal(nav_action, clusters);
                 if let Some(goal) = goal {
-                    let prev_pos = self.agents[0].pos;
                     let act = navigate_action(
                         &self.agents[0], goal, &self.grid, &mut self.nav_cache,
                     );
+                    // Returns true iff the agent stepped straight into a wall.
                     physics::apply_action(
-                        &mut self.agents, &self.grid, 0, act, carry_speed, self.tick, Some(goal),
-                    );
-                    matches!(act, Action::Move(_)) && self.agents[0].pos == prev_pos
+                        &mut self.agents, &self.grid, 0, act, self.tick, Some(goal),
+                    )
                 } else {
                     false
                 }
@@ -302,12 +348,60 @@ impl SimCore {
             RlAction::NavigateToCluster(k) => clusters.get(k as usize)
                 .and_then(|c| c.as_ref())
                 .and_then(|c| c.nearest_gold(pos)),
-            RlAction::NavigateToBase       => Some(self.agents[0].base_pos),
-            RlAction::NavigateToSpeed      => self.nearest_item(pos, |k| k.is_speed()),
-            RlAction::NavigateToMultiplier => self.nearest_item(pos, |k| k == ItemKind::Multiplier),
-            RlAction::Wait                 => None,
+            RlAction::NavigateToBase        => Some(self.agents[0].base_pos),
+            RlAction::NavigateToSpeed       => self.nearest_item(pos, |k| k.is_speed()),
+            RlAction::NavigateToMultiplier  => self.nearest_item(pos, |k| k == ItemKind::Multiplier),
+            RlAction::NavigateToNearestGold => self.gold_positions.iter()
+                .min_by_key(|&&g| chebyshev(pos, g))
+                .copied(),
+            RlAction::Wait                  => None,
         }
     }
+
+    /// Compute decision telemetry for a high-level action at the current state.
+    /// "Own region" is the fixed 3×3 region the agent currently stands in; the agent
+    /// "skips" local gold when that region holds collectible gold but it commits to a
+    /// different region instead. `chosen_dist` is the Chebyshev distance to the gold
+    /// it actually targets (−1 for non-gold actions).
+    fn decision_telem(&self, action: RlAction) -> DecisionTelem {
+        let pos = self.agents[0].pos;
+        let (gw, gh) = (self.grid.width as i32, self.grid.height as i32);
+        let clusters = find_clusters(&self.gold_positions, gw, gh);
+        let own = region_of(pos, gw, gh);
+        let own_has_gold =
+            self.agents[0].gold_carried < AGENT_MAX_GOLD && clusters[own].is_some();
+
+        // Which gold this action commits to (and whether it's a region pick that can
+        // "skip" local gold). `region = None` for nearest-gold — by construction it
+        // takes the closest gold, so it is never a skip.
+        let target: Option<(GridPos, Option<usize>)> = match action {
+            RlAction::NavigateToCluster(k) => {
+                let kk = k as usize;
+                clusters.get(kk).and_then(|c| c.as_ref())
+                    .and_then(|c| c.nearest_gold(pos))
+                    .map(|g| (g, Some(kk)))
+            }
+            RlAction::NavigateToNearestGold => self.gold_positions.iter()
+                .min_by_key(|&&g| chebyshev(pos, g))
+                .copied()
+                .map(|g| (g, None)),
+            _ => None,
+        };
+
+        match target {
+            Some((g, region)) => {
+                // Path-aware distance (around walls), not Chebyshev.
+                let field = nav::dist_field(&self.grid, pos);
+                let chosen_dist = nav::dist_at(&field, &self.grid, g).unwrap_or(-1);
+                let skipped_own = own_has_gold && matches!(region, Some(k) if k != own);
+                DecisionTelem { is_cluster: true, own_has_gold, skipped_own, chosen_dist }
+            }
+            None => DecisionTelem { is_cluster: false, own_has_gold, skipped_own: false, chosen_dist: -1 },
+        }
+    }
+
+    /// Telemetry for the most recent high-level decision (set by `step_option`).
+    pub fn last_decision(&self) -> DecisionTelem { self.last_decision }
 
     /// Nearest item (by Chebyshev distance) whose kind matches `pred`.
     fn nearest_item(&self, from: GridPos, pred: impl Fn(ItemKind) -> bool) -> Option<GridPos> {

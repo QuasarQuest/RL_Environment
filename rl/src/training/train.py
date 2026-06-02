@@ -48,12 +48,15 @@ from training.callbacks import (
     CheckpointCallback,
     EntropyCoefScheduleCallback,
     EpisodeStatsCallback,
-    EvalWithVecNorm,
+    PeriodicPlotCallback,
+    PolicyTelemetryCallback,
     RichLogCallback,
     kv_table,
+    make_eval_callback,
 )
 from training.config import EnvConfig, PpoConfig, TrainConfig, register_configs
 from training.schedules import linear_schedule
+from training.smdp import SmdpDiscountCallback, smdp_buffer_class
 
 
 def _seq_str(seq: nn.Sequential) -> str:
@@ -277,6 +280,8 @@ def train(cfg: DictConfig) -> None:
         model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,
+            # Semi-MDP γ^k cross-option discounting (None → plain γ for unsupported algos).
+            rollout_buffer_class=smdp_buffer_class(t_cfg.algo),
             learning_rate=lr_schedule,
             n_steps=p_cfg.n_steps,
             batch_size=p_cfg.batch_size,
@@ -309,16 +314,21 @@ def train(cfg: DictConfig) -> None:
             onnx_export=True,
         ),
         EpisodeStatsCallback(stats_path=run_dir / "stats.h5"),
+        # Logs chosen-gold-region distance + own-region skip rate to TB (policy/*).
+        PolicyTelemetryCallback(),
+        # Feeds per-step option lengths to the SMDP rollout buffer (γ^k discount).
+        SmdpDiscountCallback(),
         RichLogCallback(console),
         EntropyCoefScheduleCallback(
             schedule=ent_schedule,
             total_timesteps=t_cfg.total_timesteps,
         ),
-        # FIX: EvalWithVecNorm saves vec_normalize alongside every eval-best
-        # model. SB3's stock EvalCallback only saves the model zip, leaving no
-        # matching _vecnorm.pkl — the best model cannot be loaded correctly
-        # for deployment or resume without the normalisation stats.
-        EvalWithVecNorm(
+        # make_eval_callback saves vec_normalize alongside every eval-best model
+        # (SB3's stock EvalCallback only saves the zip, leaving no matching
+        # _vecnorm.pkl) and selects the maskable vs standard eval base by algo so
+        # masking-only kwargs are never passed to a non-maskable model's predict().
+        make_eval_callback(
+            t_cfg.algo,
             eval_env=eval_env,
             best_model_save_path=eval_best_path,
             log_path=str(run_dir / "eval_log"),
@@ -333,6 +343,15 @@ def train(cfg: DictConfig) -> None:
             onnx_path=run_dir / "models" / "eval_best" / "policy.onnx",
         ),
     ]
+
+    # Periodic in-training plot refresh (non-blocking). 0 = only at stage end.
+    if getattr(t_cfg, "plot_freq", 0) and t_cfg.plot_freq > 0:
+        callbacks.append(PeriodicPlotCallback(
+            plot_freq=t_cfg.plot_freq,
+            run_dir=run_dir,
+            plot_script=_RL_ROOT / "scripts" / "plot_runs.py",
+        ))
+        console.print(f"  plots           : every {t_cfg.plot_freq:,} steps → {run_dir.name}/plots/")
 
     t0 = time.time()
     interrupted = False

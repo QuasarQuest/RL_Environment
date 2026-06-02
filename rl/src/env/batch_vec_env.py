@@ -3,7 +3,7 @@
 Observation protocol
 --------------------
 Rust returns a flat bytearray of shape (n_envs * OBS_TOTAL * 4 bytes).
-np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 11504) — flat, not (C,H,W).
+np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 10222) — flat, not (C,H,W).
 AtbCnnExtractor in policy.py splits crop + minimap + cluster features internally.
 
 Score tracking
@@ -127,8 +127,8 @@ class BatchVecEnv(VecEnv):
         the reused obs_flat buffer), so each step's view already owns independent,
         Python-managed memory. SB3's rollout buffer copies obs into its own
         preallocated storage on ``add()``, so nothing downstream aliases this view
-        across steps. An extra ``.copy()`` here would be a redundant 1.47 MB/step
-        memcpy (n_envs=64 × 11504 × 4 B).
+        across steps. An extra ``.copy()`` here would be a redundant ~2.5 MB/step
+        memcpy (n_envs=64 × 10222 × 4 B).
         """
         return np.frombuffer(ba, dtype=_OBS_DTYPE).reshape(n, _OBS_TOTAL)
 
@@ -257,6 +257,27 @@ class BatchVecEnv(VecEnv):
     def action_masks(self) -> np.ndarray:
         """Direct accessor (n_envs, ACTION_SIZE) — convenience alongside env_method."""
         return self._action_masks_all()
+
+    def decision_telemetry(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Per-env decision telemetry from the most recent step_batch.
+
+        Returns (chosen_gold_dist, is_cluster, own_region_had_gold, skipped_own),
+        each shape (n_envs,). chosen_gold_dist is Chebyshev distance to the gold the
+        policy committed to (−1 for non-gold actions). Consumed by
+        PolicyTelemetryCallback to log chosen-region distance + own-region skip rate.
+        """
+        dist, is_cluster, own_gold, skipped = self._batch.decision_telemetry()
+        return (
+            np.asarray(dist, dtype=np.int64),
+            np.asarray(is_cluster, dtype=bool),
+            np.asarray(own_gold, dtype=bool),
+            np.asarray(skipped, dtype=bool),
+        )
+
+    def option_ticks(self) -> np.ndarray:
+        """Per-env option length (sim ticks) from the most recent step_batch, shape
+        (n_envs,). Drives the SMDP γ^k cross-option discount (see SmdpRolloutBuffer)."""
+        return np.asarray(self._batch.option_ticks(), dtype=np.float32)
 
     def seed(self, seed: Optional[int] = None) -> list[Optional[int]]:
         return [None] * self.num_envs

@@ -9,7 +9,6 @@
 
 use serde::Deserialize;
 use crate::entity::item::{ItemKind, ItemSpawnConfig};
-use crate::config as global;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -178,8 +177,6 @@ pub struct WorldConfig {
     pub obstacle_clusters: Vec<ObstacleCluster>,
     #[serde(default)]
     pub item_density: ItemDensityConfig,
-    #[serde(default = "default_gold_carry_speed")]
-    pub gold_carry_speed: f32,
     #[serde(default)]
     pub reward: RewardConfig,
 }
@@ -190,7 +187,6 @@ fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
 fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
-fn default_gold_carry_speed()   -> f32 { global::GOLD_CARRY_SPEED }
 fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
 fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
 fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }

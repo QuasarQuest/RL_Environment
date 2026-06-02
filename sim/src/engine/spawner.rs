@@ -13,6 +13,7 @@
 use rand::seq::SliceRandom;
 use rand::RngExt;
 use rand::rngs::SmallRng;
+use rustc_hash::FxHashSet;
 
 use crate::entity::agent::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
@@ -29,11 +30,13 @@ pub struct SpawnBudget {
 }
 
 /// Called every tick from SimCore::step. May push new items into `items`.
+/// `blocked` is the spawn pocket around the base — items never spawn there.
 pub fn tick_spawns(
     items:   &mut Vec<ItemState>,
     agents:  &[AgentState],
     grid:    &Grid,
     budgets: &[SpawnBudget],
+    blocked: &FxHashSet<GridPos>,
     rng:     &mut SmallRng,
 ) {
     for budget in budgets {
@@ -52,6 +55,7 @@ pub fn tick_spawns(
             .flat_map(|y| (0..grid.width as i32).map(move |x| GridPos::new(x, y)))
             .filter(|p| {
                 grid.get(p.x, p.y) == Some(Tile::Free)
+                    && !blocked.contains(p)
                     && !items.iter().any(|i| i.pos == *p)
                     && !agents.iter().any(|a| a.pos == *p)
             })

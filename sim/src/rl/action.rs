@@ -10,20 +10,27 @@
 //   K        NavigateToBase           — return to base and deposit
 //   K+1      NavigateToSpeed          — nearest speed-boost item
 //   K+2      NavigateToMultiplier     — nearest score-multiplier item
-//   K+3      Wait
+//   K+3      NavigateToNearestGold    — globally nearest gold (position-invariant greedy)
+//   K+4      Wait
 //
 // CLUSTER_K must match engine/clusters.rs and rl/obs.rs.
-// ACTION_SIZE = CLUSTER_K + 4.
+// ACTION_SIZE = CLUSTER_K + 5.
+//
+// NavigateToNearestGold is the position-invariant "take the closest gold" primitive
+// the fixed-region actions can't express (the agent's own region index shifts every
+// episode with the random base). It composes with the strategic region slots — those
+// still encode the far-but-dense tradeoff; this just adds a stable greedy tactic.
 
 pub const CLUSTER_K:   usize = 9;
-pub const ACTION_SIZE: usize = CLUSTER_K + 4; // 13
+pub const ACTION_SIZE: usize = CLUSTER_K + 5; // 14
 
 // Index helpers (kept relative to CLUSTER_K so the layout stays correct if the
 // region grid size changes).
-pub const ACTION_BASE:  u32 = CLUSTER_K as u32;       // 9
-pub const ACTION_SPEED: u32 = CLUSTER_K as u32 + 1;   // 10
-pub const ACTION_MULT:  u32 = CLUSTER_K as u32 + 2;   // 11
-pub const ACTION_WAIT:  u32 = CLUSTER_K as u32 + 3;   // 12
+pub const ACTION_BASE:    u32 = CLUSTER_K as u32;       // 9
+pub const ACTION_SPEED:   u32 = CLUSTER_K as u32 + 1;   // 10
+pub const ACTION_MULT:    u32 = CLUSTER_K as u32 + 2;   // 11
+pub const ACTION_NEAREST: u32 = CLUSTER_K as u32 + 3;   // 12
+pub const ACTION_WAIT:    u32 = CLUSTER_K as u32 + 4;   // 13
 
 /// High-level action the RL policy selects each decision point.
 /// Navigation goals are resolved to a concrete GridPos target and executed via A*
@@ -35,6 +42,7 @@ pub enum RlAction {
     NavigateToBase,
     NavigateToSpeed,
     NavigateToMultiplier,
+    NavigateToNearestGold,
     Wait,
 }
 
@@ -53,6 +61,7 @@ impl std::fmt::Display for RlAction {
             Self::NavigateToBase        => write!(f, "Nav Base"),
             Self::NavigateToSpeed       => write!(f, "Nav Speed"),
             Self::NavigateToMultiplier  => write!(f, "Nav Multiplier"),
+            Self::NavigateToNearestGold => write!(f, "Nav Nearest Gold"),
             Self::Wait                  => write!(f, "Wait"),
         }
     }
@@ -66,6 +75,7 @@ pub fn int_to_rl_action(action: u32) -> RlAction {
         a if a == ACTION_BASE     => RlAction::NavigateToBase,
         a if a == ACTION_SPEED    => RlAction::NavigateToSpeed,
         a if a == ACTION_MULT     => RlAction::NavigateToMultiplier,
+        a if a == ACTION_NEAREST  => RlAction::NavigateToNearestGold,
         a if a == ACTION_WAIT     => RlAction::Wait,
         _ => panic!("Invalid RL action index: {action} (must be 0..{ACTION_SIZE})"),
     }

@@ -20,7 +20,6 @@ from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from rich.console import Console
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
@@ -88,11 +87,19 @@ class _PruneCallback(BaseCallback):
 def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device: str):
     algo_spec = get_algo(algo)
 
+    # maskable_ppo passes action masks into predict(), so it needs the maskable
+    # evaluator; every other algo uses the stock one. This matches how the env is
+    # masked at train time (see training/callbacks/eval.py).
+    if algo == "maskable_ppo":
+        from sb3_contrib.common.maskable.evaluation import evaluate_policy as _evaluate
+    else:
+        from stable_baselines3.common.evaluation import evaluate_policy as _evaluate
+
     def objective(trial: optuna.Trial) -> float:
         params = _sample_ppo(trial, tune_cfg)
 
         ppo_cfg = PpoConfig(
-            n_steps=512,
+            n_steps=256,  # match configs/ppo/default.yaml so tuned HPs transfer
             batch_size=params["batch_size"],
             n_epochs=params["n_epochs"],
             gamma=params["gamma"],
@@ -139,7 +146,7 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
         try:
             callbacks = [_PruneCallback(trial)] if tune_cfg.pruning else []
             model.learn(tune_cfg.n_timesteps, callback=callbacks)
-            mean_reward, _ = evaluate_policy(
+            mean_reward, _ = _evaluate(
                 model, eval_env, n_eval_episodes=10, deterministic=True
             )
         except optuna.TrialPruned:
@@ -169,19 +176,19 @@ def tune(
         study_name: str = typer.Option("atb_ppo", "--study-name"),
         device: str = typer.Option("cpu", "--device"),
         pruning: bool = typer.Option(True, "--pruning/--no-pruning"),
-        algo: str = typer.Option("ppo", "--algo"),
+        algo: str = typer.Option("maskable_ppo", "--algo"),
 ) -> None:
     tune_cfg = TuneConfig(n_trials=n_trials, n_timesteps=n_timesteps, stage=stage, pruning=pruning)
 
-    # FIX: normalize_obs=True to match stage1.yaml — tuning with normalize_obs=False
-    # produces hyperparameters that do not transfer to training where obs
-    # normalisation is active, because the value scale seen by the policy
-    # is fundamentally different between the two runs.
+    # Mirror the env normalisation used in training (configs/env/stage1.yaml:
+    # normalize_obs=false, normalize_reward=true). Tuning under a different
+    # normalisation would produce hyperparameters that do not transfer, because
+    # the value scale seen by the policy would differ between tuning and training.
     env_cfg = EnvConfig(
         stage=stage,
         n_envs=n_envs,
         seed=42,
-        normalize_obs=True,
+        normalize_obs=False,
         normalize_reward=True,
     )
 

@@ -131,17 +131,32 @@ pub fn build_obs_into(
 
     build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], gold_positions, items, grid);
 
-    // ── Cluster features (CLUSTER_K × 3 floats after minimap) ─────────────────
+    // ── Cluster features (CLUSTER_K × 4 floats after minimap) ─────────────────
+    // [dx_norm, dy_norm, pathdist_norm, count_norm] per fixed region. The "nearest
+    // gold" used for direction + distance is the PATH-nearest (BFS around walls),
+    // so the policy's distance perception is correct around obstacles.
 
+    let dist = crate::engine::nav::dist_field(grid, agent.pos);
+    let path_norm = (gw + gh) as f32; // longest plausible corridor distance
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
-        let base = cluster_start + k * 3;
+        let base = cluster_start + k * 4;
         if let Some(c) = maybe_cluster {
-            if let Some(nearest) = c.nearest_gold(agent.pos) {
-                buf[base]     = (nearest.x - ax) as f32 / gw as f32;
-                buf[base + 1] = (nearest.y - ay) as f32 / gh as f32;
+            // Pick the region's gold with the smallest true path distance; fall back
+            // to the Chebyshev-nearest for direction if none is reachable.
+            let path_nearest = c.golds.iter()
+                .filter_map(|&g| crate::engine::nav::dist_at(&dist, grid, g).map(|d| (d, g)))
+                .min_by_key(|&(d, _)| d);
+            let (target, pathdist) = match path_nearest {
+                Some((d, g)) => (Some(g), (d as f32 / path_norm).min(1.0)),
+                None         => (c.nearest_gold(agent.pos), 1.0), // all walled off
+            };
+            if let Some(g) = target {
+                buf[base]     = (g.x - ax) as f32 / gw as f32;
+                buf[base + 1] = (g.y - ay) as f32 / gh as f32;
             }
-            buf[base + 2] = (c.count() as f32 / CLUSTER_COUNT_NORM).min(1.0);
+            buf[base + 2] = pathdist;
+            buf[base + 3] = (c.count() as f32 / CLUSTER_COUNT_NORM).min(1.0);
         }
     }
 }

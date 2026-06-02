@@ -1,33 +1,36 @@
-"""EvalCallback subclass that co-saves VecNormalize stats with every best model."""
+"""Eval-best callbacks that co-save VecNormalize stats and export ONNX.
+
+`make_eval_callback` selects the correct eval base for the algorithm:
+maskable_ppo needs sb3-contrib's MaskableEvalCallback (it fetches action masks
+and passes them into predict); every other algo (ppo, recurrent_ppo) must use
+the stock EvalCallback. Using the maskable base with a non-maskable model (e.g.
+RecurrentPPO) would pass an `action_masks` kwarg its predict() rejects and crash
+evaluation — so the base is chosen by algo, not by import availability.
+"""
 from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Optional
 
-from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.callbacks import EvalCallback
 
 try:
-    from sb3_contrib.common.callbacks import MaskableEvalCallback as _EvalBase
+    from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
+    _MASKABLE_AVAILABLE = True
 except ImportError:
-    from stable_baselines3.common.callbacks import EvalCallback as _EvalBase  # type: ignore[assignment]
+    MaskableEvalCallback = None  # type: ignore[assignment,misc]
+    _MASKABLE_AVAILABLE = False
 
 
-class EvalWithVecNorm(_EvalBase):
-    """EvalCallback that saves VecNormalize stats and exports ONNX on every new eval-best.
+class _VecNormOnnxEvalMixin:
+    """On every new eval-best: co-save VecNormalize stats and export ONNX.
 
-    SB3's stock EvalCallback writes `best_model.zip` on a new best mean reward
-    but never saves the matching VecNormalize stats, so a resume or deployment
-    load silently uses fresh (mean=0, var=1) statistics.
+    SB3's stock EvalCallback writes only `best_model.zip` and never the matching
+    VecNormalize stats, so a resume or deployment load silently uses fresh
+    (mean=0, var=1) statistics. Mix this into the correct eval base for the algo.
     """
 
-    def __init__(
-            self,
-            *args,
-            vec_normalize: Optional[VecNormalize] = None,
-            onnx_path: Optional[Path] = None,
-            **kwargs,
-    ) -> None:
+    def __init__(self, *args, vec_normalize=None, onnx_path=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._vec_normalize = vec_normalize
         self._onnx_path = Path(onnx_path) if onnx_path else None
@@ -62,3 +65,24 @@ class EvalWithVecNorm(_EvalBase):
             )
         except Exception as exc:
             print(f"  [ONNX export skipped: {exc}]")
+
+
+class EvalWithVecNorm(_VecNormOnnxEvalMixin, EvalCallback):
+    """Standard (non-masking) eval-best callback with VecNorm + ONNX co-save."""
+
+
+if _MASKABLE_AVAILABLE:
+
+    class MaskableEvalWithVecNorm(_VecNormOnnxEvalMixin, MaskableEvalCallback):
+        """Maskable eval-best callback — fetches action masks during evaluation."""
+
+
+def make_eval_callback(algo: str, *args, **kwargs):
+    """Return the eval-best callback matching the algorithm's masking support."""
+    if algo == "maskable_ppo":
+        if not _MASKABLE_AVAILABLE:
+            raise RuntimeError(
+                "algo=maskable_ppo requires sb3-contrib (MaskableEvalCallback)."
+            )
+        return MaskableEvalWithVecNorm(*args, **kwargs)
+    return EvalWithVecNorm(*args, **kwargs)
