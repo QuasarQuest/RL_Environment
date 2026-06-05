@@ -77,6 +77,36 @@ impl Default for DecisionTelem {
     }
 }
 
+/// One per-tick record captured inside `step_option` when tracing is enabled
+/// (`set_trace(true)`). Lets the offline trace recorder reconstruct the agent's
+/// path and the exact reward signal that fired each tick of an option, without
+/// touching the zero-overhead batch-training path (tracing defaults off).
+///
+/// The map (gold/items/obstacles) is essentially static within an option — a
+/// pickup/deposit ends the option — so full positions are snapshotted per
+/// DECISION on the Python side; this record carries only what changes per tick.
+#[derive(Clone, Copy, Debug)]
+pub struct TickRecord {
+    pub tick:         u64,
+    pub ax:           i32,
+    pub ay:           i32,
+    pub gold_carried: u8,
+    pub score:        u32,
+    pub r_tick:       f32,
+    pub r_pickup:     f32,
+    pub r_deposit:    f32,
+    pub r_wall:       f32,
+    pub r_total:      f32,
+    /// γᵗ applied to this tick within the option (running intra-option discount).
+    pub discount:     f32,
+    /// Gold tiles remaining on the map after this tick.
+    pub gold_count:   u32,
+}
+
+/// Number of f32 columns when a `TickRecord` is flattened for FFI — keep in sync
+/// with `TickRecord` field count (see env.rs `trace_flat` and pyo3.rs `get_trace`).
+pub const TRACE_FIELDS: usize = 12;
+
 pub struct SimCore {
     pub grid:    Grid,
     pub agents:  Vec<AgentState>,
@@ -104,6 +134,12 @@ pub struct SimCore {
     rng: SmallRng,
 
     pub obs_buf: Vec<f32>,
+
+    /// Offline trace capture (default off → zero overhead for training). When on,
+    /// `step_option` records a `TickRecord` per tick into `trace` (cleared at each
+    /// option boundary). Used only by the single-env trace recorder.
+    trace_enabled: bool,
+    trace:         Vec<TickRecord>,
 }
 
 impl SimCore {
@@ -148,6 +184,8 @@ impl SimCore {
             nav_cache: NavCache::new(),
             rng,
             obs_buf,
+            trace_enabled: false,
+            trace:         Vec::new(),
         }
     }
 
@@ -174,7 +212,7 @@ impl SimCore {
         self.build_observation();
     }
 
-    fn tick_once(&mut self, rl_action: RlAction) -> (f32, bool) {
+    fn tick_once(&mut self, rl_action: RlAction) -> (reward::RewardBreakdown, bool) {
         self.prev_gold  = self.agents[0].gold_carried;
         self.prev_score = self.agents[0].score;
         self.prev_pos   = self.agents[0].pos;
@@ -197,7 +235,7 @@ impl SimCore {
 
         self.gold_positions = gold_positions_of(&self.items);
 
-        let rew = reward::compute(
+        let rew = reward::compute_components(
             &self.world_cfg.reward,
             &self.agents[0],
             self.prev_gold,
@@ -210,9 +248,9 @@ impl SimCore {
 
     /// Single-tick step (viewer path).
     pub fn step(&mut self, action: u32) -> (f32, bool) {
-        let r = self.tick_once(int_to_rl_action(action));
+        let (rb, done) = self.tick_once(int_to_rl_action(action));
         self.build_observation();
-        r
+        (rb.total(), done)
     }
 
     /// Temporally-extended ("option") step used by the RL training/eval path.
@@ -230,13 +268,32 @@ impl SimCore {
         let rl_action = int_to_rl_action(action);
         // Capture decision telemetry at the option boundary (before stepping).
         self.last_decision = self.decision_telem(rl_action);
+        if self.trace_enabled { self.trace.clear(); }
         let gamma = self.world_cfg.reward.option_gamma;
         let mut total_rew = 0.0f32;
         let mut discount = 1.0f32;
         let mut option_ticks = 0u64;
         let done = loop {
-            let (r, d) = self.tick_once(rl_action);
+            let (rb, d) = self.tick_once(rl_action);
+            let r = rb.total();
             total_rew += discount * r;
+            if self.trace_enabled {
+                let agent = &self.agents[0];
+                self.trace.push(TickRecord {
+                    tick:         self.tick,
+                    ax:           agent.pos.x,
+                    ay:           agent.pos.y,
+                    gold_carried: agent.gold_carried,
+                    score:        agent.score,
+                    r_tick:       rb.tick,
+                    r_pickup:     rb.pickup,
+                    r_deposit:    rb.deposit,
+                    r_wall:       rb.wall,
+                    r_total:      r,
+                    discount,
+                    gold_count:   self.gold_positions.len() as u32,
+                });
+            }
             discount *= gamma;
             option_ticks += 1;
 
@@ -258,6 +315,19 @@ impl SimCore {
     /// Sim ticks the most recent option ran (≥1). The SMDP cross-option discount is
     /// γ^k for an option of length k — see the Python SmdpRolloutBuffer.
     pub fn last_option_ticks(&self) -> u64 { self.last_option_ticks }
+
+    /// Enable/disable per-tick trace capture (off by default — see `TickRecord`).
+    pub fn set_trace(&mut self, on: bool) { self.trace_enabled = on; }
+
+    /// Per-tick trace for the most recent option (empty unless tracing is enabled).
+    pub fn trace(&self) -> &[TickRecord] { &self.trace }
+
+    /// Reward weights in play: (tick, pickup, deposit, wall_hit, option_gamma).
+    /// Surfaced so the trace recorder can record the exact shaping used.
+    pub fn reward_weights(&self) -> (f32, f32, f32, f32, f32) {
+        let r = &self.world_cfg.reward;
+        (r.tick, r.pickup, r.deposit, r.wall_hit, r.option_gamma)
+    }
 
     /// Per-decision action mask: `valid[i] == true` iff action `i` is worth taking.
     /// `Wait` is never masked so there is always a legal action.

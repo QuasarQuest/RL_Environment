@@ -165,6 +165,40 @@ impl BatchEnv {
     /// Per-env option length (sim ticks) from the most recent `step_batch`.
     pub fn option_ticks(&self) -> &[u64] { &self.option_ticks }
 
+    // ── Trace capture (offline recorder; off by default) ─────────────────────────
+
+    /// Enable/disable per-tick trace capture on every env.
+    pub fn set_trace(&mut self, on: bool) {
+        for env in &mut self.envs { env.set_trace(on); }
+    }
+
+    /// Flatten env `i`'s most-recent-option trace into a row-major f32 buffer
+    /// (`TRACE_FIELDS` columns per tick). Empty unless tracing is enabled.
+    pub fn trace_flat(&self, i: usize) -> Vec<f32> {
+        let trace = self.envs[i].trace();
+        let mut out = Vec::with_capacity(trace.len() * crate::engine::TRACE_FIELDS);
+        for r in trace {
+            out.push(r.tick as f32);
+            out.push(r.ax as f32);
+            out.push(r.ay as f32);
+            out.push(r.gold_carried as f32);
+            out.push(r.score as f32);
+            out.push(r.r_tick);
+            out.push(r.r_pickup);
+            out.push(r.r_deposit);
+            out.push(r.r_wall);
+            out.push(r.r_total);
+            out.push(r.discount);
+            out.push(r.gold_count as f32);
+        }
+        out
+    }
+
+    /// Reward weights (tick, pickup, deposit, wall_hit, option_gamma) from env 0.
+    pub fn reward_weights(&self) -> (f32, f32, f32, f32, f32) {
+        self.envs[0].reward_weights()
+    }
+
     // ── Viewer state queries ───────────────────────────────────────────────────
 
     pub fn grid_size(&self) -> (usize, usize) {

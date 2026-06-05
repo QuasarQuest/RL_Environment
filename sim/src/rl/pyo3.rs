@@ -144,6 +144,27 @@ impl PyBatchEnv {
         self.inner.option_ticks().to_vec()
     }
 
+    // ── Trace capture (offline recorder; off by default) ────────────────────────
+
+    /// Enable/disable per-tick trace capture on all envs. Off by default — the
+    /// training path pays nothing. Used by the single-env trace recorder.
+    pub fn set_trace(&mut self, on: bool) {
+        self.inner.set_trace(on);
+    }
+
+    /// Flat per-tick trace for env `i`'s most recent option, row-major with
+    /// `trace_fields()` columns per tick. Python: np.asarray(...).reshape(-1, F).
+    /// Column order: tick, ax, ay, gold_carried, score, r_tick, r_pickup,
+    /// r_deposit, r_wall, r_total, discount, gold_count.
+    pub fn get_trace(&self, i: usize) -> Vec<f32> {
+        self.inner.trace_flat(i)
+    }
+
+    /// Reward weights: (tick, pickup, deposit, wall_hit, option_gamma).
+    pub fn reward_weights(&self) -> (f32, f32, f32, f32, f32) {
+        self.inner.reward_weights()
+    }
+
     // ── Viewer state queries ──────────────────────────────────────────────────
 
     pub fn grid_size(&self) -> (usize, usize)                           { self.inner.grid_size() }
@@ -163,6 +184,7 @@ impl PyBatchEnv {
     #[staticmethod] pub fn mm_shape()         -> (usize, usize, usize) { MM_SHAPE }
     #[staticmethod] pub fn cluster_features() -> usize                 { CLUSTER_FEATURES }
     #[staticmethod] pub fn action_size()      -> usize                 { ACTION_SIZE }
+    #[staticmethod] pub fn trace_fields()     -> usize                 { crate::engine::TRACE_FIELDS }
 }
 
 // ── Module registration ───────────────────────────────────────────────────────
