@@ -2,18 +2,20 @@
 
 Runs a trained checkpoint on a single env and records, for every high-level
 decision and every sim tick, exactly what the agent saw and chose — so reward
-shaping (the balance between the dense-cluster actions and NavigateToNearestGold)
-can be tuned against evidence instead of guesswork.
+shaping and the agent's spatial (which-region) decisions can be tuned against
+evidence instead of guesswork.
 
 Why this exists
 ---------------
-The agent over-uses `NavigateToNearestGold` (action 12). We want it to prefer
-dense gold clusters unless gold is genuinely close. The intra-option SMDP discount
-(`reward.option_gamma`) is meant to trade near-vs-far, but its effect on the
-policy's choices is invisible. This tool makes it visible: at each decision it
-logs the per-region gold counts + path distances (the obs cluster features), the
-masked action probabilities, the value estimate, and the per-tick reward
-breakdown (tick / pickup / deposit / wall) that the option earned.
+The agent must reach gold through the fixed-region nav slots (there is no
+hardcoded "nearest gold" action — see sim/src/rl/action.rs), so where it chooses
+to go is a learned decision over the per-region obs features. We want to see
+whether it steers toward dense clusters or just the nearest sparse gold. The
+intra-option SMDP discount (`reward.option_gamma`) is meant to trade near-vs-far,
+but its effect on the policy's choices is invisible. This tool makes it visible:
+at each decision it logs the per-region gold counts + path distances (the obs
+cluster features), the masked action probabilities, the value estimate, and the
+per-tick reward breakdown (tick / pickup / deposit / wall) that the option earned.
 
 What's faithful about the granularity
 --------------------------------------
@@ -31,6 +33,7 @@ CLI
 ---
     atb-trace --run runs/seq_s1_<id> --episodes 5          # record (default cmd)
     atb-trace summary runs/seq_s1_<id>/trace.h5            # human-readable summary
+    atb-trace view    runs/seq_s1_<id>/trace.h5 -e 0       # visual per-decision panels
 
     # explicit paths instead of --run:
     atb-trace --model M/best_model.zip --vecnorm M/vn.pkl --config cfg.ron
@@ -53,17 +56,17 @@ from network.extractor import ACTION_SIZE, CLUSTER_FEATURES, CLUSTER_K
 log = logging.getLogger(__name__)
 app = typer.Typer(add_completion=False)
 
-# Action names — must match sim/src/rl/action.rs (CLUSTER_K nav slots + 5 specials).
+# Action names — must match sim/src/rl/action.rs (CLUSTER_K nav slots + 4 specials).
 ACTION_NAMES: list[str] = (
     [f"NavCluster{k}" for k in range(CLUSTER_K)]
-    + ["NavBase", "NavSpeed", "NavMultiplier", "NavNearestGold", "Wait"]
+    + ["NavBase", "NavSpeed", "NavMultiplier", "Wait"]
 )
-ACTION_NEAREST = CLUSTER_K + 3  # index of NavigateToNearestGold
 
 # Per-tick trace column order — must match SimCore::trace_flat / TickRecord.
 TICK_FIELDS: list[str] = [
     "tick", "ax", "ay", "gold_carried", "score",
     "r_tick", "r_pickup", "r_deposit", "r_wall", "r_total", "discount", "gold_count",
+    "r_mult",  # appended last (matches SimCore::trace_flat) — multiplier-use bonus
 ]
 
 # Cluster-feature sub-layout: region k → obs offset k*4 + {dx, dy, pathdist, count}.
@@ -206,7 +209,7 @@ def record(
 ) -> None:
     """Record per-decision + per-tick behaviour traces for a trained checkpoint.
 
-    This is the default action; `summary` is the other subcommand.
+    This is the default action; `summary` and `view` are the other subcommands.
     """
     # A named subcommand (e.g. `summary`) was invoked → don't also record.
     if ctx.invoked_subcommand is not None:
@@ -353,8 +356,8 @@ def summary(
 
     chosen = []                  # chosen action per decision
     near_count, near_dist = [], []   # cluster_count / pathdist the agent committed to
-    nearest_decisions = 0
-    nearest_skipped_denser_far = 0   # NavNearestGold while a denser+farther region existed
+    cluster_decisions = 0
+    chose_sparse_near = 0   # picked a region while a denser one existed >margin farther
 
     with h5py.File(path, "r") as f:
         names = [n.decode() if isinstance(n, bytes) else str(n) for n in f.attrs["action_names"]]
@@ -367,19 +370,15 @@ def summary(
             chosen.append(acts)
             for i, a in enumerate(acts):
                 a = int(a)
-                if a < CLUSTER_K:                      # chose a cluster
-                    near_count.append(float(count[i, a]))
-                    near_dist.append(float(pdist[i, a]))
-                if a == ACTION_NEAREST:
-                    nearest_decisions += 1
-                    # The nearest gold's region: smallest pathdist among regions with gold.
-                    has = count[i] > 0
-                    if has.any():
-                        near_region = np.where(has, pdist[i], np.inf).argmin()
-                        nd, nc = pdist[i, near_region], count[i, near_region]
-                        denser_far = has & (count[i] > nc) & (pdist[i] > nd + dist_margin)
-                        if denser_far.any():
-                            nearest_skipped_denser_far += 1
+                if a < CLUSTER_K:                      # chose a region
+                    cluster_decisions += 1
+                    cc, cd = float(count[i, a]), float(pdist[i, a])
+                    near_count.append(cc)
+                    near_dist.append(cd)
+                    # Did a denser region exist meaningfully farther than the one chosen?
+                    # (the agent trading dense-far for sparse-near, now via region slots)
+                    if ((count[i] > cc) & (pdist[i] > cd + dist_margin)).any():
+                        chose_sparse_near += 1
 
     acts = np.concatenate(chosen) if chosen else np.empty(0, int)
     total = len(acts)
@@ -391,15 +390,266 @@ def summary(
             log.info("  %-16s %6d  %5.1f%%", names[a], n, 100.0 * n / max(total, 1))
 
     if near_count:
-        log.info("\nChosen-cluster decisions: mean count=%.3f  mean pathdist=%.3f",
-                 float(np.mean(near_count)), float(np.mean(near_dist)))
-    if nearest_decisions:
-        frac = 100.0 * nearest_skipped_denser_far / nearest_decisions
-        log.info("\nNavNearestGold decisions: %d", nearest_decisions)
-        log.info("  ...where a DENSER region existed >%.2f farther: %d (%.1f%%)",
-                 dist_margin, nearest_skipped_denser_far, frac)
-        log.info("  (high %s ⇒ agent trades dense-far for sparse-near — raise pickup "
-                 "weight or option_gamma to rebalance)", "%")
+        log.info("\nChosen-region decisions: %d  mean count=%.3f  mean pathdist=%.3f",
+                 cluster_decisions, float(np.mean(near_count)), float(np.mean(near_dist)))
+    if cluster_decisions:
+        frac = 100.0 * chose_sparse_near / cluster_decisions
+        log.info("  ...where a DENSER region existed >%.2f farther (chose sparse-near): %d (%.1f%%)",
+                 dist_margin, chose_sparse_near, frac)
+        log.info("  (high %s ⇒ the learned policy favours near-sparse over far-dense — raise "
+                 "pickup weight or option_gamma to rebalance)", "%")
+
+
+# ── view command ─────────────────────────────────────────────────────────────
+#
+# Renders, per high-level decision, four panels so reward / obs / action shaping
+# can be debugged by eye:
+#   • Grid       — obstacles, base, safezone, gold, items, agent; the chosen region
+#                  is highlighted with an arrow to its obs path-nearest gold.
+#   • Actions    — masked action-probability distribution (masked = hatched, chosen
+#                  = outlined).
+#   • Cluster obs — the 3×3 region grid the agent perceived (true count + count_norm
+#                  + pathdist per region).
+#   • Reward     — the per-tick reward breakdown the option earned + discounted return.
+#
+# matplotlib is imported lazily inside `view` so `record`/`summary` never pay for it.
+
+_REGION_COLS = _REGION_ROWS = 3            # matches engine/clusters.rs (3×3 grid)
+_CLUSTER_COUNT_NORM = 25.0                 # matches sim/src/engine/obs.rs
+
+
+class _Trace:
+    """Thin reader over one episode group of a trace.h5."""
+
+    def __init__(self, f: h5py.File, ep_key: str) -> None:
+        self.names = [n.decode() if isinstance(n, bytes) else str(n)
+                      for n in f.attrs["action_names"]]
+        self.gw = int(f.attrs["grid_w"])
+        self.gh = int(f.attrs["grid_h"])
+        self.rw = {k: float(f.attrs[k]) for k in f.attrs if k.startswith("reward_")}
+        self.option_gamma = float(f.attrs["option_gamma"])
+        g = f[ep_key]
+        self.tiles = g["map_tiles"][:]                       # (H, W) uint8
+        self.final_score = float(g.attrs["final_score"])
+        self.base_x, self.base_y = int(g.attrs["base_x"]), int(g.attrs["base_y"])
+        self.d = g["decisions"]
+        self.n = int(g.attrs["n_decisions"])
+        self.gold_off = self.d["gold_offsets"][:]
+        self.item_off = self.d["item_offsets"][:]
+        self.gold_xy = self.d["gold_xy"][:]
+        self.item_xyk = self.d["item_xyk"][:]
+        t = g["ticks"]                                       # per-tick reward rows
+        self.t_dec = t["decision_idx"][:]
+        self.t_r = {k: t[k][:] for k in ("r_tick", "r_pickup", "r_deposit", "r_wall",
+                                         "r_mult", "r_total", "discount", "tick")}
+
+    def gold_at(self, i: int) -> np.ndarray:
+        return self.gold_xy[self.gold_off[i]:self.gold_off[i + 1]]
+
+    def items_at(self, i: int) -> np.ndarray:
+        return self.item_xyk[self.item_off[i]:self.item_off[i + 1]]
+
+    def scalar(self, key: str, i: int):
+        return self.d[key][i]
+
+
+def _region_of(xs: np.ndarray, ys: np.ndarray, gw: int, gh: int) -> np.ndarray:
+    rx = np.clip(xs * _REGION_COLS // max(gw, 1), 0, _REGION_COLS - 1)
+    ry = np.clip(ys * _REGION_ROWS // max(gh, 1), 0, _REGION_ROWS - 1)
+    return (ry * _REGION_COLS + rx).astype(int)
+
+
+def _tile_rgb(tiles: np.ndarray) -> np.ndarray:
+    """Map tile codes (0 free, 1 obstacle, 10+ base, 20+ safezone) → RGB image."""
+    img = np.ones((*tiles.shape, 3), dtype=float)         # free = white
+    img[tiles == 1] = (0.22, 0.22, 0.25)                  # obstacle = dark
+    img[tiles >= 20] = (0.80, 0.95, 0.80)                 # safezone = light green
+    img[(tiles >= 10) & (tiles < 20)] = (0.65, 0.80, 1.0)  # base = light blue
+    return img
+
+
+def _render(tr: _Trace, i: int, axes) -> None:
+    """Draw the four panels for decision `i` into the provided (grid, act, clu, rew) axes."""
+    import matplotlib.patches as mpatches
+    ax_grid, ax_act, ax_clu, ax_rew = axes
+    for a in axes:
+        a.clear()
+
+    K = _REGION_COLS * _REGION_ROWS
+    a = int(tr.scalar("chosen_action", i))
+    ax, ay = int(tr.scalar("agent_x", i)), int(tr.scalar("agent_y", i))
+    carried = int(tr.scalar("gold_carried", i))
+    score = int(tr.scalar("score", i))
+    value = float(tr.scalar("value", i))
+    cdx = tr.scalar("cluster_dx", i); cdy = tr.scalar("cluster_dy", i)
+    cpd = tr.scalar("cluster_pathdist", i); ccnt = tr.scalar("cluster_count", i)
+    probs = tr.scalar("action_probs", i); mask = tr.scalar("action_mask", i).astype(bool)
+
+    # ── Grid ────────────────────────────────────────────────────────────────
+    ax_grid.imshow(_tile_rgb(tr.tiles), origin="upper", interpolation="nearest")
+    for c in range(1, _REGION_COLS):
+        ax_grid.axvline(tr.gw * c / _REGION_COLS - 0.5, color="0.6", lw=0.7, ls=":")
+    for r in range(1, _REGION_ROWS):
+        ax_grid.axhline(tr.gh * r / _REGION_ROWS - 0.5, color="0.6", lw=0.7, ls=":")
+    gold = tr.gold_at(i)
+    if len(gold):
+        ax_grid.scatter(gold[:, 0], gold[:, 1], s=14, c="goldenrod",
+                        edgecolors="k", linewidths=0.3, label="gold", zorder=3)
+    items = tr.items_at(i)
+    pu = items[items[:, 2] != 0] if len(items) else items   # non-gold = power-ups
+    if len(pu):
+        ax_grid.scatter(pu[:, 0], pu[:, 1], s=40, marker="*", c="magenta",
+                        edgecolors="k", linewidths=0.3, label="item", zorder=3)
+    ax_grid.scatter([tr.base_x], [tr.base_y], s=70, marker="s", c="blue",
+                    edgecolors="k", label="base", zorder=4)
+    ax_grid.scatter([ax], [ay], s=90, marker="o", c="red",
+                    edgecolors="k", label="agent", zorder=5)
+    # Highlight the chosen region + arrow to its obs-nearest gold.
+    if a < K:
+        rx, ry = a % _REGION_COLS, a // _REGION_COLS
+        x0, y0 = tr.gw * rx / _REGION_COLS - 0.5, tr.gh * ry / _REGION_ROWS - 0.5
+        ax_grid.add_patch(mpatches.Rectangle(
+            (x0, y0), tr.gw / _REGION_COLS, tr.gh / _REGION_ROWS,
+            fill=False, edgecolor="red", lw=2.0, zorder=2))
+        tx, ty = ax + cdx[a] * tr.gw, ay + cdy[a] * tr.gh
+        ax_grid.annotate("", xy=(tx, ty), xytext=(ax, ay),
+                         arrowprops=dict(arrowstyle="->", color="red", lw=1.5), zorder=6)
+    act_name = tr.names[a] if a < len(tr.names) else f"act{a}"
+    ax_grid.set_title(f"decision {i+1}/{tr.n}  tick={int(tr.scalar('tick', i))}\n"
+                      f"action={act_name}  carried={carried}  score={score}  V={value:.2f}",
+                      fontsize=9)
+    ax_grid.set_xlim(-0.5, tr.gw - 0.5); ax_grid.set_ylim(tr.gh - 0.5, -0.5)
+    ax_grid.legend(loc="upper right", fontsize=6, framealpha=0.8)
+    ax_grid.set_xticks([]); ax_grid.set_yticks([])
+
+    # ── Action probabilities ──────────────────────────────────────────────────
+    A = len(probs)
+    ypos = np.arange(A)
+    bars = ax_act.barh(ypos, probs,
+                       color=["tab:blue" if k < K else "tab:gray" for k in range(A)])
+    for k in range(A):
+        if not mask[k]:
+            bars[k].set_hatch("xxx"); bars[k].set_alpha(0.35)
+    bars[a].set_edgecolor("red"); bars[a].set_linewidth(2.0)
+    ax_act.set_yticks(ypos)
+    ax_act.set_yticklabels([tr.names[k] if k < len(tr.names) else str(k) for k in range(A)],
+                           fontsize=6)
+    ax_act.invert_yaxis()
+    ax_act.set_xlim(0, 1); ax_act.set_xlabel("policy prob", fontsize=7)
+    ax_act.set_title("actions (hatched = masked, red = chosen)", fontsize=8)
+
+    # ── Cluster obs (3×3) ───────────────────────────────────────────────────
+    true_cnt = np.zeros(K, int)
+    if len(gold):
+        for r in _region_of(gold[:, 0], gold[:, 1], tr.gw, tr.gh):
+            true_cnt[r] += 1
+    ax_clu.imshow(true_cnt.reshape(_REGION_ROWS, _REGION_COLS), cmap="YlOrBr", origin="upper")
+    for k in range(K):
+        rx, ry = k % _REGION_COLS, k // _REGION_COLS
+        ax_clu.add_patch(mpatches.Rectangle((rx - 0.5, ry - 0.5), 1, 1, fill=False,
+                         edgecolor="red" if k == a else "0.7", lw=2.0 if k == a else 0.5))
+        ax_clu.text(rx, ry - 0.22, f"n={true_cnt[k]}", ha="center", va="center", fontsize=6)
+        ax_clu.text(rx, ry + 0.08, f"obs c={ccnt[k]:.2f}", ha="center", va="center", fontsize=5.5)
+        ax_clu.text(rx, ry + 0.30, f"d={cpd[k]:.2f}", ha="center", va="center", fontsize=5.5)
+    ax_clu.set_xticks([]); ax_clu.set_yticks([])
+    ax_clu.set_title("cluster obs: true count / obs count_norm / pathdist", fontsize=8)
+
+    # ── Reward breakdown (this option) ────────────────────────────────────────
+    sel = tr.t_dec == i
+    comps = {"tick": tr.t_r["r_tick"][sel].sum(),
+             "pickup": tr.t_r["r_pickup"][sel].sum(),
+             "deposit": tr.t_r["r_deposit"][sel].sum(),
+             "wall": tr.t_r["r_wall"][sel].sum(),
+             "mult": tr.t_r["r_mult"][sel].sum()}
+    total = float(tr.t_r["r_total"][sel].sum())
+    ret = float(tr.scalar("option_return", i))
+    oticks = int(tr.scalar("option_ticks", i))
+    vals = list(comps.values()) + [total]
+    bar_colors = ["tab:red" if v < 0 else "tab:green" for v in vals]
+    bar_colors[-1] = "black"
+    ax_rew.bar(list(comps) + ["TOTAL"], vals, color=bar_colors)
+    ax_rew.axhline(0, color="k", lw=0.6)
+    for j, v in enumerate(vals):
+        ax_rew.text(j, v, f"{v:.2f}", ha="center",
+                    va="bottom" if v >= 0 else "top", fontsize=7)
+    ax_rew.set_title(f"option reward  (ticks={oticks}, Σγᵗr={ret:.2f}, γ={tr.option_gamma})",
+                     fontsize=8)
+    ax_rew.tick_params(axis="x", labelsize=7)
+
+
+@app.command()
+def view(
+    path: Path = typer.Argument(..., help="A trace.h5 produced by `atb-trace`."),
+    episode: int = typer.Option(0, "--episode", "-e", help="Episode index to view."),
+    decision: Optional[int] = typer.Option(None, "--decision", "-d",
+        help="Show only this decision (else start interactive at decision 0)."),
+    save: Optional[Path] = typer.Option(None, "--save",
+        help="Headless: write one PNG per decision to this dir (no display)."),
+) -> None:
+    """Render a recorded trace — interactive slider, or PNG dump with --save.
+
+    Four panels per decision: grid (agent/gold/items/obstacles), masked action
+    probabilities, the 3×3 cluster observation, and the per-option reward breakdown.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    import matplotlib
+    if save is not None:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+
+    with h5py.File(path, "r") as f:
+        ep_key = f"episode_{episode:03d}"
+        if ep_key not in f:
+            eps = sorted(k for k in f if k.startswith("episode_"))
+            raise typer.BadParameter(f"{ep_key} not found. Available: {eps}")
+        tr = _Trace(f, ep_key)
+        log.info("episode %d: %d decisions, final_score=%.1f, reward weights=%s",
+                 episode, tr.n, tr.final_score, tr.rw)
+
+        def make_axes():
+            """Grid panel on the left; a 3-row right column (actions / cluster / reward)."""
+            fig = plt.figure(figsize=(14, 8))
+            gs = GridSpec(3, 2, width_ratios=[1.4, 1.0], figure=fig,
+                          wspace=0.30, hspace=0.45, bottom=0.10)
+            axes = (fig.add_subplot(gs[:, 0]), fig.add_subplot(gs[0, 1]),
+                    fig.add_subplot(gs[1, 1]), fig.add_subplot(gs[2, 1]))
+            return fig, axes
+
+        if save is not None:                       # ── headless PNG dump ──
+            save.mkdir(parents=True, exist_ok=True)
+            idxs = [decision] if decision is not None else list(range(tr.n))
+            for i in idxs:
+                fig, axes = make_axes()
+                _render(tr, i, axes)
+                fig.savefig(save / f"ep{episode:03d}_dec{i:03d}.png", dpi=110,
+                            bbox_inches="tight")
+                plt.close(fig)
+            log.info("wrote %d frame(s) → %s", len(idxs), save)
+            return
+
+        # ── interactive ──
+        from matplotlib.widgets import Slider
+        fig, axes = make_axes()
+        start = decision if decision is not None else 0
+        _render(tr, start, axes)
+
+        sax = fig.add_axes([0.12, 0.02, 0.5, 0.03])
+        slider = Slider(sax, "decision", 0, max(tr.n - 1, 0), valinit=start, valstep=1)
+
+        def update(_val):
+            _render(tr, int(slider.val), axes)
+            fig.canvas.draw_idle()
+        slider.on_changed(update)
+
+        def on_key(event):
+            if event.key in ("right", "left"):
+                step = 1 if event.key == "right" else -1
+                slider.set_val(int(np.clip(slider.val + step, 0, tr.n - 1)))
+        fig.canvas.mpl_connect("key_press_event", on_key)
+
+        log.info("interactive — slider or ←/→ to scrub decisions; close window to exit.")
+        plt.show()
 
 
 if __name__ == "__main__":

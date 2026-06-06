@@ -49,6 +49,8 @@ pub struct AgentState {
     pub slow_buff:    u16,
     /// Ticks of 2× deposit value remaining (0 = none). Set by the Multiplier pickup.
     pub mult_buff:    u16,
+    /// Ticks of forced immobility remaining (0 = none). Set by stepping on a Trap.
+    pub trap_buff:    u16,
     pub spawn_pos:    GridPos,
     pub base_pos:     GridPos,
 

@@ -39,13 +39,13 @@ use rustc_hash::FxHashSet;
 use crate::config::AGENT_MAX_GOLD;
 use crate::entity::item::ItemKind;
 use crate::rl::action::{
-    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_NEAREST, ACTION_SIZE,
+    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_SIZE,
     ACTION_SPEED, ACTION_WAIT, CLUSTER_K,
 };
 use crate::rl::obs::OBS_TOTAL;
 use crate::rl::reward;
 use crate::world::{config::WorldConfig, coords::GridPos, grid::Grid};
-use self::clusters::{GoldCluster, find_clusters, region_of, chebyshev};
+use self::clusters::{GoldCluster, find_clusters, region_of};
 use self::nav::{navigate_action, NavCache};
 use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
@@ -101,11 +101,14 @@ pub struct TickRecord {
     pub discount:     f32,
     /// Gold tiles remaining on the map after this tick.
     pub gold_count:   u32,
+    /// Multiplier-use shaping bonus this tick (deposit while 2× active). Appended last
+    /// so existing trace column indices are unchanged.
+    pub r_mult:       f32,
 }
 
 /// Number of f32 columns when a `TickRecord` is flattened for FFI — keep in sync
 /// with `TickRecord` field count (see env.rs `trace_flat` and pyo3.rs `get_trace`).
-pub const TRACE_FIELDS: usize = 12;
+pub const TRACE_FIELDS: usize = 13;
 
 pub struct SimCore {
     pub grid:    Grid,
@@ -292,6 +295,7 @@ impl SimCore {
                     r_total:      r,
                     discount,
                     gold_count:   self.gold_positions.len() as u32,
+                    r_mult:       rb.mult,
                 });
             }
             discount *= gamma;
@@ -360,10 +364,6 @@ impl SimCore {
         if self.items.iter().any(|it| it.kind == ItemKind::Multiplier) {
             mask[ACTION_MULT as usize] = true;
         }
-        // Nearest-gold: valid whenever any gold exists and the agent can carry more.
-        if agent.gold_carried < AGENT_MAX_GOLD && !self.gold_positions.is_empty() {
-            mask[ACTION_NEAREST as usize] = true;
-        }
         mask
     }
 
@@ -421,9 +421,6 @@ impl SimCore {
             RlAction::NavigateToBase        => Some(self.agents[0].base_pos),
             RlAction::NavigateToSpeed       => self.nearest_item(pos, |k| k.is_speed()),
             RlAction::NavigateToMultiplier  => self.nearest_item(pos, |k| k == ItemKind::Multiplier),
-            RlAction::NavigateToNearestGold => self.gold_positions.iter()
-                .min_by_key(|&&g| chebyshev(pos, g))
-                .copied(),
             RlAction::Wait                  => None,
         }
     }
@@ -441,9 +438,9 @@ impl SimCore {
         let own_has_gold =
             self.agents[0].gold_carried < AGENT_MAX_GOLD && clusters[own].is_some();
 
-        // Which gold this action commits to (and whether it's a region pick that can
-        // "skip" local gold). `region = None` for nearest-gold — by construction it
-        // takes the closest gold, so it is never a skip.
+        // Which gold this action commits to (and the region it targets, so we can tell
+        // whether it "skips" gold in the agent's own region). Only the region-nav
+        // actions commit to gold; everything else is a non-gold goal.
         let target: Option<(GridPos, Option<usize>)> = match action {
             RlAction::NavigateToCluster(k) => {
                 let kk = k as usize;
@@ -451,10 +448,6 @@ impl SimCore {
                     .and_then(|c| c.nearest_gold(pos))
                     .map(|g| (g, Some(kk)))
             }
-            RlAction::NavigateToNearestGold => self.gold_positions.iter()
-                .min_by_key(|&&g| chebyshev(pos, g))
-                .copied()
-                .map(|g| (g, None)),
             _ => None,
         };
 
@@ -510,7 +503,7 @@ fn gold_positions_of(items: &[ItemState]) -> Vec<GridPos> {
 fn build_spawn_budgets(items: &[ItemState]) -> Vec<SpawnBudget> {
     use ItemKind::*;
     let mut budgets = Vec::new();
-    for kind in [Gold, Speed1, Speed2, Speed3, Slow, Multiplier] {
+    for kind in [Gold, Speed1, Speed2, Speed3, Slow, Multiplier, Trap] {
         let target = items.iter().filter(|it| it.kind == kind).count();
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };

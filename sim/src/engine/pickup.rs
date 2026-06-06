@@ -2,7 +2,7 @@
 //
 // Item pickup logic — applied after movement each tick.
 
-use crate::config::{AGENT_MAX_GOLD, MULT_TICKS, SLOW_TICKS, SPEED1_TICKS, SPEED2_TICKS, SPEED3_TICKS};
+use crate::config::{AGENT_MAX_GOLD, MULT_TICKS, SLOW_TICKS, SPEED1_TICKS, SPEED2_TICKS, SPEED3_TICKS, TRAP_TICKS};
 use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 
@@ -28,6 +28,7 @@ pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
                     ItemKind::Speed3 => { a.speed_buff = a.speed_buff.max(SPEED3_TICKS); true }
                     ItemKind::Slow       => { a.slow_buff = a.slow_buff.max(SLOW_TICKS); true }
                     ItemKind::Multiplier => { a.mult_buff = a.mult_buff.max(MULT_TICKS); true }
+                    ItemKind::Trap       => { a.trap_buff = a.trap_buff.max(TRAP_TICKS); true }
                 }
             };
             if picked { items.swap_remove(item_idx); } else { item_idx += 1; }

@@ -190,6 +190,7 @@ impl BatchEnv {
             out.push(r.r_total);
             out.push(r.discount);
             out.push(r.gold_count as f32);
+            out.push(r.r_mult);   // appended last — keeps existing column indices stable
         }
         out
     }
@@ -229,6 +230,7 @@ impl BatchEnv {
                 ItemKind::Speed3     => 3,
                 ItemKind::Slow       => 4,
                 ItemKind::Multiplier => 5,
+                ItemKind::Trap       => 6,
             }))
             .collect()
     }

@@ -8,6 +8,10 @@
 //   pickup   : reward on each gold pickup
 //   deposit  : large reward on depositing gold at base
 //   wall_hit : small penalty when a Move is blocked (no position change)
+//   mult     : small bonus when gold is banked while the 2× multiplier is active —
+//              bootstraps "use the multiplier" (deposit under it; see below)
+//   speed    : small bonus when gold is picked up while a speed boost is active —
+//              bootstraps "use the speed boost" (collect fast under it)
 //
 // Reward is intentionally MINIMAL and event-based: the agent learns purely from
 // game outcomes — gold picked up, gold banked — plus a tiny per-step time cost
@@ -32,12 +36,14 @@ pub struct RewardBreakdown {
     pub pickup:  f32,
     pub deposit: f32,
     pub wall:    f32,
+    /// Bonus paid only when a deposit lands while the 2× score multiplier is active.
+    pub mult:    f32,
 }
 
 impl RewardBreakdown {
     /// The summed per-step reward — what the agent actually receives this tick.
     pub fn total(&self) -> f32 {
-        self.tick + self.pickup + self.deposit + self.wall
+        self.tick + self.pickup + self.deposit + self.wall + self.mult
     }
 }
 
@@ -62,10 +68,17 @@ pub fn compute_components(
     prev_score: u32,
     wall_hit:   bool,
 ) -> RewardBreakdown {
+    let score_gain = agent.score.saturating_sub(prev_score) as f32;
     RewardBreakdown {
         tick:    cfg.tick,
         pickup:  cfg.pickup  * agent.gold_carried.saturating_sub(prev_gold) as f32,
-        deposit: cfg.deposit * agent.score.saturating_sub(prev_score)       as f32,
+        deposit: cfg.deposit * score_gain,
         wall:    if wall_hit { cfg.wall_hit } else { 0.0 },
+        // Shaping: reward banking gold *while the multiplier is active*, scaled by the
+        // (already-doubled) score banked. The doubled deposit alone is too far from the
+        // NavigateToMultiplier grab for PPO to credit it; this bonus, realised only on a
+        // deposit-under-multiplier, makes "grab the multiplier then bank a load" pay off
+        // closer to the behaviour we want. Fires only when mult_buff is still active.
+        mult:    if agent.mult_buff > 0 { cfg.mult_use_bonus * score_gain } else { 0.0 },
     }
 }

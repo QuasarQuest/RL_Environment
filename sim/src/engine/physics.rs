@@ -14,6 +14,7 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
         if a.speed_buff > 0 { a.speed_buff -= 1; }
         if a.slow_buff  > 0 { a.slow_buff  -= 1; }
         if a.mult_buff  > 0 { a.mult_buff  -= 1; }
+        if a.trap_buff  > 0 { a.trap_buff  -= 1; }
     }
 }
 
@@ -73,10 +74,14 @@ fn apply_move(
 }
 
 /// How many tiles the agent moves this tick.
-///   base              : 1 tile
-///   speed_buff active : 2 tiles
+///   trap_buff active  : 0 tiles — fully immobilised (dominates everything)
 ///   slow_buff active  : 0.5 tiles → 1 tile on even ticks, 0 on odd (slow wins over speed)
+///   speed_buff active : 2 tiles
+///   base              : 1 tile
 fn movement_tiles(a: &AgentState, tick: u64) -> u32 {
+    if a.trap_buff > 0 {
+        return 0; // trapped — cannot move at all until the trap window expires
+    }
     if a.slow_buff > 0 {
         // Half speed: move on even ticks only. Slow dominates an active speed buff.
         return if tick % 2 == 0 { 1 } else { 0 };

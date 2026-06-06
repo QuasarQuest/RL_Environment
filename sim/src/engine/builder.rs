@@ -61,6 +61,7 @@ pub fn build_episode(cfg: &WorldConfig, rng: &mut SmallRng) -> WorldSnapshot {
         speed_buff:   0,
         slow_buff:    0,
         mult_buff:    0,
+        trap_buff:    0,
         spawn_pos:    base,
         base_pos:     base,
         // Inert viewer-compat fields (see entity/agent.rs).

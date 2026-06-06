@@ -91,11 +91,13 @@ pub struct ItemDensityConfig {
     pub slow: f32,
     #[serde(default)]
     pub multiplier: f32,
+    #[serde(default)]
+    pub trap: f32,
 }
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, speed1: 0.0, speed2: 0.0, speed3: 0.0, slow: 0.0, multiplier: 0.0 }
+        Self { gold: DEFAULT_GOLD_DENSITY, speed1: 0.0, speed2: 0.0, speed3: 0.0, slow: 0.0, multiplier: 0.0, trap: 0.0 }
     }
 }
 
@@ -114,6 +116,7 @@ impl ItemDensityConfig {
         push(ItemKind::Speed3,     self.speed3);
         push(ItemKind::Slow,       self.slow);
         push(ItemKind::Multiplier, self.multiplier);
+        push(ItemKind::Trap,       self.trap);
         out
     }
 }
@@ -133,6 +136,12 @@ pub struct RewardConfig {
     /// Small penalty when a Move action is blocked by a wall (no position change).
     #[serde(default)]
     pub wall_hit: f32,
+    /// Bonus per point of score banked while the 2× multiplier is active. Bootstraps
+    /// the agent to *use* the multiplier (grab it, then bank under it) — the doubled
+    /// deposit alone is too indirect to learn. Only fires on deposit-under-multiplier;
+    /// 0 disables. No effect on stages without the Multiplier item.
+    #[serde(default = "default_reward_mult_use_bonus")]
+    pub mult_use_bonus: f32,
     /// Per-tick discount applied WITHIN a navigation option: the option's return is
     /// Σ γᵗ rₜ over the ticks it ran (semi-MDP option return). This is what makes a
     /// nearer reward worth more than a farther one — a pickup that takes 50 ticks is
@@ -144,20 +153,22 @@ pub struct RewardConfig {
 }
 
 impl RewardConfig {
-    pub const DEFAULT_TICK:         f32 = -0.0005;
-    pub const DEFAULT_PICKUP:       f32 =  0.5;
-    pub const DEFAULT_DEPOSIT:      f32 =  5.0;
-    pub const DEFAULT_OPTION_GAMMA: f32 =  0.99;
+    pub const DEFAULT_TICK:           f32 = -0.0005;
+    pub const DEFAULT_PICKUP:         f32 =  0.5;
+    pub const DEFAULT_DEPOSIT:        f32 =  5.0;
+    pub const DEFAULT_OPTION_GAMMA:   f32 =  0.99;
+    pub const DEFAULT_MULT_USE_BONUS: f32 =  0.5;
 }
 
 impl Default for RewardConfig {
     fn default() -> Self {
         Self {
-            tick:         Self::DEFAULT_TICK,
-            pickup:       Self::DEFAULT_PICKUP,
-            deposit:      Self::DEFAULT_DEPOSIT,
-            wall_hit:     0.0,
-            option_gamma: Self::DEFAULT_OPTION_GAMMA,
+            tick:           Self::DEFAULT_TICK,
+            pickup:         Self::DEFAULT_PICKUP,
+            deposit:        Self::DEFAULT_DEPOSIT,
+            wall_hit:       0.0,
+            mult_use_bonus: Self::DEFAULT_MULT_USE_BONUS,
+            option_gamma:   Self::DEFAULT_OPTION_GAMMA,
         }
     }
 }
@@ -190,6 +201,7 @@ fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
 fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
 fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
 fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
+fn default_reward_mult_use_bonus() -> f32 { RewardConfig::DEFAULT_MULT_USE_BONUS }
 fn default_option_gamma()       -> f32 { RewardConfig::DEFAULT_OPTION_GAMMA }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────

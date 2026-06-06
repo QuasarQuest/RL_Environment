@@ -16,6 +16,9 @@ pub enum ItemKind {
     Slow,
     /// Score multiplier — deposits are worth 2× while active.
     Multiplier,
+    /// Trap hazard — stepping on it immobilises the agent (0 move speed) for a long
+    /// window (TRAP_TICKS). Strictly bad; the agent should learn to route around it.
+    Trap,
 }
 
 impl ItemKind {

@@ -14,7 +14,7 @@
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use crate::config::{AGENT_MAX_GOLD, MULT_BUFF_MAX, SLOW_BUFF_MAX, SPEED_BUFF_MAX};
+use crate::config::{AGENT_MAX_GOLD, MULT_BUFF_MAX, SLOW_BUFF_MAX, SPEED_BUFF_MAX, TRAP_BUFF_MAX};
 use crate::entity::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
 use crate::engine::clusters::GoldCluster;
@@ -22,8 +22,8 @@ use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
     CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_HAZARD, CH_MULT,
     CH_MULT_REMAINING, CH_OBSTACLE, CH_OOB, CH_SLOW_REMAINING, CH_SPEED,
-    CH_SPEED_REMAINING, CH_TIME_REMAINING,
-    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SLOW, MM_CH_SPEED,
+    CH_SPEED_REMAINING, CH_TIME_REMAINING, CH_TRAP, CH_TRAP_REMAINING,
+    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SLOW, MM_CH_SPEED, MM_CH_TRAP,
     MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
 use crate::world::coords::GridPos;
@@ -81,6 +81,8 @@ pub fn build_obs_into(
         .fill((agent.slow_buff as f32 / SLOW_BUFF_MAX as f32).min(1.0));
     buf[CH_MULT_REMAINING * plane..(CH_MULT_REMAINING + 1) * plane]
         .fill((agent.mult_buff as f32 / MULT_BUFF_MAX as f32).min(1.0));
+    buf[CH_TRAP_REMAINING * plane..(CH_TRAP_REMAINING + 1) * plane]
+        .fill((agent.trap_buff as f32 / TRAP_BUFF_MAX as f32).min(1.0));
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 
@@ -123,6 +125,7 @@ pub fn build_obs_into(
                 buf[pixel(CH_SPEED, cx, cy)] = speed_tier_value(it.kind),
             ItemKind::Slow       => buf[pixel(CH_HAZARD, cx, cy)] = 1.0,
             ItemKind::Multiplier => buf[pixel(CH_MULT,   cx, cy)] = 1.0,
+            ItemKind::Trap       => buf[pixel(CH_TRAP,   cx, cy)] = 1.0,
             ItemKind::Gold       => {} // already drawn from gold_positions
         }
     }
@@ -205,6 +208,7 @@ fn build_minimap(
             ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 => MM_CH_SPEED,
             ItemKind::Slow       => MM_CH_SLOW,
             ItemKind::Multiplier => MM_CH_MULT,
+            ItemKind::Trap       => MM_CH_TRAP,
             ItemKind::Gold       => continue,
         };
         let (mx, my) = to_mm(it.pos.x, it.pos.y);

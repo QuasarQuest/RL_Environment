@@ -27,9 +27,11 @@
 //   11  SPEED_REMAINING speed_buff / SPEED_BUFF_MAX ∈ [0,1]
 //   12  SLOW_REMAINING  slow_buff  / SLOW_BUFF_MAX  ∈ [0,1]
 //   13  MULT_REMAINING  mult_buff  / MULT_BUFF_MAX  ∈ [0,1]
+//   14  TRAP            trap hazard item (spatial; 1.0 where a trap sits in the crop)
+//   15  TRAP_REMAINING  trap_buff  / TRAP_BUFF_MAX  ∈ [0,1] (forced-immobility timer)
 //
-//  Minimap — 17×17 cells, ~3×3 tiles/cell for a 50×50 grid (5 channels):
-//    0 obstacle, 1 gold, 2 speed, 3 slow, 4 mult (max-pooled over ~3×3 tiles).
+//  Minimap — 17×17 cells, ~3×3 tiles/cell for a 50×50 grid (6 channels):
+//    0 obstacle, 1 gold, 2 speed, 3 slow, 4 mult, 5 trap (max-pooled over ~3×3 tiles).
 //
 //  Cluster features — 9 gold regions × 4 floats = 36 floats:
 //    [dx_norm, dy_norm, pathdist_norm, count_norm] per fixed 3×3 region slot.
@@ -37,7 +39,7 @@
 //    pathdist_norm is that true travel distance / (w+h) ∈ [0,1] (1.0 = unreachable).
 //    See engine/clusters.rs and engine/nav.rs::dist_field.
 
-pub const OBS_CHANNELS: usize = 14;
+pub const OBS_CHANNELS: usize = 16;
 
 // ── Spatial channels ──────────────────────────────────────────────────────────
 
@@ -58,6 +60,9 @@ pub const CH_TIME_REMAINING: usize = 10;
 pub const CH_SPEED_REMAINING: usize = 11;
 pub const CH_SLOW_REMAINING:  usize = 12;
 pub const CH_MULT_REMAINING:  usize = 13;
+// Trap channels appended last so the existing channel indices above are unchanged.
+pub const CH_TRAP:            usize = 14; // spatial: trap item location in the crop
+pub const CH_TRAP_REMAINING:  usize = 15; // broadcast: forced-immobility timer
 
 // ── Spatial crop dimensions ───────────────────────────────────────────────────
 // 25×25 covers half the 50×50 map in each dimension — sufficient local context.
@@ -70,7 +75,7 @@ pub const OBS_SHAPE: (usize, usize, usize) = (OBS_CHANNELS, OBS_CROP_SIZE, OBS_C
 // ── Minimap ───────────────────────────────────────────────────────────────────
 // 17×17 → each cell covers ~3×3 tiles on a 50×50 grid, giving cluster-level detail.
 
-pub const MM_CHANNELS: usize = 5;
+pub const MM_CHANNELS: usize = 6;
 pub const MM_SIZE:     usize = 17;
 
 pub const MM_CH_OBSTACLE: usize = 0;
@@ -78,6 +83,7 @@ pub const MM_CH_GOLD:     usize = 1;
 pub const MM_CH_SPEED:    usize = 2;
 pub const MM_CH_SLOW:     usize = 3;
 pub const MM_CH_MULT:     usize = 4;
+pub const MM_CH_TRAP:     usize = 5;
 
 pub const MM_DIM:   usize                 = MM_CHANNELS * MM_SIZE * MM_SIZE;
 pub const MM_SHAPE: (usize, usize, usize) = (MM_CHANNELS, MM_SIZE, MM_SIZE);
@@ -93,5 +99,5 @@ pub const CLUSTER_FEATURES:    usize = CLUSTER_K * CLUSTER_FEATURE_DIM; // 36 fl
 // ── Total flat buffer size ────────────────────────────────────────────────────
 
 /// OBS_DIM (crop) + MM_DIM (minimap) + CLUSTER_FEATURES — written by build_obs_into.
-/// 14·625 + 5·289 + 36 = 8750 + 1445 + 36 = 10231.
+/// 16·625 + 6·289 + 36 = 10000 + 1734 + 36 = 11770.
 pub const OBS_TOTAL: usize = OBS_DIM + MM_DIM + CLUSTER_FEATURES;

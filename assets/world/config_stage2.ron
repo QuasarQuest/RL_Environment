@@ -10,10 +10,10 @@
 
     item_density: (
         gold:   2.0,
-        speed1: 0.5,   // common  — 40-tick 2× boost
-        speed2: 0.25,  // uncommon — 80-tick
-        speed3: 0.1,   // rare    — 160-tick
-        slow:   0.4,   // hazard  — 60-tick 0.5× (avoid it)
+        speed1: 0.5,
+        speed2: 0.25,
+        speed3: 0.1,
+        slow:   0.4,
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

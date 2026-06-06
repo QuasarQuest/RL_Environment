@@ -167,12 +167,15 @@ def export_to_onnx(
             wrapper = _StatefulLstmWrapper(policy, mean_np, var_np, clip)
             dummy_h = torch.zeros(n_layers, 1, hidden_size)
             dummy_c = torch.zeros(n_layers, 1, hidden_size)
+            # Static batch=1 (no dynamic_axes): the viewer runs single-obs inference,
+            # and a symbolic batch dim leaves the feature-extractor Reshape (-1, C, H, W)
+            # unresolvable for tract's startup analysis pass — it then falls back to the
+            # BT agent instead of auto-loading the policy. Fixed shapes keep tract happy.
             torch.onnx.export(
                 wrapper, (dummy, dummy_h, dummy_c), str(out_path),
                 opset_version=opset,
                 input_names=["obs", "h_in", "c_in"],
                 output_names=["logits", "h_out", "c_out"],
-                dynamic_axes={"obs": {0: "batch"}, "logits": {0: "batch"}},
                 do_constant_folding=True,
                 dynamo=False,
             )
@@ -184,12 +187,15 @@ def export_to_onnx(
         else:
             wrapper = _NormPolicyWrapper(policy, mean_np, var_np, clip) if mean_np is not None \
                       else _PolicyWrapper(policy)
+            # Static batch=1 (no dynamic_axes): the viewer runs single-obs inference,
+            # and a symbolic batch dim leaves the feature-extractor Reshape (-1, C, H, W)
+            # unresolvable for tract's startup analysis pass — it then falls back to the
+            # BT agent instead of auto-loading the policy. Fixed shapes keep tract happy.
             torch.onnx.export(
                 wrapper, (dummy,), str(out_path),
                 opset_version=opset,
                 input_names=["obs"],
                 output_names=["logits"],
-                dynamic_axes={"obs": {0: "batch"}, "logits": {0: "batch"}},
                 do_constant_folding=True,
                 dynamo=False,
             )

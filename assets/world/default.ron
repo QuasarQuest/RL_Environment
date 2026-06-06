@@ -1,20 +1,21 @@
 // Default config — loaded by the viewer. Showcase map with every item type so all
-// mechanics are visible: gold, the three speed tiers, the slow hazard and the
-// score multiplier, with moderate obstacles. Base is randomised per episode.
+// mechanics are visible: gold, the three speed tiers, the slow hazard, the score
+// multiplier and the Trap (black; immobilises 250 ticks). Base randomised per episode.
 (
     width:  50,
     height: 50,
     match_duration_ticks: 1500,
 
-    obstacles: ( density: 0.10, profile: Mixed ),
+    obstacles: ( density: 0.15, profile: Mixed ),
 
     item_density: (
-        gold:       2.0,
-        speed1:     0.5,
-        speed2:     0.25,
-        speed3:     0.1,
-        slow:       0.4,
-        multiplier: 0.2,
+        gold:       0.5,
+        speed1:     0.15,
+        speed2:     0.1,
+        speed3:     0.05,
+        slow:       0.25,
+        multiplier: 0.05,
+        trap:       0.05,
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

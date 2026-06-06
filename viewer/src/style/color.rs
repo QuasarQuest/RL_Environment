@@ -42,6 +42,7 @@ pub const ITEM_SPEED2: Color = Color::srgb(0.30, 0.75, 0.35); // tier 2 — medi
 pub const ITEM_SPEED3: Color = Color::srgb(0.45, 1.00, 0.50); // tier 3 — bright lime green
 pub const ITEM_SLOW:   Color = Color::srgb(0.90, 0.25, 0.25);
 pub const ITEM_MULT:   Color = Color::srgb(0.75, 0.40, 0.95);
+pub const ITEM_TRAP:   Color = Color::srgb(0.04, 0.04, 0.06); // near-black — immobilises, avoid
 
 /// Items shown in the help-menu legend: (label, swatch colour). Single source of
 /// truth — keep in sync with `sim_bridge::item_color` and `entity::item::ItemKind`.
@@ -52,6 +53,7 @@ pub const ITEM_LEGEND: &[(&str, Color)] = &[
     ("Speed III",  ITEM_SPEED3),
     ("Slow (avoid)", ITEM_SLOW),
     ("Multiplier", ITEM_MULT),
+    ("Trap (avoid)", ITEM_TRAP),
 ];
 
 // ── App background / generic surfaces ───────────────────────────────────────────

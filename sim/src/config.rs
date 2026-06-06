@@ -30,13 +30,17 @@ pub const AGENT_MAX_GOLD:      u8  = 5;
 pub const SPEED1_TICKS: u16 =  40;
 pub const SPEED2_TICKS: u16 =  80;
 pub const SPEED3_TICKS: u16 = 160;
-pub const SLOW_TICKS:   u16 =  60;
+pub const SLOW_TICKS:   u16 = 200;  // half move-speed window — long enough to clearly bite
 pub const MULT_TICKS:   u16 = 100;
+/// Trap immobilises the agent completely (0 tiles/tick) for this many ticks — a
+/// hazard to avoid, far more punishing than Slow.
+pub const TRAP_TICKS:   u16 = 250;
 
 /// Normalisers for the buff-remaining observation channels (longest window per buff).
 pub const SPEED_BUFF_MAX: u16 = SPEED3_TICKS;
 pub const SLOW_BUFF_MAX:  u16 = SLOW_TICKS;
 pub const MULT_BUFF_MAX:  u16 = MULT_TICKS;
+pub const TRAP_BUFF_MAX:  u16 = TRAP_TICKS;
 
 /// Score multiplier applied to a deposit while `mult_buff > 0`.
 pub const DEPOSIT_MULTIPLIER: u32 = 2;

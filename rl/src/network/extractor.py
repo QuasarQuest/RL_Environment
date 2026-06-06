@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
-  [0     : 8750)   main egocentric crop  — (14, 25, 25) logically
-  [8750  : 10195)  minimap               — (5, 17, 17) logically
-  [10195 : 10231)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11770,):
+  [0     : 10000)  main egocentric crop  — (16, 25, 25) logically
+  [10000 : 11734)  minimap               — (6, 17, 17) logically
+  [11734 : 11770)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -75,24 +75,24 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 # Single-agent gold rush. Crop channels: OOB, BASE, GOLD, OBSTACLE, SPEED, HAZARD,
 # MULT, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, SLOW_REM, MULT_REM.
 
-OBS_CHANNELS = 14
+OBS_CHANNELS = 16  # +TRAP, +TRAP_REMAINING vs the original 14 (see sim/src/rl/obs.rs)
 OBS_CROP_H = 25
 OBS_CROP_W = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8750
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 10000
 
-MM_CHANNELS = 5   # obstacle, gold, speed, slow, mult
+MM_CHANNELS = 6   # obstacle, gold, speed, slow, mult, trap
 MM_H = 17
 MM_W = 17
-MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1445
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1734
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
 CLUSTER_FEATURES = CLUSTER_K * 4  # 36 — 9 regions × [dx, dy, pathdist, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10231
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11770
 
 # Action space size. Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K region-nav
-# slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + NavigateToNearestGold + Wait).
-ACTION_SIZE = CLUSTER_K + 5  # 14
+# slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + Wait).
+ACTION_SIZE = CLUSTER_K + 4  # 13
 
 
 # ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
