@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import h5py
 import numpy as np
@@ -126,7 +126,7 @@ def _policy_step(model, policy_obs: np.ndarray, mask: np.ndarray, deterministic:
 class _Episode:
     """Buffers one episode's decision rows + per-tick rows, then writes a group."""
 
-    def __init__(self, tiles: np.ndarray, grid_w: int, grid_h: int) -> None:
+    def __init__(self, tiles: np.ndarray) -> None:
         self.map_tiles = tiles  # (H, W) uint8
         # Base tile code is 10 + team (see BatchEnv::get_tiles). Team 0 → 10.
         ys, xs = np.where((tiles >= 10) & (tiles < 20))
@@ -234,7 +234,7 @@ def record(
 
     # ── Single raw env + optional obs normalisation stats ────────────────────────
     raw = BatchVecEnv(1, str(config))
-    raw._batch.set_trace(True)
+    raw.batch.set_trace(True)
 
     normalize_obs = None
     if vn_path is not None and vn_path.exists():
@@ -247,11 +247,11 @@ def record(
 
     tf = atb.PyBatchEnv.trace_fields()
     assert tf == len(TICK_FIELDS), f"trace_fields {tf} != {len(TICK_FIELDS)}"
-    grid_w, grid_h = raw._batch.grid_size()
+    grid_w, grid_h = raw.batch.grid_size()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(out_path, "w") as f:
-        _write_meta(f, model_obj, model_path, config, episodes, deterministic, grid_w, grid_h, raw)
+        _write_meta(f, model_path, config, episodes, deterministic, grid_w, grid_h, raw)
 
         obs = raw.reset()
         raw_obs = obs.copy()
@@ -260,20 +260,23 @@ def record(
         completed = 0
 
         while completed < episodes:
-            agents = raw._batch.get_agents(0)
+            agents = raw.batch.get_agents(0)
             ax, ay, _team, gold_carried, score = agents[0]
-            items = np.array(raw._batch.get_items(0), dtype=np.int16).reshape(-1, 3)
+            items = np.array(raw.batch.get_items(0), dtype=np.int16).reshape(-1, 3)
             gold = items[items[:, 2] == 0][:, :2] if len(items) else np.empty((0, 2), np.int16)
-            tick = raw._batch.get_tick(0)
-            mask = np.asarray(raw._batch.action_masks(), dtype=bool).reshape(ACTION_SIZE)
+            tick = raw.batch.get_tick(0)
+            mask = np.asarray(raw.batch.action_masks(), dtype=bool).reshape(ACTION_SIZE)
             cf = raw_obs[0, -CLUSTER_FEATURES:].astype(np.float32)
 
-            policy_obs = normalize_obs(raw_obs) if normalize_obs is not None else raw_obs
+            policy_obs = (
+                cast(np.ndarray, normalize_obs(raw_obs))
+                if normalize_obs is not None else raw_obs
+            )
             probs, value, action = _policy_step(model_obj, policy_obs, mask, deterministic)
 
             raw.step_async(np.array([action], dtype=np.int64))
             obs, _rews, dones, infos = raw.step_wait()
-            trace = np.asarray(raw._batch.get_trace(0), dtype=np.float32).reshape(-1, tf)
+            trace = np.asarray(raw.batch.get_trace(0), dtype=np.float32).reshape(-1, tf)
             dist_t, is_cluster_t, own_gold_t, skipped_t = raw.decision_telemetry()
 
             top5 = np.argsort(probs)[::-1][:5]
@@ -305,7 +308,7 @@ def record(
             raw_obs = obs.copy()
 
             if bool(dones[0]):
-                final_score = float(infos[0].get("score", score))
+                final_score = float(cast(float, infos[0].get("score", score)))
                 length_ticks = int(trace[-1, 0]) if len(trace) else int(tick)
                 ep.write(f, completed, final_score, length_ticks)
                 log.info("episode %d: %d decisions, score=%.1f, reward=%.2f",
@@ -320,13 +323,13 @@ def record(
 
 def _new_episode(raw: BatchVecEnv, grid_w: int, grid_h: int) -> _Episode:
     # PyO3 returns Vec<u8> as Python `bytes`, so decode via frombuffer.
-    tiles = np.frombuffer(bytes(raw._batch.get_tiles(0)), dtype=np.uint8).reshape(grid_h, grid_w)
-    return _Episode(tiles, grid_w, grid_h)
+    tiles = np.frombuffer(bytes(raw.batch.get_tiles(0)), dtype=np.uint8).reshape(grid_h, grid_w)
+    return _Episode(tiles)
 
 
-def _write_meta(f, model_obj, model_path, config, episodes, deterministic,
+def _write_meta(f, model_path, config, episodes, deterministic,
                 grid_w, grid_h, raw) -> None:
-    rt, rp, rd, rw, og = raw._batch.reward_weights()
+    rt, rp, rd, rw, og = raw.batch.reward_weights()
     f.attrs["model_path"] = str(model_path)
     f.attrs["config_path"] = str(config)
     f.attrs["episodes"] = int(episodes)
@@ -348,7 +351,8 @@ def _write_meta(f, model_obj, model_path, config, episodes, deterministic,
 @app.command()
 def summary(
     path: Path = typer.Argument(..., help="A trace.h5 produced by `atb-trace record`."),
-    dist_margin: float = typer.Option(0.10, "--dist-margin",
+    dist_margin: float = typer.Option(
+        0.10, "--dist-margin",
         help="Min extra normalised path-distance for a region to count as 'farther'."),
 ) -> None:
     """Print action frequencies and the near-vs-dense tradeoff the agent is making."""
@@ -475,15 +479,18 @@ def _render(tr: _Trace, i: int, axes) -> None:
     for a in axes:
         a.clear()
 
-    K = _REGION_COLS * _REGION_ROWS
+    n_regions = _REGION_COLS * _REGION_ROWS
     a = int(tr.scalar("chosen_action", i))
     ax, ay = int(tr.scalar("agent_x", i)), int(tr.scalar("agent_y", i))
     carried = int(tr.scalar("gold_carried", i))
     score = int(tr.scalar("score", i))
     value = float(tr.scalar("value", i))
-    cdx = tr.scalar("cluster_dx", i); cdy = tr.scalar("cluster_dy", i)
-    cpd = tr.scalar("cluster_pathdist", i); ccnt = tr.scalar("cluster_count", i)
-    probs = tr.scalar("action_probs", i); mask = tr.scalar("action_mask", i).astype(bool)
+    cdx = tr.scalar("cluster_dx", i)
+    cdy = tr.scalar("cluster_dy", i)
+    cpd = tr.scalar("cluster_pathdist", i)
+    ccnt = tr.scalar("cluster_count", i)
+    probs = tr.scalar("action_probs", i)
+    mask = tr.scalar("action_mask", i).astype(bool)
 
     # ── Grid ────────────────────────────────────────────────────────────────
     ax_grid.imshow(_tile_rgb(tr.tiles), origin="upper", interpolation="nearest")
@@ -505,7 +512,7 @@ def _render(tr: _Trace, i: int, axes) -> None:
     ax_grid.scatter([ax], [ay], s=90, marker="o", c="red",
                     edgecolors="k", label="agent", zorder=5)
     # Highlight the chosen region + arrow to its obs-nearest gold.
-    if a < K:
+    if a < n_regions:
         rx, ry = a % _REGION_COLS, a // _REGION_COLS
         x0, y0 = tr.gw * rx / _REGION_COLS - 0.5, tr.gh * ry / _REGION_ROWS - 0.5
         ax_grid.add_patch(mpatches.Rectangle(
@@ -518,40 +525,46 @@ def _render(tr: _Trace, i: int, axes) -> None:
     ax_grid.set_title(f"decision {i+1}/{tr.n}  tick={int(tr.scalar('tick', i))}\n"
                       f"action={act_name}  carried={carried}  score={score}  V={value:.2f}",
                       fontsize=9)
-    ax_grid.set_xlim(-0.5, tr.gw - 0.5); ax_grid.set_ylim(tr.gh - 0.5, -0.5)
+    ax_grid.set_xlim(-0.5, tr.gw - 0.5)
+    ax_grid.set_ylim(tr.gh - 0.5, -0.5)
     ax_grid.legend(loc="upper right", fontsize=6, framealpha=0.8)
-    ax_grid.set_xticks([]); ax_grid.set_yticks([])
+    ax_grid.set_xticks([])
+    ax_grid.set_yticks([])
 
     # ── Action probabilities ──────────────────────────────────────────────────
-    A = len(probs)
-    ypos = np.arange(A)
+    n_actions = len(probs)
+    ypos = np.arange(n_actions)
     bars = ax_act.barh(ypos, probs,
-                       color=["tab:blue" if k < K else "tab:gray" for k in range(A)])
-    for k in range(A):
+                       color=["tab:blue" if k < n_regions else "tab:gray" for k in range(n_actions)])
+    for k in range(n_actions):
         if not mask[k]:
-            bars[k].set_hatch("xxx"); bars[k].set_alpha(0.35)
-    bars[a].set_edgecolor("red"); bars[a].set_linewidth(2.0)
+            bars[k].set_hatch("xxx")
+            bars[k].set_alpha(0.35)
+    bars[a].set_edgecolor("red")
+    bars[a].set_linewidth(2.0)
     ax_act.set_yticks(ypos)
-    ax_act.set_yticklabels([tr.names[k] if k < len(tr.names) else str(k) for k in range(A)],
+    ax_act.set_yticklabels([tr.names[k] if k < len(tr.names) else str(k) for k in range(n_actions)],
                            fontsize=6)
     ax_act.invert_yaxis()
-    ax_act.set_xlim(0, 1); ax_act.set_xlabel("policy prob", fontsize=7)
+    ax_act.set_xlim(0, 1)
+    ax_act.set_xlabel("policy prob", fontsize=7)
     ax_act.set_title("actions (hatched = masked, red = chosen)", fontsize=8)
 
     # ── Cluster obs (3×3) ───────────────────────────────────────────────────
-    true_cnt = np.zeros(K, int)
+    true_cnt = np.zeros(n_regions, int)
     if len(gold):
         for r in _region_of(gold[:, 0], gold[:, 1], tr.gw, tr.gh):
             true_cnt[r] += 1
     ax_clu.imshow(true_cnt.reshape(_REGION_ROWS, _REGION_COLS), cmap="YlOrBr", origin="upper")
-    for k in range(K):
+    for k in range(n_regions):
         rx, ry = k % _REGION_COLS, k // _REGION_COLS
         ax_clu.add_patch(mpatches.Rectangle((rx - 0.5, ry - 0.5), 1, 1, fill=False,
                          edgecolor="red" if k == a else "0.7", lw=2.0 if k == a else 0.5))
         ax_clu.text(rx, ry - 0.22, f"n={true_cnt[k]}", ha="center", va="center", fontsize=6)
         ax_clu.text(rx, ry + 0.08, f"obs c={ccnt[k]:.2f}", ha="center", va="center", fontsize=5.5)
         ax_clu.text(rx, ry + 0.30, f"d={cpd[k]:.2f}", ha="center", va="center", fontsize=5.5)
-    ax_clu.set_xticks([]); ax_clu.set_yticks([])
+    ax_clu.set_xticks([])
+    ax_clu.set_yticks([])
     ax_clu.set_title("cluster obs: true count / obs count_norm / pathdist", fontsize=8)
 
     # ── Reward breakdown (this option) ────────────────────────────────────────
@@ -581,9 +594,11 @@ def _render(tr: _Trace, i: int, axes) -> None:
 def view(
     path: Path = typer.Argument(..., help="A trace.h5 produced by `atb-trace`."),
     episode: int = typer.Option(0, "--episode", "-e", help="Episode index to view."),
-    decision: Optional[int] = typer.Option(None, "--decision", "-d",
+    decision: Optional[int] = typer.Option(
+        None, "--decision", "-d",
         help="Show only this decision (else start interactive at decision 0)."),
-    save: Optional[Path] = typer.Option(None, "--save",
+    save: Optional[Path] = typer.Option(
+        None, "--save",
         help="Headless: write one PNG per decision to this dir (no display)."),
 ) -> None:
     """Render a recorded trace — interactive slider, or PNG dump with --save.
@@ -609,12 +624,12 @@ def view(
 
         def make_axes():
             """Grid panel on the left; a 3-row right column (actions / cluster / reward)."""
-            fig = plt.figure(figsize=(14, 8))
-            gs = GridSpec(3, 2, width_ratios=[1.4, 1.0], figure=fig,
+            figure = plt.figure(figsize=(14, 8))
+            gs = GridSpec(3, 2, width_ratios=[1.4, 1.0], figure=figure,
                           wspace=0.30, hspace=0.45, bottom=0.10)
-            axes = (fig.add_subplot(gs[:, 0]), fig.add_subplot(gs[0, 1]),
-                    fig.add_subplot(gs[1, 1]), fig.add_subplot(gs[2, 1]))
-            return fig, axes
+            panels = (figure.add_subplot(gs[:, 0]), figure.add_subplot(gs[0, 1]),
+                      figure.add_subplot(gs[1, 1]), figure.add_subplot(gs[2, 1]))
+            return figure, panels
 
         if save is not None:                       # ── headless PNG dump ──
             save.mkdir(parents=True, exist_ok=True)
@@ -629,20 +644,21 @@ def view(
             return
 
         # ── interactive ──
+        from matplotlib.backend_bases import KeyEvent
         from matplotlib.widgets import Slider
         fig, axes = make_axes()
         start = decision if decision is not None else 0
         _render(tr, start, axes)
 
-        sax = fig.add_axes([0.12, 0.02, 0.5, 0.03])
+        sax = fig.add_axes((0.12, 0.02, 0.5, 0.03))
         slider = Slider(sax, "decision", 0, max(tr.n - 1, 0), valinit=start, valstep=1)
 
-        def update(_val):
+        def update(_val) -> None:
             _render(tr, int(slider.val), axes)
             fig.canvas.draw_idle()
         slider.on_changed(update)
 
-        def on_key(event):
+        def on_key(event: KeyEvent) -> None:
             if event.key in ("right", "left"):
                 step = 1 if event.key == "right" else -1
                 slider.set_val(int(np.clip(slider.val + step, 0, tr.n - 1)))

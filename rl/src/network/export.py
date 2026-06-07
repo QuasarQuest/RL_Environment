@@ -144,25 +144,25 @@ def export_to_onnx(
 
     # Resolve optional VecNormalize obs stats.
     mean_np: np.ndarray | None = None
-    var_np:  np.ndarray | None = None
+    var_np: np.ndarray | None = None
     clip = 10.0
     if vecnorm_path is not None and vecnorm_path.exists():
         with open(vecnorm_path, "rb") as fh:
             vn = pickle.load(fh)
         if vn.norm_obs:
             mean_np = np.asarray(vn.obs_rms.mean, dtype=np.float32).reshape(obs_shape)
-            var_np  = np.asarray(vn.obs_rms.var,  dtype=np.float32).reshape(obs_shape)
-            clip    = float(vn.clip_obs)
+            var_np = np.asarray(vn.obs_rms.var, dtype=np.float32).reshape(obs_shape)
+            clip = float(vn.clip_obs)
             log.info("VecNormalize obs stats baked into ONNX graph from %s", vecnorm_path)
 
     dummy = torch.randn(1, *obs_shape, dtype=torch.float32)
 
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(record=False):
         warnings.filterwarnings("ignore", message=".*variable length with LSTM.*")
 
         if has_lstm:
             lstm: torch.nn.LSTM = policy.lstm_actor  # type: ignore[assignment]
-            n_layers    = lstm.num_layers
+            n_layers = lstm.num_layers
             hidden_size = lstm.hidden_size
             wrapper = _StatefulLstmWrapper(policy, mean_np, var_np, clip)
             dummy_h = torch.zeros(n_layers, 1, hidden_size)
@@ -185,8 +185,11 @@ def export_to_onnx(
             meta_path.write_text(json.dumps(meta))
             log.info("LSTM metadata  → %s", meta_path)
         else:
-            wrapper = _NormPolicyWrapper(policy, mean_np, var_np, clip) if mean_np is not None \
-                      else _PolicyWrapper(policy)
+            if mean_np is not None:
+                assert var_np is not None  # mean_np and var_np are set together above
+                wrapper = _NormPolicyWrapper(policy, mean_np, var_np, clip)
+            else:
+                wrapper = _PolicyWrapper(policy)
             # Static batch=1 (no dynamic_axes): the viewer runs single-obs inference,
             # and a symbolic batch dim leaves the feature-extractor Reshape (-1, C, H, W)
             # unresolvable for tract's startup analysis pass — it then falls back to the
@@ -204,7 +207,7 @@ def export_to_onnx(
 
     # Validation — compare ONNX runtime vs torch with a single obs (seq_len=1 for LSTM).
     obs_np = np.random.RandomState(0).randn(1, *obs_shape).astype(np.float32)
-    sess   = ort.InferenceSession(str(out_path))
+    sess = ort.InferenceSession(str(out_path))
     if has_lstm:
         h_np = np.zeros([n_layers, 1, hidden_size], dtype=np.float32)
         c_np = np.zeros([n_layers, 1, hidden_size], dtype=np.float32)

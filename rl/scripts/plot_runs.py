@@ -419,11 +419,11 @@ def plot_combined_learning_curves(runs: list[RunInfo], out_dir: Path) -> None:
 
     def overlay(field: str, ylabel: str, fname: str) -> None:
         series = []
-        for info in runs:
-            if info.episodes is None:
+        for r in runs:
+            if r.episodes is None:
                 continue
-            ts, mu, sd = _rolling(info.episodes.timestep, getattr(info.episodes, field))
-            series.append((ts, mu, sd, STAGE_COLORS.get(info.stage, "#aaa"), f"S{info.stage}"))
+            ts, mu, sd = _rolling(r.episodes.timestep, getattr(r.episodes, field))
+            series.append((ts, mu, sd, STAGE_COLORS.get(r.stage, "#aaa"), f"S{r.stage}"))
         _curve(d / fname, f"{ylabel} — all stages (rolling 100)", series, ylabel)
 
     overlay("reward", "Reward", "reward.png")

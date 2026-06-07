@@ -72,9 +72,11 @@ def find_latest_run(name: str | None) -> tuple[Path, str, int, int]:
 
 def current_steps(run_dir: Path) -> int:
     """Best estimate of the run's trained step count: the highest checkpoint step."""
-    steps = [int(m.group(1))
-             for p in (run_dir / "checkpoints").glob("step_*.zip")
-             if (m := re.search(r"step_(\d+)\.zip$", p.name))]
+    steps = []
+    for p in (run_dir / "checkpoints").glob("step_*.zip"):
+        m = re.search(r"step_(\d+)\.zip$", p.name)
+        if m:
+            steps.append(int(m.group(1)))
     return max(steps, default=0)
 
 

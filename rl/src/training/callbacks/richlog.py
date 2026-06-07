@@ -122,7 +122,7 @@ class _RichWriter(KVWriter):
             ("fps", f"{fps:,}"),
             ("elapsed", f"{elapsed}s"),
         ]
-        game_rows  = [(lbl, kv[key]) for lbl, key in game_keys  if key in kv]
+        game_rows = [(lbl, kv[key]) for lbl, key in game_keys if key in kv]
         train_rows = [(lbl, kv[key]) for lbl, key in train_keys if key in kv]
 
         if not train_rows:

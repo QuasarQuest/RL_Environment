@@ -77,11 +77,11 @@ class PeriodicPlotCallback(BaseCallback):
         if self._proc is not None and self._proc.poll() is None:
             try:
                 self._proc.wait(timeout=180)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 pass
         self._spawn()
         if self._proc is not None:
             try:
                 self._proc.wait(timeout=300)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 pass

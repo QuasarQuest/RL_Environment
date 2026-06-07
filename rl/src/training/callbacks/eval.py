@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from stable_baselines3.common.callbacks import EvalCallback
 
@@ -22,7 +23,18 @@ except ImportError:
     _MASKABLE_AVAILABLE = False
 
 
-class _VecNormOnnxEvalMixin:
+# At runtime the mixin is combined with a concrete EvalCallback subclass (see
+# EvalWithVecNorm / MaskableEvalWithVecNorm), inheriting best_mean_reward,
+# best_model_save_path, model and _on_step from it. Declaring EvalCallback as the
+# static base (type-checking only) lets the checker resolve those attributes
+# without changing the runtime MRO — the real base is supplied by the subclass.
+if TYPE_CHECKING:
+    _EvalBase = EvalCallback
+else:
+    _EvalBase = object
+
+
+class _VecNormOnnxEvalMixin(_EvalBase):
     """On every new eval-best: co-save VecNormalize stats and export ONNX.
 
     SB3's stock EvalCallback writes only `best_model.zip` and never the matching
@@ -37,7 +49,7 @@ class _VecNormOnnxEvalMixin:
 
     def _on_step(self) -> bool:
         prev_best = self.best_mean_reward
-        result    = super()._on_step()
+        result = super()._on_step()
 
         if self.best_mean_reward <= prev_best:
             return result
@@ -53,6 +65,7 @@ class _VecNormOnnxEvalMixin:
     def _try_export_onnx(self) -> None:
         from network.export import export_to_onnx  # noqa: PLC0415
 
+        assert self._onnx_path is not None  # only called from _on_step under this guard
         vn_path = (
             Path(self.best_model_save_path + "_vecnorm.pkl")
             if self.best_model_save_path else None

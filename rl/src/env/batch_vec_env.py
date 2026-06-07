@@ -114,6 +114,17 @@ class BatchVecEnv(VecEnv):
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
+    @property
+    def batch(self) -> Any:
+        """The underlying Rust ``PyBatchEnv``.
+
+        Exposed for offline tooling (e.g. the trace recorder) that needs direct
+        per-env introspection — get_agents / get_items / get_trace / get_tiles /
+        reward_weights — which the SB3 VecEnv API doesn't surface. Training code
+        should prefer the public VecEnv methods above.
+        """
+        return self._batch
+
     @staticmethod
     def _ba_to_obs(ba, n: int) -> np.ndarray:
         """Zero-copy bytearray → (n, OBS_TOTAL) numpy array.

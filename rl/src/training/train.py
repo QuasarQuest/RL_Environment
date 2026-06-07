@@ -184,10 +184,10 @@ def train(cfg: DictConfig) -> None:
     e_cfg = EnvConfig(**raw["env"])
 
     algo_spec = get_algo(t_cfg.algo)
-    run_dir  = Path(HydraConfig.get().runtime.output_dir)
+    run_dir = Path(HydraConfig.get().runtime.output_dir)
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    run_tag  = run_dir.name
+    run_tag = run_dir.name
     _dev = get_device(t_cfg.device)
     if _dev.type == "cuda" and _dev.index is None:
         import torch
