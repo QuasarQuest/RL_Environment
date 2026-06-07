@@ -56,12 +56,12 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     n = len(df)
     tail = df.tail(window)
 
-    reward_mean = tail["episode_reward"].mean()
-    reward_std = tail["episode_reward"].std(ddof=0)
-    reward_max = df["episode_reward"].max()
-    length_mean = tail["episode_length"].mean()
-    score_mean = tail["score"].mean() if "score" in tail.columns else float("nan")
-    win_rate = tail["win"].mean() if "win" in tail.columns else float("nan")
+    reward_mean = float(tail["episode_reward"].mean())
+    reward_std = float(tail["episode_reward"].std(ddof=0))
+    reward_max = float(df["episode_reward"].max())
+    length_mean = float(tail["episode_length"].mean())
+    score_mean = float(tail["score"].mean()) if "score" in tail.columns else float("nan")
+    win_rate = float(tail["win"].mean()) if "win" in tail.columns else float("nan")
     last_step = int(df["timestep"].max()) if "timestep" in df.columns else 0
 
     table = Table(
@@ -90,8 +90,8 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     # Trend arrow: compare last window/2 to previous window/2
     half = max(window // 2, 1)
     if n >= window:
-        prev_mean = df["episode_reward"].iloc[-window:-half].mean()
-        curr_mean = df["episode_reward"].iloc[-half:].mean()
+        prev_mean = float(df["episode_reward"].iloc[-window:-half].mean())
+        curr_mean = float(df["episode_reward"].iloc[-half:].mean())
         delta = curr_mean - prev_mean
         arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "→")
         colour = "green" if delta > 0 else ("red" if delta < 0 else "yellow")

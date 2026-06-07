@@ -644,7 +644,7 @@ def view(
             return
 
         # ── interactive ──
-        from matplotlib.backend_bases import KeyEvent
+        from matplotlib.backend_bases import Event, KeyEvent
         from matplotlib.widgets import Slider
         fig, axes = make_axes()
         start = decision if decision is not None else 0
@@ -658,9 +658,12 @@ def view(
             fig.canvas.draw_idle()
         slider.on_changed(update)
 
-        def on_key(event: KeyEvent) -> None:
-            if event.key in ("right", "left"):
-                step = 1 if event.key == "right" else -1
+        def on_key(event: Event) -> None:
+            # mpl_connect types the callback as Callable[[Event], Any]; the
+            # "key_press_event" always delivers a KeyEvent (which carries .key).
+            key = cast(KeyEvent, event).key
+            if key in ("right", "left"):
+                step = 1 if key == "right" else -1
                 slider.set_val(int(np.clip(slider.val + step, 0, tr.n - 1)))
         fig.canvas.mpl_connect("key_press_event", on_key)
 
