@@ -66,7 +66,6 @@ ACTION_NAMES: list[str] = (
 TICK_FIELDS: list[str] = [
     "tick", "ax", "ay", "gold_carried", "score",
     "r_tick", "r_pickup", "r_deposit", "r_wall", "r_total", "discount", "gold_count",
-    "r_mult",  # appended last (matches SimCore::trace_flat) — multiplier-use bonus
 ]
 
 # Cluster-feature sub-layout: region k → obs offset k*4 + {dx, dy, pathdist, count}.
@@ -445,7 +444,7 @@ class _Trace:
         t = g["ticks"]                                       # per-tick reward rows
         self.t_dec = t["decision_idx"][:]
         self.t_r = {k: t[k][:] for k in ("r_tick", "r_pickup", "r_deposit", "r_wall",
-                                         "r_mult", "r_total", "discount", "tick")}
+                                         "r_total", "discount", "tick")}
 
     def gold_at(self, i: int) -> np.ndarray:
         return self.gold_xy[self.gold_off[i]:self.gold_off[i + 1]]
@@ -572,8 +571,7 @@ def _render(tr: _Trace, i: int, axes) -> None:
     comps = {"tick": tr.t_r["r_tick"][sel].sum(),
              "pickup": tr.t_r["r_pickup"][sel].sum(),
              "deposit": tr.t_r["r_deposit"][sel].sum(),
-             "wall": tr.t_r["r_wall"][sel].sum(),
-             "mult": tr.t_r["r_mult"][sel].sum()}
+             "wall": tr.t_r["r_wall"][sel].sum()}
     total = float(tr.t_r["r_total"][sel].sum())
     ret = float(tr.scalar("option_return", i))
     oticks = int(tr.scalar("option_ticks", i))

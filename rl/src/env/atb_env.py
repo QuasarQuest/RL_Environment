@@ -5,10 +5,10 @@ This class exists so the factory's eval path and DummyVecEnv work correctly.
 
 Observation layout
 ------------------
-Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (11770,):
-  [0     : 10000)  main egocentric crop  — (16, 25, 25)
-  [10000 : 11734)  minimap               — ( 6, 17, 17)
-  [11734 : 11770)  cluster features      — (36,)
+Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
+  [0    : 8750)   main egocentric crop  — (14, 25, 25)
+  [8750 : 10195)  minimap               — ( 5, 17, 17)
+  [10195: 10231)  cluster features      — (36,)
 
 AtbCnnExtractor in policy.py splits and reshapes internally.
 
@@ -45,6 +45,11 @@ DEFAULT_CONFIG = str(PROJECT_ROOT / "assets" / "world" / "config_stage1.ron")
 
 _OBS_DTYPE = np.float32
 _OBS_FLAT_SHAPE = (_OBS_TOTAL,)
+
+# Index of the RL agent (team 0) and the score field in the get_agents() tuple
+# (x, y, team, gold_carried, score) — mirrors batch_vec_env.
+_RL_AGENT_IDX = 0
+_SCORE_FIELD = 4
 
 
 class AtbEnv(gym.Env):
@@ -103,10 +108,11 @@ class AtbEnv(gym.Env):
 
         self._episode_reward += reward
         self._episode_length += 1
-        if reward > 0.0:
-            self._score += reward
+        # True score = gold banked at base (read from Rust), NOT a sum of positive
+        # rewards — matches BatchVecEnv's score so eval and training agree.
+        self._score = float(self._env.get_agents(0)[_RL_AGENT_IDX][_SCORE_FIELD])
 
-        info: dict[str, Any] = {"score": self._score, "win": 0}
+        info: dict[str, Any] = {"score": self._score}
         if done:
             info["episode"] = {"r": self._episode_reward, "l": self._episode_length}
 

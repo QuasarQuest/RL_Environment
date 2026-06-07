@@ -25,25 +25,29 @@ pub const AGENT_MAX_GOLD:      u8  = 5;
 
 // ── Item buffs (ticks) ─────────────────────────────────────────────────────────
 // Speed boosts: all give 2× move speed; the three tiers differ only in how long
-// the window lasts (rarer tier → longer). Slow halves move speed; Multiplier
-// doubles deposit value. SPEED_BUFF_MAX is the normaliser for the speed obs channel.
+// the window lasts (rarer tier → longer). SPEED_BUFF_MAX is the normaliser for the
+// speed obs channel. (The old Slow hazard was removed.)
 pub const SPEED1_TICKS: u16 =  40;
 pub const SPEED2_TICKS: u16 =  80;
 pub const SPEED3_TICKS: u16 = 160;
-pub const SLOW_TICKS:   u16 = 200;  // half move-speed window — long enough to clearly bite
-pub const MULT_TICKS:   u16 = 100;
-/// Trap immobilises the agent completely (0 tiles/tick) for this many ticks — a
-/// hazard to avoid, far more punishing than Slow.
+/// Trap immobilises the agent completely (0 tiles/tick) for this many ticks. The
+/// navigator routes around trap tiles (engine/nav.rs), so this only bites when a
+/// trap is unavoidable or spawns under the agent.
 pub const TRAP_TICKS:   u16 = 250;
 
 /// Normalisers for the buff-remaining observation channels (longest window per buff).
 pub const SPEED_BUFF_MAX: u16 = SPEED3_TICKS;
-pub const SLOW_BUFF_MAX:  u16 = SLOW_TICKS;
-pub const MULT_BUFF_MAX:  u16 = MULT_TICKS;
 pub const TRAP_BUFF_MAX:  u16 = TRAP_TICKS;
 
-/// Score multiplier applied to a deposit while `mult_buff > 0`.
+/// The score multiplier is a consumable charge (not a timed window): picking one up
+/// holds a single charge; the next deposit consumes it and is worth this many times
+/// its gold. Capacity is intentionally 1 — "use it on your next bank".
 pub const DEPOSIT_MULTIPLIER: u32 = 2;
+pub const MULT_CHARGE_MAX:    u8  = 1;
+
+/// Traps spawn as connected blobs of this many adjacent tiles (instead of single
+/// tiles), so a cluster can seal a corridor and force the navigator to detour.
+pub const TRAP_CLUSTER_SIZE: usize = 3;
 
 // ── Viewer-compat constant ──────────────────────────────────────────────────────
 // Combat is gone, but the agent's inert `hearts` field (read only by the viewer's

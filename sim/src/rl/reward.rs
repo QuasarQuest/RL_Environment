@@ -8,17 +8,17 @@
 //   pickup   : reward on each gold pickup
 //   deposit  : large reward on depositing gold at base
 //   wall_hit : small penalty when a Move is blocked (no position change)
-//   mult     : small bonus when gold is banked while the 2× multiplier is active —
-//              bootstraps "use the multiplier" (deposit under it; see below)
-//   speed    : small bonus when gold is picked up while a speed boost is active —
-//              bootstraps "use the speed boost" (collect fast under it)
 //
 // Reward is intentionally MINIMAL and event-based: the agent learns purely from
 // game outcomes — gold picked up, gold banked — plus a tiny per-step time cost
 // and the wall_hit penalty. There is deliberately NO approach/navigation shaping
-// (the policy discovers where to go from the observation alone). With the
-// temporally-extended options in SimCore::step_option each pickup/deposit lands
-// at an option boundary, so credit assignment is already short.
+// and NO buff-use shaping (the policy discovers where to go from the observation
+// alone). With the temporally-extended options in SimCore::step_option each
+// pickup/deposit lands at an option boundary, so credit assignment is already short.
+//
+// The score multiplier needs no dedicated signal: a deposit made with a multiplier
+// charge banks 2× the gold, so `deposit` (which scales with the score gained) is
+// already doubled for it — the incentive to grab and spend a charge is emergent.
 //
 // Combat (kill / death) was removed — this agent is gold rush only.
 //
@@ -36,14 +36,12 @@ pub struct RewardBreakdown {
     pub pickup:  f32,
     pub deposit: f32,
     pub wall:    f32,
-    /// Bonus paid only when a deposit lands while the 2× score multiplier is active.
-    pub mult:    f32,
 }
 
 impl RewardBreakdown {
     /// The summed per-step reward — what the agent actually receives this tick.
     pub fn total(&self) -> f32 {
-        self.tick + self.pickup + self.deposit + self.wall + self.mult
+        self.tick + self.pickup + self.deposit + self.wall
     }
 }
 
@@ -72,13 +70,9 @@ pub fn compute_components(
     RewardBreakdown {
         tick:    cfg.tick,
         pickup:  cfg.pickup  * agent.gold_carried.saturating_sub(prev_gold) as f32,
+        // A multiplier-charge deposit banks 2× the gold, so score_gain (and thus this
+        // term) already doubles for it — no separate buff-use bonus needed.
         deposit: cfg.deposit * score_gain,
         wall:    if wall_hit { cfg.wall_hit } else { 0.0 },
-        // Shaping: reward banking gold *while the multiplier is active*, scaled by the
-        // (already-doubled) score banked. The doubled deposit alone is too far from the
-        // NavigateToMultiplier grab for PPO to credit it; this bonus, realised only on a
-        // deposit-under-multiplier, makes "grab the multiplier then bank a load" pay off
-        // closer to the behaviour we want. Fires only when mult_buff is still active.
-        mult:    if agent.mult_buff > 0 { cfg.mult_use_bonus * score_gain } else { 0.0 },
     }
 }

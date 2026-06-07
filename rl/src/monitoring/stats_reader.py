@@ -10,7 +10,6 @@ Columns produced by `EpisodeStatsCallback`:
     episode_reward  : total reward over the episode
     episode_length  : number of env steps in the episode
     score           : env-defined score signal at episode end
-    win             : 0/1 (env-defined win condition)
 """
 from __future__ import annotations
 
@@ -78,9 +77,7 @@ class RunSummary:
     min_reward: float
     mean_length: float
     score_mean: float
-    win_rate: float
     last_100_mean_reward: float
-    last_100_win_rate: float
 
     def as_dict(self) -> dict[str, float | int | str]:
         return {
@@ -94,9 +91,7 @@ class RunSummary:
             "min_reward": self.min_reward,
             "mean_length": self.mean_length,
             "score_mean": self.score_mean,
-            "win_rate": self.win_rate,
             "last_100_mean_reward": self.last_100_mean_reward,
-            "last_100_win_rate": self.last_100_win_rate,
         }
 
 
@@ -117,9 +112,7 @@ def summarise(df: pd.DataFrame, name: str = "run") -> RunSummary:
         min_reward=float(df["episode_reward"].min()),
         mean_length=float(df["episode_length"].mean()),
         score_mean=float(df["score"].mean()) if "score" in df else float("nan"),
-        win_rate=float(df["win"].mean()) if "win" in df else float("nan"),
         last_100_mean_reward=float(tail["episode_reward"].mean()),
-        last_100_win_rate=float(tail["win"].mean()) if "win" in tail else float("nan"),
     )
 
 
@@ -139,7 +132,7 @@ def summarise_all(paths: Iterable[str | Path]) -> pd.DataFrame:
 def rolling(
     df: pd.DataFrame,
     window: int = 100,
-    columns: Iterable[str] = ("episode_reward", "episode_length", "score", "win"),
+    columns: Iterable[str] = ("episode_reward", "episode_length", "score"),
 ) -> pd.DataFrame:
     """Add rolling-mean columns suffixed with `_rollN` for plotting."""
     out = df.copy()
@@ -155,7 +148,7 @@ def rolling(
 def bin_by_step(
     df: pd.DataFrame,
     bin_size: int = 100_000,
-    columns: Iterable[str] = ("episode_reward", "episode_length", "win"),
+    columns: Iterable[str] = ("episode_reward", "episode_length", "score"),
 ) -> pd.DataFrame:
     """Bin episodes by env timestep. Useful for comparing runs of different
     episode counts on an equal-step axis."""

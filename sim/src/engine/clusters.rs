@@ -27,7 +27,7 @@
 // strategic call — which region, and when to bank — not the micro-pathing.
 //
 // NOTE: CLUSTER_K here must match CLUSTER_K in rl/action.rs and rl/obs.rs, and
-// ACTION_SIZE in rl/action.rs is sized as CLUSTER_K + 7 direct/nav actions.
+// ACTION_SIZE in rl/action.rs is sized as CLUSTER_K + 4 (base, speed, mult, wait).
 
 use crate::world::coords::GridPos;
 
@@ -54,14 +54,6 @@ impl GoldCluster {
         self.golds.iter()
             .min_by_key(|&&g| chebyshev(pos, g))
             .copied()
-    }
-
-    /// Mean position of all gold pieces in the cluster.
-    pub fn centroid(&self) -> (f32, f32) {
-        let n = self.golds.len() as f32;
-        let cx = self.golds.iter().map(|g| g.x as f32).sum::<f32>() / n;
-        let cy = self.golds.iter().map(|g| g.y as f32).sum::<f32>() / n;
-        (cx, cy)
     }
 }
 

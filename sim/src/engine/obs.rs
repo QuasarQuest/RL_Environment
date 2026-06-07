@@ -14,16 +14,18 @@
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use crate::config::{AGENT_MAX_GOLD, MULT_BUFF_MAX, SLOW_BUFF_MAX, SPEED_BUFF_MAX, TRAP_BUFF_MAX};
+use rustc_hash::FxHashSet;
+
+use crate::config::{AGENT_MAX_GOLD, SPEED_BUFF_MAX, TRAP_BUFF_MAX};
 use crate::entity::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
 use crate::engine::clusters::GoldCluster;
 use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
-    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_HAZARD, CH_MULT,
-    CH_MULT_REMAINING, CH_OBSTACLE, CH_OOB, CH_SLOW_REMAINING, CH_SPEED,
+    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_MULT,
+    CH_MULT_CHARGE, CH_OBSTACLE, CH_OOB, CH_SPEED,
     CH_SPEED_REMAINING, CH_TIME_REMAINING, CH_TRAP, CH_TRAP_REMAINING,
-    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SLOW, MM_CH_SPEED, MM_CH_TRAP,
+    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SPEED, MM_CH_TRAP,
     MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
 use crate::world::coords::GridPos;
@@ -77,10 +79,9 @@ pub fn build_obs_into(
     // Active buff timers, normalised by their longest possible window.
     buf[CH_SPEED_REMAINING * plane..(CH_SPEED_REMAINING + 1) * plane]
         .fill((agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
-    buf[CH_SLOW_REMAINING * plane..(CH_SLOW_REMAINING + 1) * plane]
-        .fill((agent.slow_buff as f32 / SLOW_BUFF_MAX as f32).min(1.0));
-    buf[CH_MULT_REMAINING * plane..(CH_MULT_REMAINING + 1) * plane]
-        .fill((agent.mult_buff as f32 / MULT_BUFF_MAX as f32).min(1.0));
+    // Multiplier is a held charge (not a timer): 1.0 while one is banked-up to spend.
+    buf[CH_MULT_CHARGE * plane..(CH_MULT_CHARGE + 1) * plane]
+        .fill((agent.mult_charge > 0) as u8 as f32);
     buf[CH_TRAP_REMAINING * plane..(CH_TRAP_REMAINING + 1) * plane]
         .fill((agent.trap_buff as f32 / TRAP_BUFF_MAX as f32).min(1.0));
 
@@ -123,9 +124,8 @@ pub fn build_obs_into(
         match it.kind {
             ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 =>
                 buf[pixel(CH_SPEED, cx, cy)] = speed_tier_value(it.kind),
-            ItemKind::Slow       => buf[pixel(CH_HAZARD, cx, cy)] = 1.0,
-            ItemKind::Multiplier => buf[pixel(CH_MULT,   cx, cy)] = 1.0,
-            ItemKind::Trap       => buf[pixel(CH_TRAP,   cx, cy)] = 1.0,
+            ItemKind::Multiplier => buf[pixel(CH_MULT, cx, cy)] = 1.0,
+            ItemKind::Trap       => buf[pixel(CH_TRAP, cx, cy)] = 1.0,
             ItemKind::Gold       => {} // already drawn from gold_positions
         }
     }
@@ -139,7 +139,13 @@ pub fn build_obs_into(
     // gold" used for direction + distance is the PATH-nearest (BFS around walls),
     // so the policy's distance perception is correct around obstacles.
 
-    let dist = crate::engine::nav::dist_field(grid, agent.pos);
+    // Trap tiles are impassable to the navigator, so path distances (and hence the
+    // agent's reachable-gold perception) route around them — see engine/nav.rs.
+    let trap_set: FxHashSet<GridPos> = items.iter()
+        .filter(|it| it.kind == ItemKind::Trap)
+        .map(|it| it.pos)
+        .collect();
+    let dist = crate::engine::nav::dist_field(grid, agent.pos, &trap_set);
     let path_norm = (gw + gh) as f32; // longest plausible corridor distance
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
@@ -206,7 +212,6 @@ fn build_minimap(
     for it in items {
         let ch = match it.kind {
             ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 => MM_CH_SPEED,
-            ItemKind::Slow       => MM_CH_SLOW,
             ItemKind::Multiplier => MM_CH_MULT,
             ItemKind::Trap       => MM_CH_TRAP,
             ItemKind::Gold       => continue,

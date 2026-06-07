@@ -1,6 +1,6 @@
 # @package env
-# Stage 3: full item set (speed tiers, slow hazard, multiplier), denser obstacles,
-# slightly scarcer gold. Final curriculum stage.
+# Stage 3: full item set (speed tiers, multiplier charge, trap clusters), denser
+# obstacles, slightly scarcer gold. Final curriculum stage.
 
 stage: 3
 n_envs: 64

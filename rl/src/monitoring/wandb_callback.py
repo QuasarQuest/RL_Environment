@@ -13,7 +13,7 @@ Setup
 
 What gets logged
 ----------------
-- train/episode_reward, episode_length, score, win_rate  (per episode)
+- train/episode_reward, episode_length, score  (per episode)
 - train/entropy_loss, policy_loss, value_loss, approx_kl (SB3 built-ins)
 - train/ent_coef                                          (scheduled value)
 - perf/steps_per_sec
@@ -100,7 +100,6 @@ class WandbCallback(BaseCallback):
             log["train/episode_reward"] = float(ep["r"])
             log["train/episode_length"] = int(ep["l"])
             log["train/score"] = float(info.get("score", 0.0))
-            log["train/win"] = int(info.get("win", 0))
 
         for key in (
             "train/entropy_loss", "train/policy_loss", "train/value_loss",

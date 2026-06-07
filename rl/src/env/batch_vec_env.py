@@ -3,7 +3,7 @@
 Observation protocol
 --------------------
 Rust returns a flat bytearray of shape (n_envs * OBS_TOTAL * 4 bytes).
-np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 10222) — flat, not (C,H,W).
+np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 10231) — flat, not (C,H,W).
 AtbCnnExtractor in policy.py splits crop + minimap + cluster features internally.
 
 Score tracking
@@ -19,7 +19,7 @@ time-limit truncation, not a true MDP terminal. We surface this to SB3 via
 `infos[i]["TimeLimit.truncated"] = True`, which is the flag SB3's PPO checks
 before bootstrapping V(terminal_observation). Without it, the value target at
 every episode boundary is wrongly treated as 0, biasing value estimates low.
-(If a true terminal condition — win/loss — is ever added to the sim, expose a
+(If a true terminal condition is ever added to the sim, expose a
 per-env `truncated` flag from Rust and set this from that instead of `True`.)
 
 Profiling
@@ -138,8 +138,8 @@ class BatchVecEnv(VecEnv):
         the reused obs_flat buffer), so each step's view already owns independent,
         Python-managed memory. SB3's rollout buffer copies obs into its own
         preallocated storage on ``add()``, so nothing downstream aliases this view
-        across steps. An extra ``.copy()`` here would be a redundant ~2.5 MB/step
-        memcpy (n_envs=64 × 10222 × 4 B).
+        across steps. An extra ``.copy()`` here would be a redundant ~2.6 MB/step
+        memcpy (n_envs=64 × 10231 × 4 B).
         """
         return np.frombuffer(ba, dtype=_OBS_DTYPE).reshape(n, _OBS_TOTAL)
 
@@ -200,7 +200,6 @@ class BatchVecEnv(VecEnv):
             }
             # Read true score from Rust before reset.
             infos[i]["score"] = self._rust_score(int(i))
-            infos[i]["win"] = 0
 
             new_ba = self._batch.reset_env(int(i))
             obs[i] = np.frombuffer(new_ba, dtype=_OBS_DTYPE).reshape(_OBS_TOTAL)

@@ -33,9 +33,9 @@ pub enum Action {
     Wait,
 }
 
-/// Single-agent gold-rush state: gold carry/score plus three temporary buff
-/// timers (ticks remaining). Combat is gone — there are no enemies, no teams and
-/// no damage. `team`/`hearts`/`ammo` are retained as inert single-agent values
+/// Single-agent gold-rush state: gold carry/score plus the temporary buff timers
+/// and the held multiplier charge. Combat is gone — there are no enemies, no teams
+/// and no damage. `team`/`hearts`/`ammo` are retained as inert single-agent values
 /// (team 0, full hearts, no ammo) only so the existing viewer panels keep
 /// rendering; the simulation never mutates them.
 #[derive(Clone)]
@@ -45,10 +45,9 @@ pub struct AgentState {
     pub score:        u32,
     /// Ticks of 2× move speed remaining (0 = none). Set by Speed{1,2,3} pickups.
     pub speed_buff:   u16,
-    /// Ticks of 0.5× move speed remaining (0 = none). Set by the Slow hazard.
-    pub slow_buff:    u16,
-    /// Ticks of 2× deposit value remaining (0 = none). Set by the Multiplier pickup.
-    pub mult_buff:    u16,
+    /// Held score-multiplier charges (0 or MULT_CHARGE_MAX). Set by the Multiplier
+    /// pickup, consumed one-per-deposit to double that deposit's value.
+    pub mult_charge:  u8,
     /// Ticks of forced immobility remaining (0 = none). Set by stepping on a Trap.
     pub trap_buff:    u16,
     pub spawn_pos:    GridPos,

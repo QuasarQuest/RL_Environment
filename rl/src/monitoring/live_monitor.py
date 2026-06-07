@@ -61,7 +61,6 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     reward_max = float(df["episode_reward"].max())
     length_mean = float(tail["episode_length"].mean())
     score_mean = float(tail["score"].mean()) if "score" in tail.columns else float("nan")
-    win_rate = float(tail["win"].mean()) if "win" in tail.columns else float("nan")
     last_step = int(df["timestep"].max()) if "timestep" in df.columns else 0
 
     table = Table(
@@ -85,7 +84,6 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     table.add_row("reward max (all time)", _fmt(reward_max))
     table.add_row(f"ep length mean (last {window})", _fmt(length_mean, ".1f"))
     table.add_row(f"score mean (last {window})", _fmt(score_mean))
-    table.add_row(f"win rate   (last {window})", _fmt(win_rate, ".1%"))
 
     # Trend arrow: compare last window/2 to previous window/2
     half = max(window // 2, 1)

@@ -99,9 +99,8 @@ pub fn update_tooltip(
 
             // Position + active buff timers (ticks remaining) + policy mode for agent 0.
             let mut buffs = String::new();
-            if agent.speed_buff > 0 { buffs += &format!("  ⚡{}", agent.speed_buff); }
-            if agent.slow_buff  > 0 { buffs += &format!("  🐌{}", agent.slow_buff); }
-            if agent.mult_buff  > 0 { buffs += &format!("  ×2:{}", agent.mult_buff); }
+            if agent.speed_buff  > 0 { buffs += &format!("  ⚡{}", agent.speed_buff); }
+            if agent.mult_charge > 0 { buffs += "  ×2"; }
             let mode_str = if idx == 0 {
                 format!("  [{}]", bridge.mode.label())
             } else {

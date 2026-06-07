@@ -15,7 +15,8 @@ use rand::seq::SliceRandom;
 use rand::rngs::SmallRng;
 use rustc_hash::FxHashSet;
 
-use crate::config;
+use crate::config::{self, TRAP_CLUSTER_SIZE};
+use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 use crate::world::{
     config::{WorldConfig, SPAWN_POCKET_RADIUS},
@@ -59,8 +60,7 @@ pub fn build_episode(cfg: &WorldConfig, rng: &mut SmallRng) -> WorldSnapshot {
         gold_carried: 0,
         score:        0,
         speed_buff:   0,
-        slow_buff:    0,
-        mult_buff:    0,
+        mult_charge:  0,
         trap_buff:    0,
         spawn_pos:    base,
         base_pos:     base,
@@ -185,19 +185,56 @@ fn spawn_items_internal(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridP
     // Place each kind on its own shuffled prefix of free tiles. Reshuffling per
     // kind lets kinds overlap in candidate space without colliding (swap_remove
     // would be O(n²)); duplicates across kinds are avoided by removing taken tiles.
+    //
+    // Traps are placed as connected blobs of TRAP_CLUSTER_SIZE tiles so a cluster
+    // can seal a corridor (the navigator routes around trap tiles); every other
+    // kind is a single tile. `target` counts tiles either way.
     let mut taken: FxHashSet<GridPos> = FxHashSet::default();
     for ic in &item_cfgs {
         let target = (ic.max_on_map / 2).max(1);
+        let cluster_size = if ic.kind == ItemKind::Trap { TRAP_CLUSTER_SIZE } else { 1 };
         free_tiles.shuffle(rng);
         let mut placed = 0;
-        for &pos in free_tiles.iter() {
+        for &seed in free_tiles.iter() {
             if placed >= target { break; }
-            if taken.contains(&pos) { continue; }
-            taken.insert(pos);
-            items.push(ItemState { pos, kind: ic.kind });
-            placed += 1;
+            if taken.contains(&seed) { continue; }
+            for p in grow_blob(seed, cluster_size, grid, &blocked, &mut taken) {
+                items.push(ItemState { pos: p, kind: ic.kind });
+                placed += 1;
+            }
         }
     }
 
     items
+}
+
+/// Grow a connected blob of up to `size` free, un-taken tiles starting at `seed`
+/// (8-connected BFS). Marks every chosen tile in `taken` and returns them. With
+/// `size == 1` this is just `[seed]`.
+fn grow_blob(
+    seed:    GridPos,
+    size:    usize,
+    grid:    &Grid,
+    blocked: &FxHashSet<GridPos>,
+    taken:   &mut FxHashSet<GridPos>,
+) -> Vec<GridPos> {
+    let mut blob = vec![seed];
+    taken.insert(seed);
+    let mut i = 0;
+    while i < blob.len() && blob.len() < size {
+        let c = blob[i];
+        i += 1;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)] {
+            if blob.len() >= size { break; }
+            let np = GridPos::new(c.x + dx, c.y + dy);
+            if grid.get(np.x, np.y) == Some(Tile::Free)
+                && !blocked.contains(&np)
+                && !taken.contains(&np)
+            {
+                taken.insert(np);
+                blob.push(np);
+            }
+        }
+    }
+    blob
 }

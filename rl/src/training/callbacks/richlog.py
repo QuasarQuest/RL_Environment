@@ -54,8 +54,6 @@ def _value_style(label: str, raw: object) -> str:
     # Threshold-banded metrics need the numeric value (time rows are pre-formatted strings).
     if isinstance(raw, (int, float)):
         v = float(raw)
-        if label == "win_rate":
-            return "bold green" if v > 0 else "dim"
         if label == "exp_variance":  # 1.0 = perfect value fit, <0 = worse than mean
             return _band(v, good=0.9, warn=0.5)
         if label == "approx_kl":  # target_kl is 0.02 — flag drift past it
@@ -101,7 +99,6 @@ class _RichWriter(KVWriter):
             ("ep_reward", "game/episode_reward"),
             ("ep_length", "game/episode_length"),
             ("score", "game/score"),
-            ("win_rate", "game/win_rate"),
         ]
         train_keys = [
             ("loss", "train/loss"),

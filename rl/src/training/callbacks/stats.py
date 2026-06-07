@@ -27,14 +27,12 @@ class EpisodeStatsCallback(BaseCallback):
                 "episode_reward": float(ep["r"]),
                 "episode_length": int(ep["l"]),
                 "score": float(info.get("score", 0.0)),
-                "win": int(info.get("win", 0)),
             }
             self._writer.append(row)
 
             self.logger.record("game/episode_reward", row["episode_reward"])
             self.logger.record("game/episode_length", row["episode_length"])
             self.logger.record("game/score", row["score"])
-            self.logger.record("game/win_rate", row["win"])
 
         elapsed = max(time.time() - self._start_time, 1.0)
         self.logger.record("perf/steps_per_sec", self.num_timesteps / elapsed)

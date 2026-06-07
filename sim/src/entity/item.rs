@@ -2,7 +2,7 @@ use crate::world::coords::GridPos;
 
 /// Pickups that appear on the map. Single-agent gold rush only — no combat
 /// items (health/ammo). Gold is the objective; the rest are temporary buffs the
-/// policy can choose to detour for, plus one hazard it should avoid.
+/// policy can choose to detour for, plus one hazard the navigator routes around.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     /// The objective — carry to base to score.
@@ -12,12 +12,12 @@ pub enum ItemKind {
     Speed1,
     Speed2,
     Speed3,
-    /// Slow-down hazard — halves move speed for a window. The agent should avoid it.
-    Slow,
-    /// Score multiplier — deposits are worth 2× while active.
+    /// Score multiplier — picking one up holds a single charge that doubles the
+    /// next deposit (consumed on that deposit). See engine/pickup + physics.
     Multiplier,
     /// Trap hazard — stepping on it immobilises the agent (0 move speed) for a long
-    /// window (TRAP_TICKS). Strictly bad; the agent should learn to route around it.
+    /// window (TRAP_TICKS). Spawned in 3-tile clusters; the navigator treats trap
+    /// tiles as impassable, so the agent routes around them.
     Trap,
 }
 

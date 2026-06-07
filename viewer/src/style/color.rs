@@ -36,11 +36,10 @@ pub fn team_color(team_id: u8) -> Color {
 
 pub const ITEM_GOLD:   Color = GOLD_500;
 // Speed-boost tiers: three clearly distinct shades of green, dull → bright with
-// rarity (tier 1 common/muted, tier 3 rare/vivid). Slow hazard: red. Multiplier: purple.
+// rarity (tier 1 common/muted, tier 3 rare/vivid). Multiplier: purple.
 pub const ITEM_SPEED1: Color = Color::srgb(0.20, 0.45, 0.25); // tier 1 — dark/muted green
 pub const ITEM_SPEED2: Color = Color::srgb(0.30, 0.75, 0.35); // tier 2 — medium green
 pub const ITEM_SPEED3: Color = Color::srgb(0.45, 1.00, 0.50); // tier 3 — bright lime green
-pub const ITEM_SLOW:   Color = Color::srgb(0.90, 0.25, 0.25);
 pub const ITEM_MULT:   Color = Color::srgb(0.75, 0.40, 0.95);
 pub const ITEM_TRAP:   Color = Color::srgb(0.04, 0.04, 0.06); // near-black — immobilises, avoid
 
@@ -51,7 +50,6 @@ pub const ITEM_LEGEND: &[(&str, Color)] = &[
     ("Speed I",    ITEM_SPEED1),
     ("Speed II",   ITEM_SPEED2),
     ("Speed III",  ITEM_SPEED3),
-    ("Slow (avoid)", ITEM_SLOW),
     ("Multiplier", ITEM_MULT),
     ("Trap (avoid)", ITEM_TRAP),
 ];

@@ -1,6 +1,6 @@
-// Stage 2 — adds light obstacles and the speed/slow items. 1000-tick episodes.
-// The agent learns to detour for speed boosts (3 rarity tiers) and avoid the
-// slow-down hazard while routing gold around scattered obstacles.
+// Stage 2 — adds light obstacles and the speed items. 1000-tick episodes.
+// The agent learns to detour for speed boosts (3 rarity tiers) while routing gold
+// around scattered obstacles.
 (
     width:  50,
     height: 50,
@@ -13,7 +13,6 @@
         speed1: 0.5,
         speed2: 0.25,
         speed3: 0.1,
-        slow:   0.4,
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

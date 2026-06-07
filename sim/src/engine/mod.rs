@@ -101,14 +101,11 @@ pub struct TickRecord {
     pub discount:     f32,
     /// Gold tiles remaining on the map after this tick.
     pub gold_count:   u32,
-    /// Multiplier-use shaping bonus this tick (deposit while 2× active). Appended last
-    /// so existing trace column indices are unchanged.
-    pub r_mult:       f32,
 }
 
 /// Number of f32 columns when a `TickRecord` is flattened for FFI — keep in sync
 /// with `TickRecord` field count (see env.rs `trace_flat` and pyo3.rs `get_trace`).
-pub const TRACE_FIELDS: usize = 13;
+pub const TRACE_FIELDS: usize = 12;
 
 pub struct SimCore {
     pub grid:    Grid,
@@ -295,7 +292,6 @@ impl SimCore {
                     r_total:      r,
                     discount,
                     gold_count:   self.gold_positions.len() as u32,
-                    r_mult:       rb.mult,
                 });
             }
             discount *= gamma;
@@ -392,12 +388,13 @@ impl SimCore {
             nav_action => {
                 let goal = self.resolve_nav_goal(nav_action, clusters);
                 if let Some(goal) = goal {
+                    let blocked = trap_positions_of(&self.items);
                     let act = navigate_action(
-                        &self.agents[0], goal, &self.grid, &mut self.nav_cache,
+                        &self.agents[0], goal, &self.grid, &mut self.nav_cache, &blocked,
                     );
                     // Returns true iff the agent stepped straight into a wall.
                     physics::apply_action(
-                        &mut self.agents, &self.grid, 0, act, self.tick, Some(goal),
+                        &mut self.agents, &self.grid, 0, act, self.tick, Some(goal), &blocked,
                     )
                 } else {
                     false
@@ -453,8 +450,9 @@ impl SimCore {
 
         match target {
             Some((g, region)) => {
-                // Path-aware distance (around walls), not Chebyshev.
-                let field = nav::dist_field(&self.grid, pos);
+                // Path-aware distance (around walls and traps), not Chebyshev.
+                let blocked = trap_positions_of(&self.items);
+                let field = nav::dist_field(&self.grid, pos, &blocked);
                 let chosen_dist = nav::dist_at(&field, &self.grid, g).unwrap_or(-1);
                 let skipped_own = own_has_gold && matches!(region, Some(k) if k != own);
                 DecisionTelem { is_cluster: true, own_has_gold, skipped_own, chosen_dist }
@@ -497,13 +495,19 @@ fn gold_positions_of(items: &[ItemState]) -> Vec<GridPos> {
     items.iter().filter(|it| it.kind == ItemKind::Gold).map(|it| it.pos).collect()
 }
 
+/// Trap tiles, as a set the navigator treats as impassable (the agent routes around
+/// them). Cheap to rebuild from the current items each time it is needed.
+fn trap_positions_of(items: &[ItemState]) -> FxHashSet<GridPos> {
+    items.iter().filter(|it| it.kind == ItemKind::Trap).map(|it| it.pos).collect()
+}
+
 /// One spawn budget per item kind currently present, each refilled toward its
 /// initial on-map count. Gold uses the default probability; flavour items refill
 /// a little slower so the map doesn't saturate with buffs.
 fn build_spawn_budgets(items: &[ItemState]) -> Vec<SpawnBudget> {
     use ItemKind::*;
     let mut budgets = Vec::new();
-    for kind in [Gold, Speed1, Speed2, Speed3, Slow, Multiplier, Trap] {
+    for kind in [Gold, Speed1, Speed2, Speed3, Multiplier, Trap] {
         let target = items.iter().filter(|it| it.kind == kind).count();
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };

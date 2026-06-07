@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (11770,):
-  [0     : 10000)  main egocentric crop  — (16, 25, 25) logically
-  [10000 : 11734)  minimap               — (6, 17, 17) logically
-  [11734 : 11770)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
+  [0     : 8750)   main egocentric crop  — (14, 25, 25) logically
+  [8750  : 10195)  minimap               — (5, 17, 17) logically
+  [10195 : 10231)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -12,19 +12,19 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     2  GOLD          gold item
     3  OBSTACLE      impassable wall
     4  SPEED         speed-boost item (tier-encoded 0.33/0.66/1.0)
-    5  HAZARD        slow-down hazard item
-    6  MULT          score-multiplier item
+    5  MULT          score-multiplier item
+    6  TRAP          trap hazard item (navigator routes around these)
   Broadcast:
     7  CARRYING        gold carried
     8  BASE_DX         direction to own base X
     9  BASE_DY         direction to own base Y
     10 TIME_REMAINING  fraction of match left ∈ [0,1]
     11 SPEED_REMAINING speed buff ticks left ∈ [0,1]
-    12 SLOW_REMAINING  slow  buff ticks left ∈ [0,1]
-    13 MULT_REMAINING  mult  buff ticks left ∈ [0,1]
+    12 MULT_CHARGE     1.0 while a multiplier charge is held (spent at deposit)
+    13 TRAP_REMAINING  trap immobility ticks left ∈ [0,1]
 
   Minimap channels (5, 17, 17):
-    0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_SLOW   4  MM_MULT
+    0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_MULT   4  MM_TRAP
 
   Cluster features (36 floats = 9 regions × [dx_norm, dy_norm, pathdist_norm, count_norm]):
     One entry per fixed 3×3 map region; zero for regions with no gold. dx/dy point to
@@ -35,7 +35,7 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
 Slim architecture (v2)
 ----------------------
 Original had 13.9M parameters — 83% in a single FC stack (10816→1024→512→256).
-For a 50×50 1v1 gold-rush with 11 discrete actions this is ~9× oversized vs
+For a 50×50 gold-rush with 13 discrete actions this is ~9× oversized vs
 comparable SOTA work (Griddly 1v1: ~500k–1M, Neural MMO 128-agent: ~2–4M).
 
 Key changes vs original:
@@ -60,9 +60,9 @@ Parameter counts (features_dim=256):
   ─────────────────────────────────────────
   TOTAL      13,352,800  1,472,416      9.1×
 
-Expected FPS: ~560 → ~2000–3000 (GTX 1650 Ti, 48 envs, n_steps=128).
 Architecture is fixed across all 6 curriculum stages — sized for stage 6
 self-play, which is still well within the 1–2M param SOTA sweet spot.
+(Dev box is an RTX 4070 Laptop + i9-13900HX; stage-1 PPO is GPU-update-bound.)
 """
 from __future__ import annotations
 
@@ -72,23 +72,23 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
-# Single-agent gold rush. Crop channels: OOB, BASE, GOLD, OBSTACLE, SPEED, HAZARD,
-# MULT, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, SLOW_REM, MULT_REM.
+# Single-agent gold rush. Crop channels: OOB, BASE, GOLD, OBSTACLE, SPEED, MULT,
+# TRAP, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, MULT_CHARGE, TRAP_REM.
 
-OBS_CHANNELS = 16  # +TRAP, +TRAP_REMAINING vs the original 14 (see sim/src/rl/obs.rs)
+OBS_CHANNELS = 14  # Slow removed (-2 vs the old 16); see sim/src/rl/obs.rs
 OBS_CROP_H = 25
 OBS_CROP_W = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 10000
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8750
 
-MM_CHANNELS = 6   # obstacle, gold, speed, slow, mult, trap
+MM_CHANNELS = 5   # obstacle, gold, speed, mult, trap
 MM_H = 17
 MM_W = 17
-MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1734
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1445
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
 CLUSTER_FEATURES = CLUSTER_K * 4  # 36 — 9 regions × [dx, dy, pathdist, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 11770
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10231
 
 # Action space size. Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K region-nav
 # slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + Wait).
@@ -118,7 +118,7 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
 class AtbCnnExtractor(BaseFeaturesExtractor):
     """Three-branch extractor for egocentric crop, global minimap, and cluster features.
 
-    Input: flat (OBS_TOTAL,) = (10222,) buffer — split internally.
+    Input: flat (OBS_TOTAL,) = (10231,) buffer — split internally.
 
     Crop branch  (14, 25, 25):
       Conv(14→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
