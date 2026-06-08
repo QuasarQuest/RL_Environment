@@ -27,6 +27,13 @@ Usage
 from __future__ import annotations
 
 import os
+
+# Disable HDF5's advisory file lock before anything opens a stats/trace .h5. With a
+# read-only monitor polling the same file, the trainer's append-mode open would
+# otherwise be refused with BlockingIOError (errno 11) and abort the run. Single
+# writer + read-only monitors ⇒ safe. See monitoring/stats_writer.py for the rationale.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+
 import time
 from pathlib import Path
 

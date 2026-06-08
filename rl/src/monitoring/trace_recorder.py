@@ -41,10 +41,15 @@ CLI
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional, cast
 
-import h5py
+# Disable HDF5's advisory lock (single writer + read-only monitors ⇒ safe), so trace
+# I/O never collides with a concurrent stats reader. Must precede the h5py import.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+
+import h5py  # noqa: E402
 import numpy as np
 import torch as th
 import typer

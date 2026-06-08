@@ -15,8 +15,13 @@ Options
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
+
+# Disable HDF5's advisory lock so this poller never holds a read lock that blocks the
+# trainer's concurrent append. Must precede the h5py import below.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 import numpy as np
 import typer
