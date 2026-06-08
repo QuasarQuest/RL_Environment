@@ -26,71 +26,48 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
 /// the agent made no progress this tick. Stalls for any other reason (slowed this
 /// tick, `Wait`) are NOT wall hits, so they incur no wall penalty.
 ///
-/// `stop_at` is the agent's navigation target this tick: a multi-tile (speed-buff)
-/// move halts the instant it lands on that tile rather than sailing past it. Without
-/// this a 2-tile move steps OVER its goal — pickup/auto_deposit check only the final
-/// position, so the agent would skip its gold/base and oscillate around it forever.
-///
-/// `blocked` is the set of trap tiles. A* already routes around them, but a 2-tile
-/// speed move could overshoot a turn and land ON a trap the path turned away from —
-/// so the move also halts before entering any blocked tile.
+/// Movement is capped at a single tile per tick — the movement cadence (base vs.
+/// speed-buffed) is handled upstream in the engine's move-energy accumulator, so this
+/// just executes the one step the engine decided to take this tick. With at most one
+/// tile of travel a move can no longer overshoot a turn, so `stop_at`/`blocked` are
+/// only light guards: `stop_at` is the navigation goal (we never step off it once
+/// reached) and `blocked` is the set of trap tiles the move refuses to enter even if
+/// A* briefly points at one (e.g. a trap that just spawned onto the next waypoint).
 pub fn apply_action(
     agents:  &mut Vec<AgentState>,
     grid:    &Grid,
     idx:     usize,
     action:  Action,
-    tick:    u64,
+    _tick:   u64,
     stop_at: Option<GridPos>,
     blocked: &FxHashSet<GridPos>,
 ) -> bool {
     match action {
-        Action::Move(dir) => apply_move(agents, grid, idx, dir, tick, stop_at, blocked),
+        Action::Move(dir) => apply_move(agents, grid, idx, dir, stop_at, blocked),
         Action::Wait      => false,
     }
 }
 
-/// Returns `true` iff the agent stepped directly into a wall (first step blocked,
-/// no progress made this tick).
+/// Move one tile in `dir`. Returns `true` iff the step was blocked by a wall (the
+/// agent stepped straight into it and made no progress).
 fn apply_move(
     agents:  &mut Vec<AgentState>,
     grid:    &Grid,
     idx:     usize,
     dir:     Dir,
-    tick:    u64,
     stop_at: Option<GridPos>,
     blocked: &FxHashSet<GridPos>,
 ) -> bool {
-    let moves = movement_tiles(&agents[idx], tick);
-    if moves == 0 { return false; } // couldn't move this tick (trapped) — not a wall hit
+    if stop_at == Some(agents[idx].pos) { return false; } // already on the goal
 
     let (dx, dy) = dir.delta();
-    let mut moved = false;
-    for _ in 0..moves {
-        if stop_at == Some(agents[idx].pos) { break; }
-        let next = agents[idx].pos.apply_delta(dx, dy);
-        if !grid.is_walkable(next.x, next.y) {
-            // Blocked by a wall — a wall hit only if no progress was made at all
-            // this tick (the agent stepped straight into the wall).
-            return !moved;
-        }
-        // Don't sail a multi-tile move onto a trap the path routed around.
-        if blocked.contains(&next) { break; }
-        agents[idx].pos = next;
-        moved = true;
-        if stop_at == Some(next) { break; }
+    let next = agents[idx].pos.apply_delta(dx, dy);
+    if !grid.is_walkable(next.x, next.y) {
+        return true; // stepped straight into a wall — no progress this tick
     }
+    if blocked.contains(&next) { return false; } // trap ahead — refuse to step on it
+    agents[idx].pos = next;
     false
-}
-
-/// How many tiles the agent moves this tick.
-///   trap_buff active  : 0 tiles — fully immobilised (dominates everything)
-///   speed_buff active : 2 tiles
-///   base              : 1 tile
-fn movement_tiles(a: &AgentState, _tick: u64) -> u32 {
-    if a.trap_buff > 0 {
-        return 0; // trapped — cannot move at all until the trap window expires
-    }
-    if a.speed_buff > 0 { 2 } else { 1 }
 }
 
 // ── Deposit ───────────────────────────────────────────────────────────────────

@@ -74,19 +74,15 @@ impl Default for ObstacleConfig {
 // ── Item density ──────────────────────────────────────────────────────────────
 //
 // Per-kind spawn density, expressed as items per 100 free tiles. Gold is the
-// objective; the three speed tiers, the slow hazard and the multiplier are the
-// gold-rush flavour items. Rarer tiers simply get a lower density.
+// objective; the speed boost, the multiplier and the trap hazard are the gold-rush
+// flavour items.
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemDensityConfig {
     #[serde(default = "default_gold_density")]
     pub gold: f32,
     #[serde(default)]
-    pub speed1: f32,
-    #[serde(default)]
-    pub speed2: f32,
-    #[serde(default)]
-    pub speed3: f32,
+    pub speed: f32,
     #[serde(default)]
     pub multiplier: f32,
     #[serde(default)]
@@ -95,7 +91,7 @@ pub struct ItemDensityConfig {
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, speed1: 0.0, speed2: 0.0, speed3: 0.0, multiplier: 0.0, trap: 0.0 }
+        Self { gold: DEFAULT_GOLD_DENSITY, speed: 0.0, multiplier: 0.0, trap: 0.0 }
     }
 }
 
@@ -109,9 +105,7 @@ impl ItemDensityConfig {
             }
         };
         push(ItemKind::Gold,       self.gold);
-        push(ItemKind::Speed1,     self.speed1);
-        push(ItemKind::Speed2,     self.speed2);
-        push(ItemKind::Speed3,     self.speed3);
+        push(ItemKind::Speed,      self.speed);
         push(ItemKind::Multiplier, self.multiplier);
         push(ItemKind::Trap,       self.trap);
         out

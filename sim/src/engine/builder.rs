@@ -60,6 +60,7 @@ pub fn build_episode(cfg: &WorldConfig, rng: &mut SmallRng) -> WorldSnapshot {
         gold_carried: 0,
         score:        0,
         speed_buff:   0,
+        move_energy:  0,
         mult_charge:  0,
         trap_buff:    0,
         spawn_pos:    base,

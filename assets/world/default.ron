@@ -1,19 +1,18 @@
 // Default config — loaded by the viewer. Showcase map with every item type so all
-// mechanics are visible: gold, the three speed tiers, the score multiplier (a charge
-// that doubles the next deposit) and the Trap (black; 3-tile clusters the navigator
-// routes around, immobilises 250 ticks if stepped on). Base randomised per episode.
+// mechanics are visible: gold, the speed item, the score multiplier (a charge that
+// doubles the next deposit) and the Trap (black; 3-tile clusters the navigator routes
+// around, immobilises 250 ticks if stepped on). Base randomised per episode.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 1500,
+    match_duration_ticks: 3000,
 
     obstacles: ( density: 0.15, profile: Mixed ),
 
+    // One speed item; density trimmed ~20% (0.15 → 0.12).
     item_density: (
         gold:       0.5,
-        speed1:     0.15,
-        speed2:     0.1,
-        speed3:     0.05,
+        speed:      0.12,
         multiplier: 0.05,
         trap:       0.05,
     ),

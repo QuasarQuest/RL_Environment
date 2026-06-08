@@ -232,6 +232,7 @@ mod tests {
             gold_carried: 0,
             score:        0,
             speed_buff:   0,
+            move_energy:  0,
             mult_charge:  0,
             trap_buff:    0,
             spawn_pos:    pos,
@@ -295,10 +296,13 @@ mod tests {
         }
     }
 
-    /// End-to-end: with a permanent 2-tile (speed-buff) move the agent must still
-    /// reach the goal — overshoots are re-synced, never a permanent stall.
+    /// End-to-end navigation-robustness stress test: even if the caller advances the
+    /// agent two tiles per step (overshooting turns in the cached path), navigate_action
+    /// must re-sync and still reach the goal — never a permanent stall. The live sim now
+    /// caps movement at one tile/tick (the move-energy cadence), so this is a defensive
+    /// guard rather than the speed-buff path it originally modelled.
     #[test]
-    fn speed_buffed_navigation_reaches_goal() {
+    fn overshooting_navigation_reaches_goal() {
         let grid  = Grid::new(20, 20);
         let mut agent = agent_at(GridPos::new(1, 1));
         let goal  = GridPos::new(17, 12); // off-axis → the path turns
@@ -307,7 +311,7 @@ mod tests {
         let mut ticks = 0;
         while agent.pos != goal && ticks < 500 {
             match navigate_action(&agent, goal, &grid, &mut cache, &no_blocked()) {
-                Action::Move(dir) => step_move(&mut agent, &grid, dir, 2, goal), // 2 = speed buff
+                Action::Move(dir) => step_move(&mut agent, &grid, dir, 2, goal), // 2-tile overshoot stress
                 Action::Wait      => {}
             }
             ticks += 1;

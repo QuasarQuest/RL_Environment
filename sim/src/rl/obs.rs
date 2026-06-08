@@ -17,7 +17,7 @@
 //    1  BASE       own base tile
 //    2  GOLD       gold item
 //    3  OBSTACLE   impassable wall
-//    4  SPEED      speed-boost item, tier-encoded (Speed1=0.33, Speed2=0.66, Speed3=1.0)
+//    4  SPEED      speed-boost item (1.0 where present)
 //    5  MULT       score-multiplier item
 //    6  TRAP       trap hazard item (the navigator routes around these)
 //

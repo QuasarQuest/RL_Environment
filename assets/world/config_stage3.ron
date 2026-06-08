@@ -1,20 +1,20 @@
-// Stage 3 — full item mix + denser obstacles. 1500-tick episodes. Mirrors the
-// viewer showcase (default.ron): on top of stage 2's speed boosts it adds the score
+// Stage 3 — full item mix + denser obstacles. 3000-tick episodes (doubled from 1500
+// for the half-rate movement cadence). Mirrors the
+// viewer showcase (default.ron): on top of stage 2's speed boost it adds the score
 // multiplier (a charge that doubles the next deposit) AND the Trap hazard. Traps
 // spawn as 3-tile clusters and are impassable to the navigator, so they reshape
 // corridors; stepping on one (when unavoidable) immobilises for 250 ticks.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 1500,
+    match_duration_ticks: 3000,
 
     obstacles: ( density: 0.15, profile: Mixed ),
 
+    // One speed item; density trimmed ~20% (0.4 → 0.32).
     item_density: (
         gold:       1.0,
-        speed1:     0.4,
-        speed2:     0.2,
-        speed3:     0.1,
+        speed:      0.32,
         multiplier: 0.2,
         trap:       0.2,
     ),

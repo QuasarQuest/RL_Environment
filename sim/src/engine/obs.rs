@@ -35,16 +35,6 @@ use crate::world::tile::Tile;
 // Normaliser for cluster gold count (agent rarely sees more than this in one cluster).
 const CLUSTER_COUNT_NORM: f32 = 25.0;
 
-/// Crop-channel value for a speed item, encoding the tier in [0,1].
-fn speed_tier_value(kind: ItemKind) -> f32 {
-    match kind {
-        ItemKind::Speed1 => 1.0 / 3.0,
-        ItemKind::Speed2 => 2.0 / 3.0,
-        ItemKind::Speed3 => 1.0,
-        _ => 0.0,
-    }
-}
-
 pub fn build_obs_into(
     buf:            &mut [f32],
     agent:          &AgentState,
@@ -122,8 +112,7 @@ pub fn build_obs_into(
         let cy = it.pos.y - ay + centre;
         if !in_crop(cx, cy) { continue; }
         match it.kind {
-            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 =>
-                buf[pixel(CH_SPEED, cx, cy)] = speed_tier_value(it.kind),
+            ItemKind::Speed      => buf[pixel(CH_SPEED, cx, cy)] = 1.0,
             ItemKind::Multiplier => buf[pixel(CH_MULT, cx, cy)] = 1.0,
             ItemKind::Trap       => buf[pixel(CH_TRAP, cx, cy)] = 1.0,
             ItemKind::Gold       => {} // already drawn from gold_positions
@@ -211,7 +200,7 @@ fn build_minimap(
     // Flavour items.
     for it in items {
         let ch = match it.kind {
-            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 => MM_CH_SPEED,
+            ItemKind::Speed      => MM_CH_SPEED,
             ItemKind::Multiplier => MM_CH_MULT,
             ItemKind::Trap       => MM_CH_TRAP,
             ItemKind::Gold       => continue,

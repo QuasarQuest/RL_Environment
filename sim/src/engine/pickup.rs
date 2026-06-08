@@ -2,7 +2,7 @@
 //
 // Item pickup logic — applied after movement each tick.
 
-use crate::config::{AGENT_MAX_GOLD, MULT_CHARGE_MAX, SPEED1_TICKS, SPEED2_TICKS, SPEED3_TICKS, TRAP_TICKS};
+use crate::config::{AGENT_MAX_GOLD, MULT_CHARGE_MAX, SPEED_TICKS, TRAP_TICKS};
 use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 
@@ -23,9 +23,7 @@ pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
                     }
                     // Buffs extend rather than reset: never cut short a window already
                     // running longer than the one just picked up.
-                    ItemKind::Speed1 => { a.speed_buff = a.speed_buff.max(SPEED1_TICKS); true }
-                    ItemKind::Speed2 => { a.speed_buff = a.speed_buff.max(SPEED2_TICKS); true }
-                    ItemKind::Speed3 => { a.speed_buff = a.speed_buff.max(SPEED3_TICKS); true }
+                    ItemKind::Speed => { a.speed_buff = a.speed_buff.max(SPEED_TICKS); true }
                     // Hold a single multiplier charge — consumed on the next deposit.
                     // Leave a second one on the map (don't pick up) when already at
                     // capacity, so it isn't wasted.

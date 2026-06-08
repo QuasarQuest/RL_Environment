@@ -1,10 +1,11 @@
 // Stage 1 — single-agent gold rush. Open 50×50 map, gold only, no obstacles.
-// Short 500-tick episodes: enough to explore and learn pick-up → deposit routing.
+// 1000-tick episodes: enough to explore and learn pick-up → deposit routing. (Doubled
+// from 500 for the half-rate movement cadence, so the agent covers the same ground.)
 // Base position is randomised per episode inside a 7×7 spawn pocket (engine/builder.rs).
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 500,
+    match_duration_ticks: 1000,
 
     obstacles: ( density: 0.0, profile: None ),
 

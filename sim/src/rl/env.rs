@@ -224,9 +224,7 @@ impl BatchEnv {
         self.envs[i].items.iter()
             .map(|it| (it.pos.x, it.pos.y, match it.kind {
                 ItemKind::Gold       => 0,
-                ItemKind::Speed1     => 1,
-                ItemKind::Speed2     => 2,
-                ItemKind::Speed3     => 3,
+                ItemKind::Speed      => 1,
                 ItemKind::Multiplier => 4,
                 ItemKind::Trap       => 5,
             }))

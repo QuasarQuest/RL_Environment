@@ -43,8 +43,15 @@ pub struct AgentState {
     pub pos:          GridPos,
     pub gold_carried: u8,
     pub score:        u32,
-    /// Ticks of 2× move speed remaining (0 = none). Set by Speed{1,2,3} pickups.
+    /// Ticks of the speed buff remaining (0 = none). While >0 the agent moves at the
+    /// full per-tick cadence (one tile every tick) instead of the base half-cadence.
+    /// Set by the Speed pickup.
     pub speed_buff:   u16,
+    /// Movement-cadence accumulator. Each tick gains MOVE_ENERGY_BASE (or
+    /// MOVE_ENERGY_SPEED while speed-buffed); the agent steps one tile and subtracts
+    /// MOVE_ENERGY_STEP whenever it reaches that threshold. Caps movement at one
+    /// tile/tick so a speed buff is "twice as often", never "twice as far".
+    pub move_energy:  u8,
     /// Held score-multiplier charges (0 or MULT_CHARGE_MAX). Set by the Multiplier
     /// pickup, consumed one-per-deposit to double that deposit's value.
     pub mult_charge:  u8,

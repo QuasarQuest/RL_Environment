@@ -36,7 +36,7 @@ use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 use rustc_hash::FxHashSet;
 
-use crate::config::AGENT_MAX_GOLD;
+use crate::config::{AGENT_MAX_GOLD, MOVE_ENERGY_BASE, MOVE_ENERGY_SPEED, MOVE_ENERGY_STEP};
 use crate::entity::item::ItemKind;
 use crate::rl::action::{
     int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_SIZE,
@@ -51,8 +51,10 @@ use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
 
 /// Maximum sim ticks a single navigation option runs before control returns to
-/// the policy. Generous enough to cross the map with margin.
-pub const MAX_OPTION_TICKS: u64 = 96;
+/// the policy. Generous enough to cross the map with margin — at the base movement
+/// cadence (one tile every other tick) ~192 ticks covers ~96 tiles of travel, so a
+/// far-corner goal on a 50×50 map is still reachable inside one option.
+pub const MAX_OPTION_TICKS: u64 = 192;
 
 /// Per-decision telemetry, captured at each option boundary (the moment the policy
 /// commits to a high-level action). Used to answer "does the agent skip nearby gold
@@ -118,6 +120,13 @@ pub struct SimCore {
     prev_score:  u32,
     prev_pos:    GridPos,
 
+    /// True while the agent is actively pursuing its nav goal — it either stepped or
+    /// is resting between movement-cadence steps. The option loop keeps running while
+    /// this holds and ends the option once it goes false (arrival, a wall block, or no
+    /// valid target). Replaces the old "position unchanged ⇒ arrived" inference, which
+    /// the half-cadence base movement would otherwise trip on every rest tick.
+    en_route:    bool,
+
     /// Telemetry for the most recent high-level decision (option boundary).
     last_decision: DecisionTelem,
     /// Sim ticks the most recent option ran (for SMDP γ^k cross-option discounting).
@@ -178,6 +187,7 @@ impl SimCore {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
+            en_route: false,
             last_decision: DecisionTelem::default(),
             last_option_ticks: 1,
             gold_positions, spawn_budgets, spawn_block,
@@ -207,6 +217,7 @@ impl SimCore {
         self.prev_gold  = 0;
         self.prev_score = 0;
         self.prev_pos   = self.agents[0].pos;
+        self.en_route   = false;
         self.last_decision = DecisionTelem::default();
 
         self.build_observation();
@@ -304,8 +315,10 @@ impl SimCore {
             if self.agents[0].gold_carried != self.prev_gold
                 || self.agents[0].score    != self.prev_score
             { break false; }
-            // No movement this tick → arrived at the goal, blocked, or no valid target.
-            if self.agents[0].pos == self.prev_pos { break false; }
+            // Option ends once the agent stops pursuing its goal — arrived, wall-blocked
+            // or no valid target. A cadence "rest" tick (no step, but still en route)
+            // is NOT an ending, so the option survives the base half-speed movement.
+            if !self.en_route { break false; }
         };
         self.last_option_ticks = option_ticks;
         self.build_observation();
@@ -375,32 +388,61 @@ impl SimCore {
         );
     }
 
-    /// Resolve the RL action to a navigation goal and execute one A* step toward it.
-    /// Returns `wall_hit` — true when a Move was attempted but the agent did not
-    /// advance (blocked). `Wait` and goals with no valid target are no-ops.
+    /// Resolve the RL action to a navigation goal and, subject to the movement
+    /// cadence, execute at most one A* step toward it. Returns `wall_hit` — true when
+    /// a step was attempted but the agent walked straight into a wall. As a side effect
+    /// sets `self.en_route` (see the field doc): true while the agent is still pursuing
+    /// the goal (it stepped, or it is resting between cadence steps), false once it has
+    /// arrived, is wall-blocked, is trapped, or has no valid target.
+    ///
+    /// Movement cadence: each tick the agent gains move energy (base vs. speed-buffed)
+    /// and only steps a tile once it reaches `MOVE_ENERGY_STEP`. Base steps every other
+    /// tick; a speed buff steps every tick — capped at one tile/tick so a speed move
+    /// never teleports two tiles.
     fn apply_rl_action(
         &mut self,
         rl_action: RlAction,
         clusters:  &[Option<GoldCluster>; CLUSTER_K],
     ) -> bool {
-        match rl_action {
-            RlAction::Wait => false,
-            nav_action => {
-                let goal = self.resolve_nav_goal(nav_action, clusters);
-                if let Some(goal) = goal {
-                    let blocked = trap_positions_of(&self.items);
-                    let act = navigate_action(
-                        &self.agents[0], goal, &self.grid, &mut self.nav_cache, &blocked,
-                    );
-                    // Returns true iff the agent stepped straight into a wall.
-                    physics::apply_action(
-                        &mut self.agents, &self.grid, 0, act, self.tick, Some(goal), &blocked,
-                    )
-                } else {
-                    false
-                }
-            }
+        let nav_action = match rl_action {
+            RlAction::Wait => { self.en_route = false; return false; }
+            nav => nav,
+        };
+
+        // Fully immobilised by a trap — no movement this tick, and the option should
+        // hand control back rather than spin in place for the whole trap window.
+        if self.agents[0].trap_buff > 0 {
+            self.en_route = false;
+            return false;
         }
+
+        // Advance the movement-cadence accumulator; rest this tick if it hasn't yet
+        // reached the step threshold (still en route — the option keeps running).
+        let rate = if self.agents[0].speed_buff > 0 { MOVE_ENERGY_SPEED } else { MOVE_ENERGY_BASE };
+        self.agents[0].move_energy = self.agents[0].move_energy.saturating_add(rate);
+        if self.agents[0].move_energy < MOVE_ENERGY_STEP {
+            self.en_route = true;
+            return false;
+        }
+        self.agents[0].move_energy -= MOVE_ENERGY_STEP;
+
+        let Some(goal) = self.resolve_nav_goal(nav_action, clusters) else {
+            self.en_route = false; // no valid target
+            return false;
+        };
+
+        let blocked = trap_positions_of(&self.items);
+        let act = navigate_action(
+            &self.agents[0], goal, &self.grid, &mut self.nav_cache, &blocked,
+        );
+        let prev = self.agents[0].pos;
+        // Returns true iff the agent stepped straight into a wall.
+        let wall_hit = physics::apply_action(
+            &mut self.agents, &self.grid, 0, act, self.tick, Some(goal), &blocked,
+        );
+        // Still en route only if the step made progress; arrival/blockage ends the option.
+        self.en_route = self.agents[0].pos != prev;
+        wall_hit
     }
 
     /// Resolve a navigation RlAction to a concrete GridPos target.
@@ -507,7 +549,7 @@ fn trap_positions_of(items: &[ItemState]) -> FxHashSet<GridPos> {
 fn build_spawn_budgets(items: &[ItemState]) -> Vec<SpawnBudget> {
     use ItemKind::*;
     let mut budgets = Vec::new();
-    for kind in [Gold, Speed1, Speed2, Speed3, Multiplier, Trap] {
+    for kind in [Gold, Speed, Multiplier, Trap] {
         let target = items.iter().filter(|it| it.kind == kind).count();
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };

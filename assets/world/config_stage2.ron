@@ -1,18 +1,17 @@
-// Stage 2 — adds light obstacles and the speed items. 1000-tick episodes.
-// The agent learns to detour for speed boosts (3 rarity tiers) while routing gold
-// around scattered obstacles.
+// Stage 2 — adds light obstacles and the speed item. 2000-tick episodes (doubled
+// from 1000 for the half-rate movement cadence). The agent learns to detour for the
+// single speed boost (one tile every tick while active) around scattered obstacles.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 1000,
+    match_duration_ticks: 2000,
 
     obstacles: ( density: 0.06, profile: Mixed ),
 
+    // One speed item; density trimmed ~20% (0.5 → 0.4).
     item_density: (
-        gold:   2.0,
-        speed1: 0.5,
-        speed2: 0.25,
-        speed3: 0.1,
+        gold:  2.0,
+        speed: 0.4,
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

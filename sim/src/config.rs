@@ -24,19 +24,31 @@ pub const DEFAULT_TICKS_PER_SECOND: f32 = 10.0;
 pub const AGENT_MAX_GOLD:      u8  = 5;
 
 // ── Item buffs (ticks) ─────────────────────────────────────────────────────────
-// Speed boosts: all give 2× move speed; the three tiers differ only in how long
-// the window lasts (rarer tier → longer). SPEED_BUFF_MAX is the normaliser for the
-// speed obs channel. (The old Slow hazard was removed.)
-pub const SPEED1_TICKS: u16 =  40;
-pub const SPEED2_TICKS: u16 =  80;
-pub const SPEED3_TICKS: u16 = 160;
+// Speed boost: a single speed item. While the buff is active the agent moves at the
+// full per-tick cadence (a step every tick) instead of the base half-cadence (a step
+// every other tick) — a 2× speed-up that never teleports two tiles (see the movement
+// cadence constants below). SPEED_BUFF_MAX is the normaliser for the speed obs
+// channel. (The old Slow hazard was removed.)
+pub const SPEED_TICKS: u16 = 160;
+
+// ── Movement cadence (energy system) ────────────────────────────────────────────
+// The agent never moves more than one tile per tick. Each tick it accumulates move
+// energy and steps one tile the moment that energy reaches MOVE_ENERGY_STEP, then
+// subtracts the threshold. Base gains MOVE_ENERGY_BASE/tick → a step every other
+// tick; an active speed buff gains MOVE_ENERGY_SPEED/tick → a step every tick. Same
+// 2× advantage as the old two-tile jump, but capped at one tile/tick so a speed move
+// can never overshoot a turn or sail onto a trap the path routed around.
+pub const MOVE_ENERGY_STEP:  u8 = 2;
+pub const MOVE_ENERGY_BASE:  u8 = 1;
+pub const MOVE_ENERGY_SPEED: u8 = 2;
+
 /// Trap immobilises the agent completely (0 tiles/tick) for this many ticks. The
 /// navigator routes around trap tiles (engine/nav.rs), so this only bites when a
 /// trap is unavoidable or spawns under the agent.
 pub const TRAP_TICKS:   u16 = 250;
 
 /// Normalisers for the buff-remaining observation channels (longest window per buff).
-pub const SPEED_BUFF_MAX: u16 = SPEED3_TICKS;
+pub const SPEED_BUFF_MAX: u16 = SPEED_TICKS;
 pub const TRAP_BUFF_MAX:  u16 = TRAP_TICKS;
 
 /// The score multiplier is a consumable charge (not a timed window): picking one up
