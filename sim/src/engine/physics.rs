@@ -2,8 +2,6 @@
 //
 // Agent movement, buff ticking and deposit. Single-agent gold rush — no combat.
 
-use rustc_hash::FxHashSet;
-
 use crate::config::DEPOSIT_MULTIPLIER;
 use crate::entity::agent::{Action, AgentState, Dir};
 use crate::world::{coords::GridPos, grid::Grid, tile::Tile};
@@ -15,7 +13,6 @@ use crate::world::{coords::GridPos, grid::Grid, tile::Tile};
 pub fn tick_buffs(agents: &mut [AgentState]) {
     for a in agents {
         if a.speed_buff > 0 { a.speed_buff -= 1; }
-        if a.trap_buff  > 0 { a.trap_buff  -= 1; }
     }
 }
 
@@ -29,10 +26,8 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
 /// Movement is capped at a single tile per tick — the movement cadence (base vs.
 /// speed-buffed) is handled upstream in the engine's move-energy accumulator, so this
 /// just executes the one step the engine decided to take this tick. With at most one
-/// tile of travel a move can no longer overshoot a turn, so `stop_at`/`blocked` are
-/// only light guards: `stop_at` is the navigation goal (we never step off it once
-/// reached) and `blocked` is the set of trap tiles the move refuses to enter even if
-/// A* briefly points at one (e.g. a trap that just spawned onto the next waypoint).
+/// tile of travel a move can no longer overshoot a turn, so `stop_at` is only a light
+/// guard: it is the navigation goal, which the agent never steps off once reached.
 pub fn apply_action(
     agents:  &mut Vec<AgentState>,
     grid:    &Grid,
@@ -40,10 +35,9 @@ pub fn apply_action(
     action:  Action,
     _tick:   u64,
     stop_at: Option<GridPos>,
-    blocked: &FxHashSet<GridPos>,
 ) -> bool {
     match action {
-        Action::Move(dir) => apply_move(agents, grid, idx, dir, stop_at, blocked),
+        Action::Move(dir) => apply_move(agents, grid, idx, dir, stop_at),
         Action::Wait      => false,
     }
 }
@@ -56,7 +50,6 @@ fn apply_move(
     idx:     usize,
     dir:     Dir,
     stop_at: Option<GridPos>,
-    blocked: &FxHashSet<GridPos>,
 ) -> bool {
     if stop_at == Some(agents[idx].pos) { return false; } // already on the goal
 
@@ -65,7 +58,6 @@ fn apply_move(
     if !grid.is_walkable(next.x, next.y) {
         return true; // stepped straight into a wall — no progress this tick
     }
-    if blocked.contains(&next) { return false; } // trap ahead — refuse to step on it
     agents[idx].pos = next;
     false
 }

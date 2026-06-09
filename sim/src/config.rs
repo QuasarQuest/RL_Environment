@@ -37,29 +37,19 @@ pub const SPEED_TICKS: u16 = 160;
 // subtracts the threshold. Base gains MOVE_ENERGY_BASE/tick → a step every other
 // tick; an active speed buff gains MOVE_ENERGY_SPEED/tick → a step every tick. Same
 // 2× advantage as the old two-tile jump, but capped at one tile/tick so a speed move
-// can never overshoot a turn or sail onto a trap the path routed around.
+// can never overshoot a turn.
 pub const MOVE_ENERGY_STEP:  u8 = 2;
 pub const MOVE_ENERGY_BASE:  u8 = 1;
 pub const MOVE_ENERGY_SPEED: u8 = 2;
 
-/// Trap immobilises the agent completely (0 tiles/tick) for this many ticks. The
-/// navigator routes around trap tiles (engine/nav.rs), so this only bites when a
-/// trap is unavoidable or spawns under the agent.
-pub const TRAP_TICKS:   u16 = 250;
-
-/// Normalisers for the buff-remaining observation channels (longest window per buff).
+/// Normaliser for the speed-remaining observation channel (longest buff window).
 pub const SPEED_BUFF_MAX: u16 = SPEED_TICKS;
-pub const TRAP_BUFF_MAX:  u16 = TRAP_TICKS;
 
 /// The score multiplier is a consumable charge (not a timed window): picking one up
 /// holds a single charge; the next deposit consumes it and is worth this many times
 /// its gold. Capacity is intentionally 1 — "use it on your next bank".
 pub const DEPOSIT_MULTIPLIER: u32 = 2;
 pub const MULT_CHARGE_MAX:    u8  = 1;
-
-/// Traps spawn as connected blobs of this many adjacent tiles (instead of single
-/// tiles), so a cluster can seal a corridor and force the navigator to detour.
-pub const TRAP_CLUSTER_SIZE: usize = 3;
 
 // ── Viewer-compat constant ──────────────────────────────────────────────────────
 // Combat is gone, but the agent's inert `hearts` field (read only by the viewer's

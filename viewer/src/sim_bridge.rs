@@ -477,11 +477,10 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
 }
 
 fn item_color(kind: ItemKind) -> Color {
-    use crate::style::color::{ITEM_GOLD, ITEM_MULT, ITEM_SPEED, ITEM_TRAP};
+    use crate::style::color::{ITEM_GOLD, ITEM_MULT, ITEM_SPEED};
     match kind {
         ItemKind::Gold       => ITEM_GOLD,
         ItemKind::Speed      => ITEM_SPEED,
         ItemKind::Multiplier => ITEM_MULT,
-        ItemKind::Trap       => ITEM_TRAP,
     }
 }

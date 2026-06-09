@@ -74,8 +74,7 @@ impl Default for ObstacleConfig {
 // ── Item density ──────────────────────────────────────────────────────────────
 //
 // Per-kind spawn density, expressed as items per 100 free tiles. Gold is the
-// objective; the speed boost, the multiplier and the trap hazard are the gold-rush
-// flavour items.
+// objective; the speed boost and the multiplier are the gold-rush flavour items.
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ItemDensityConfig {
@@ -85,13 +84,11 @@ pub struct ItemDensityConfig {
     pub speed: f32,
     #[serde(default)]
     pub multiplier: f32,
-    #[serde(default)]
-    pub trap: f32,
 }
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, speed: 0.0, multiplier: 0.0, trap: 0.0 }
+        Self { gold: DEFAULT_GOLD_DENSITY, speed: 0.0, multiplier: 0.0 }
     }
 }
 
@@ -107,7 +104,6 @@ impl ItemDensityConfig {
         push(ItemKind::Gold,       self.gold);
         push(ItemKind::Speed,      self.speed);
         push(ItemKind::Multiplier, self.multiplier);
-        push(ItemKind::Trap,       self.trap);
         out
     }
 }

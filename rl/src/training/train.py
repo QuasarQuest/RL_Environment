@@ -34,6 +34,7 @@ import os
 # writer + read-only monitors ⇒ safe. See monitoring/stats_writer.py for the rationale.
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
+import math
 import time
 from pathlib import Path
 
@@ -183,6 +184,47 @@ os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 register_configs()
 
 
+def _env_option_gamma(vec_env) -> float | None:
+    """Read the env's intra-option discount (reward.option_gamma) from the Rust core.
+
+    Walks down VecEnv wrappers (e.g. VecNormalize) to the BatchVecEnv, whose
+    ``.batch.reward_weights()`` returns (tick, pickup, deposit, wall_hit, option_gamma).
+    Returns None if no introspectable batch env is found (check is then skipped).
+    """
+    env = vec_env
+    for _ in range(8):
+        if env is None:
+            break
+        if hasattr(env, "batch"):
+            return float(env.batch.reward_weights()[4])
+        env = getattr(env, "venv", None)
+    return None
+
+
+def _assert_gamma_consistency(vec_env, ppo_gamma: float) -> None:
+    """Fail fast if PPO γ (yaml) and the env's intra-option γ (RON) disagree.
+
+    These are the SAME per-tick discount applied at two levels of the option
+    hierarchy: ``reward.option_gamma`` discounts ticks WITHIN an option (the Rust
+    reward sum), and ``ppo.gamma`` discounts BETWEEN options (training/smdp.py
+    raises it to γ^option_ticks). The semi-MDP formulation is only consistent when
+    they are equal — but they live in different files (configs/ppo/*.yaml vs
+    assets/world/config_stage*.ron), so a silent desync is easy. Treat option_gamma
+    (the env) as the single source of truth and assert ppo.gamma matches it.
+    """
+    opt_gamma = _env_option_gamma(vec_env)
+    if opt_gamma is None:
+        return
+    if not math.isclose(opt_gamma, ppo_gamma, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError(
+            f"gamma mismatch: ppo.gamma={ppo_gamma} (configs/ppo/*.yaml) != "
+            f"reward.option_gamma={opt_gamma} (assets/world/config_stage*.ron). "
+            "These must match — they are one per-tick discount at two levels of the "
+            "option hierarchy (see training/smdp.py). Set ppo.gamma to the RON's "
+            "option_gamma (or vice versa) so they agree."
+        )
+
+
 @hydra.main(config_path=str(_RL_ROOT / "configs"), config_name="train", version_base="1.3")
 def train(cfg: DictConfig) -> None:
     raw: dict = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)  # type: ignore[assignment]
@@ -231,6 +273,8 @@ def train(cfg: DictConfig) -> None:
 
     # Environments.
     vec_env = build_vec_env(e_cfg)
+    # One per-tick discount, two config files — fail fast if they desync.
+    _assert_gamma_consistency(vec_env, p_cfg.gamma)
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
     eval_env = build_vec_env(e_cfg, eval_mode=True)
     eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None

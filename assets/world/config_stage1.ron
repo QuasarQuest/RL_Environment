@@ -11,5 +11,7 @@
 
     item_density: ( gold: 2.0 ),
 
-    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),
+    // option_gamma is the per-tick discount; it MUST equal ppo.gamma (configs/ppo)
+    // — one rate at two hierarchy levels, asserted at startup (training/train.py).
+    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01, option_gamma: 0.99 ),
 )

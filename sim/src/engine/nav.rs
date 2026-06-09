@@ -10,8 +10,6 @@
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::cmp::Reverse;
 
-use rustc_hash::FxHashSet;
-
 use crate::entity::agent::{AgentState, Action, Dir};
 use crate::world::coords::GridPos;
 use crate::world::grid::Grid;
@@ -38,20 +36,13 @@ fn is_walkable(grid: &Grid, x: i32, y: i32) -> bool {
     grid.get(x, y).map_or(false, |t| t.is_walkable())
 }
 
-/// A tile the agent may *enter*: walkable terrain that is not a `blocked` hazard
-/// tile (trap). The agent's current tile is never tested against `blocked`, so a
-/// trap that spawns under it never strands the pathfinder (it can still step off).
-fn passable(grid: &Grid, blocked: &FxHashSet<GridPos>, x: i32, y: i32) -> bool {
-    is_walkable(grid, x, y) && !blocked.contains(&GridPos::new(x, y))
+// Diagonal moves require both adjacent cardinal tiles to be walkable so the agent
+// can't slip through diagonal wall gaps.
+fn diagonal_clear(grid: &Grid, fx: i32, fy: i32, dx: i32, dy: i32) -> bool {
+    is_walkable(grid, fx + dx, fy) && is_walkable(grid, fx, fy + dy)
 }
 
-// Diagonal moves require both adjacent cardinal tiles to be enterable so the agent
-// can't slip through diagonal wall (or trap) gaps.
-fn diagonal_clear(grid: &Grid, blocked: &FxHashSet<GridPos>, fx: i32, fy: i32, dx: i32, dy: i32) -> bool {
-    passable(grid, blocked, fx + dx, fy) && passable(grid, blocked, fx, fy + dy)
-}
-
-fn astar(grid: &Grid, start: GridPos, goal: GridPos, blocked: &FxHashSet<GridPos>) -> VecDeque<GridPos> {
+fn astar(grid: &Grid, start: GridPos, goal: GridPos) -> VecDeque<GridPos> {
     if start == goal { return VecDeque::new(); }
 
     // Cross-product tie-breaking: nodes on the start→goal line score 0, deviating
@@ -88,10 +79,10 @@ fn astar(grid: &Grid, start: GridPos, goal: GridPos, blocked: &FxHashSet<GridPos
         for &(dx, dy, _) in &DIRS {
             let nx = current.x + dx;
             let ny = current.y + dy;
-            if dx != 0 && dy != 0 && !diagonal_clear(grid, blocked, current.x, current.y, dx, dy) {
+            if dx != 0 && dy != 0 && !diagonal_clear(grid, current.x, current.y, dx, dy) {
                 continue;
             }
-            if !passable(grid, blocked, nx, ny) { continue; }
+            if !is_walkable(grid, nx, ny) { continue; }
             let neighbor = GridPos::new(nx, ny);
             let tentative_g = g + 1;
             if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
@@ -114,7 +105,7 @@ fn astar(grid: &Grid, start: GridPos, goal: GridPos, blocked: &FxHashSet<GridPos
 /// so a plain BFS gives exact shortest path lengths. This is the "path-aware"
 /// distance the policy sees in its cluster features — unlike Chebyshev it accounts
 /// for walls, so a region that is near in straight-line but walled off reads as far.
-pub fn dist_field(grid: &Grid, start: GridPos, blocked: &FxHashSet<GridPos>) -> Vec<i32> {
+pub fn dist_field(grid: &Grid, start: GridPos) -> Vec<i32> {
     let (w, h) = (grid.width as i32, grid.height as i32);
     let mut dist = vec![-1i32; (w * h) as usize];
     if !is_walkable(grid, start.x, start.y) {
@@ -128,10 +119,10 @@ pub fn dist_field(grid: &Grid, start: GridPos, blocked: &FxHashSet<GridPos>) -> 
         let d = dist[idx(c.x, c.y)];
         for &(dx, dy, _) in &DIRS {
             let (nx, ny) = (c.x + dx, c.y + dy);
-            if dx != 0 && dy != 0 && !diagonal_clear(grid, blocked, c.x, c.y, dx, dy) {
+            if dx != 0 && dy != 0 && !diagonal_clear(grid, c.x, c.y, dx, dy) {
                 continue;
             }
-            if !passable(grid, blocked, nx, ny) {
+            if !is_walkable(grid, nx, ny) {
                 continue;
             }
             let ni = idx(nx, ny);
@@ -179,14 +170,12 @@ impl Default for NavCache {
     fn default() -> Self { Self { path: VecDeque::new(), cached_goal: None } }
 }
 
-/// Navigate one step toward `target` using cached A*. `blocked` is the set of
-/// trap tiles the agent routes around (impassable to the pathfinder).
+/// Navigate one step toward `target` using cached A*.
 pub fn navigate_action(
     agent:   &AgentState,
     target:  GridPos,
     grid:    &Grid,
     cache:   &mut NavCache,
-    blocked: &FxHashSet<GridPos>,
 ) -> Action {
     // Pop stale front nodes (agent already there after a multi-tile move).
     while cache.path.front() == Some(&agent.pos) {
@@ -202,13 +191,8 @@ pub fn navigate_action(
     // "valid A* path but agent never moves" bug).
     let off_path = cache.path.front()
         .map_or(false, |&n| chebyshev(agent.pos, n) != 1);
-    // A trap can spawn onto a tile of the already-cached path. The path was valid
-    // when computed, so neither the goal nor `off_path` changes — recompute when the
-    // next waypoint is now a blocked (trap) tile so the agent reroutes instead of
-    // stepping straight into it.
-    let next_blocked = cache.path.front().map_or(false, |&n| blocked.contains(&n));
-    if cache.cached_goal != Some(target) || cache.path.is_empty() || off_path || next_blocked {
-        cache.path        = astar(grid, agent.pos, target, blocked);
+    if cache.cached_goal != Some(target) || cache.path.is_empty() || off_path {
+        cache.path        = astar(grid, agent.pos, target);
         cache.cached_goal = Some(target);
         while cache.path.front() == Some(&agent.pos) {
             cache.path.pop_front();
@@ -234,7 +218,6 @@ mod tests {
             speed_buff:   0,
             move_energy:  0,
             mult_charge:  0,
-            trap_buff:    0,
             spawn_pos:    pos,
             base_pos:     pos,
             team:         0,
@@ -242,9 +225,6 @@ mod tests {
             ammo:         0,
         }
     }
-
-    /// No trap tiles in these navigation unit tests.
-    fn no_blocked() -> FxHashSet<GridPos> { FxHashSet::default() }
 
     /// Replicate engine::physics movement for `moves` tiles in one direction,
     /// stopping at walls or on the navigation target `stop_at` (mirrors
@@ -283,7 +263,7 @@ mod tests {
         ]);
         cache.cached_goal = Some(goal);
 
-        let act = navigate_action(&agent, goal, &grid, &mut cache, &no_blocked());
+        let act = navigate_action(&agent, goal, &grid, &mut cache);
 
         // Pre-fix this returned Action::Wait (frozen). It must now recompute and
         // step toward the goal (eastward, the +x direction).
@@ -310,7 +290,7 @@ mod tests {
 
         let mut ticks = 0;
         while agent.pos != goal && ticks < 500 {
-            match navigate_action(&agent, goal, &grid, &mut cache, &no_blocked()) {
+            match navigate_action(&agent, goal, &grid, &mut cache) {
                 Action::Move(dir) => step_move(&mut agent, &grid, dir, 2, goal), // 2-tile overshoot stress
                 Action::Wait      => {}
             }
@@ -333,7 +313,7 @@ mod tests {
 
         let mut ticks = 0;
         while agent.pos != goal && ticks < 500 {
-            match navigate_action(&agent, goal, &grid, &mut cache, &no_blocked()) {
+            match navigate_action(&agent, goal, &grid, &mut cache) {
                 Action::Move(dir) => step_move(&mut agent, &grid, dir, 1, goal),
                 Action::Wait      => break,
             }

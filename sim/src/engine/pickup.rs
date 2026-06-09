@@ -2,7 +2,7 @@
 //
 // Item pickup logic — applied after movement each tick.
 
-use crate::config::{AGENT_MAX_GOLD, MULT_CHARGE_MAX, SPEED_TICKS, TRAP_TICKS};
+use crate::config::{AGENT_MAX_GOLD, MULT_CHARGE_MAX, SPEED_TICKS};
 use crate::entity::item::ItemKind;
 use crate::entity::{AgentState, ItemState};
 
@@ -35,7 +35,6 @@ pub fn pickup(agents: &mut Vec<AgentState>, items: &mut Vec<ItemState>) {
                             false
                         }
                     }
-                    ItemKind::Trap       => { a.trap_buff = a.trap_buff.max(TRAP_TICKS); true }
                 }
             };
             if picked { items.swap_remove(item_idx); } else { item_idx += 1; }

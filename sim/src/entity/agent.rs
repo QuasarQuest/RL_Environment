@@ -55,8 +55,6 @@ pub struct AgentState {
     /// Held score-multiplier charges (0 or MULT_CHARGE_MAX). Set by the Multiplier
     /// pickup, consumed one-per-deposit to double that deposit's value.
     pub mult_charge:  u8,
-    /// Ticks of forced immobility remaining (0 = none). Set by stepping on a Trap.
-    pub trap_buff:    u16,
     pub spawn_pos:    GridPos,
     pub base_pos:     GridPos,
 

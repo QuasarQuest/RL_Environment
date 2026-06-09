@@ -3,7 +3,7 @@
 Observation protocol
 --------------------
 Rust returns a flat bytearray of shape (n_envs * OBS_TOTAL * 4 bytes).
-np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 10231) — flat, not (C,H,W).
+np.frombuffer gives (n_envs, OBS_TOTAL) = (n_envs, 8692) — flat, not (C,H,W).
 AtbCnnExtractor in policy.py splits crop + minimap + cluster features internally.
 
 Score tracking
@@ -139,7 +139,7 @@ class BatchVecEnv(VecEnv):
         Python-managed memory. SB3's rollout buffer copies obs into its own
         preallocated storage on ``add()``, so nothing downstream aliases this view
         across steps. An extra ``.copy()`` here would be a redundant ~2.6 MB/step
-        memcpy (n_envs=64 × 10231 × 4 B).
+        memcpy (n_envs=64 × 8692 × 4 B).
         """
         return np.frombuffer(ba, dtype=_OBS_DTYPE).reshape(n, _OBS_TOTAL)
 

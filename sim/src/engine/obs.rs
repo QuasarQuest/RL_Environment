@@ -4,19 +4,17 @@
 // Writes into a caller-supplied buffer — no per-step heap allocation.
 //
 // Single-agent gold rush: the agent observes gold, the base, obstacles and the
-// three flavour items (speed boost, slow hazard, score multiplier), plus its own
-// carried gold and active buff timers.
+// two flavour items (speed boost, score multiplier), plus its own carried gold
+// and active buff timers.
 //
 // Buffer layout (OBS_TOTAL floats):
 //   [0 .. OBS_DIM)                  egocentric crop  (OBS_CHANNELS × 25 × 25)
 //   [OBS_DIM .. OBS_DIM+MM_DIM)     minimap          (MM_CHANNELS  × 17 × 17)
-//   [OBS_DIM+MM_DIM .. OBS_TOTAL)   cluster features (CLUSTER_K × 3)
+//   [OBS_DIM+MM_DIM .. OBS_TOTAL)   cluster features (CLUSTER_K × 4)
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use rustc_hash::FxHashSet;
-
-use crate::config::{AGENT_MAX_GOLD, SPEED_BUFF_MAX, TRAP_BUFF_MAX};
+use crate::config::{AGENT_MAX_GOLD, SPEED_BUFF_MAX};
 use crate::entity::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
 use crate::engine::clusters::GoldCluster;
@@ -24,8 +22,8 @@ use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
     CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_MULT,
     CH_MULT_CHARGE, CH_OBSTACLE, CH_OOB, CH_SPEED,
-    CH_SPEED_REMAINING, CH_TIME_REMAINING, CH_TRAP, CH_TRAP_REMAINING,
-    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SPEED, MM_CH_TRAP,
+    CH_SPEED_REMAINING, CH_TIME_REMAINING,
+    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SPEED,
     MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
 use crate::world::coords::GridPos;
@@ -72,8 +70,6 @@ pub fn build_obs_into(
     // Multiplier is a held charge (not a timer): 1.0 while one is banked-up to spend.
     buf[CH_MULT_CHARGE * plane..(CH_MULT_CHARGE + 1) * plane]
         .fill((agent.mult_charge > 0) as u8 as f32);
-    buf[CH_TRAP_REMAINING * plane..(CH_TRAP_REMAINING + 1) * plane]
-        .fill((agent.trap_buff as f32 / TRAP_BUFF_MAX as f32).min(1.0));
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 
@@ -105,7 +101,7 @@ pub fn build_obs_into(
         }
     }
 
-    // ── Flavour items (crop): speed / hazard / multiplier ────────────────────
+    // ── Flavour items (crop): speed / multiplier ─────────────────────────────
 
     for it in items {
         let cx = it.pos.x - ax + centre;
@@ -114,7 +110,6 @@ pub fn build_obs_into(
         match it.kind {
             ItemKind::Speed      => buf[pixel(CH_SPEED, cx, cy)] = 1.0,
             ItemKind::Multiplier => buf[pixel(CH_MULT, cx, cy)] = 1.0,
-            ItemKind::Trap       => buf[pixel(CH_TRAP, cx, cy)] = 1.0,
             ItemKind::Gold       => {} // already drawn from gold_positions
         }
     }
@@ -128,13 +123,7 @@ pub fn build_obs_into(
     // gold" used for direction + distance is the PATH-nearest (BFS around walls),
     // so the policy's distance perception is correct around obstacles.
 
-    // Trap tiles are impassable to the navigator, so path distances (and hence the
-    // agent's reachable-gold perception) route around them — see engine/nav.rs.
-    let trap_set: FxHashSet<GridPos> = items.iter()
-        .filter(|it| it.kind == ItemKind::Trap)
-        .map(|it| it.pos)
-        .collect();
-    let dist = crate::engine::nav::dist_field(grid, agent.pos, &trap_set);
+    let dist = crate::engine::nav::dist_field(grid, agent.pos);
     let path_norm = (gw + gh) as f32; // longest plausible corridor distance
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
@@ -202,7 +191,6 @@ fn build_minimap(
         let ch = match it.kind {
             ItemKind::Speed      => MM_CH_SPEED,
             ItemKind::Multiplier => MM_CH_MULT,
-            ItemKind::Trap       => MM_CH_TRAP,
             ItemKind::Gold       => continue,
         };
         let (mx, my) = to_mm(it.pos.x, it.pos.y);

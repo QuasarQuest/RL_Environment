@@ -4,7 +4,7 @@
 // (single-agent gold rush: no enemies, no combat).
 //
 // Per-tick step order (`tick_once`):
-//   tick_buffs (speed/slow/multiplier decay)
+//   tick_buffs (speed-buff decay)
 //   → find_clusters (gold clustering for this tick)
 //   → resolve RL action → A* navigate one step (or Wait)
 //   → pickup → auto_deposit → spawner
@@ -393,7 +393,7 @@ impl SimCore {
     /// a step was attempted but the agent walked straight into a wall. As a side effect
     /// sets `self.en_route` (see the field doc): true while the agent is still pursuing
     /// the goal (it stepped, or it is resting between cadence steps), false once it has
-    /// arrived, is wall-blocked, is trapped, or has no valid target.
+    /// arrived, is wall-blocked, or has no valid target.
     ///
     /// Movement cadence: each tick the agent gains move energy (base vs. speed-buffed)
     /// and only steps a tile once it reaches `MOVE_ENERGY_STEP`. Base steps every other
@@ -408,13 +408,6 @@ impl SimCore {
             RlAction::Wait => { self.en_route = false; return false; }
             nav => nav,
         };
-
-        // Fully immobilised by a trap — no movement this tick, and the option should
-        // hand control back rather than spin in place for the whole trap window.
-        if self.agents[0].trap_buff > 0 {
-            self.en_route = false;
-            return false;
-        }
 
         // Advance the movement-cadence accumulator; rest this tick if it hasn't yet
         // reached the step threshold (still en route — the option keeps running).
@@ -431,14 +424,13 @@ impl SimCore {
             return false;
         };
 
-        let blocked = trap_positions_of(&self.items);
         let act = navigate_action(
-            &self.agents[0], goal, &self.grid, &mut self.nav_cache, &blocked,
+            &self.agents[0], goal, &self.grid, &mut self.nav_cache,
         );
         let prev = self.agents[0].pos;
         // Returns true iff the agent stepped straight into a wall.
         let wall_hit = physics::apply_action(
-            &mut self.agents, &self.grid, 0, act, self.tick, Some(goal), &blocked,
+            &mut self.agents, &self.grid, 0, act, self.tick, Some(goal),
         );
         // Still en route only if the step made progress; arrival/blockage ends the option.
         self.en_route = self.agents[0].pos != prev;
@@ -492,9 +484,8 @@ impl SimCore {
 
         match target {
             Some((g, region)) => {
-                // Path-aware distance (around walls and traps), not Chebyshev.
-                let blocked = trap_positions_of(&self.items);
-                let field = nav::dist_field(&self.grid, pos, &blocked);
+                // Path-aware distance (around walls), not Chebyshev.
+                let field = nav::dist_field(&self.grid, pos);
                 let chosen_dist = nav::dist_at(&field, &self.grid, g).unwrap_or(-1);
                 let skipped_own = own_has_gold && matches!(region, Some(k) if k != own);
                 DecisionTelem { is_cluster: true, own_has_gold, skipped_own, chosen_dist }
@@ -537,19 +528,13 @@ fn gold_positions_of(items: &[ItemState]) -> Vec<GridPos> {
     items.iter().filter(|it| it.kind == ItemKind::Gold).map(|it| it.pos).collect()
 }
 
-/// Trap tiles, as a set the navigator treats as impassable (the agent routes around
-/// them). Cheap to rebuild from the current items each time it is needed.
-fn trap_positions_of(items: &[ItemState]) -> FxHashSet<GridPos> {
-    items.iter().filter(|it| it.kind == ItemKind::Trap).map(|it| it.pos).collect()
-}
-
 /// One spawn budget per item kind currently present, each refilled toward its
 /// initial on-map count. Gold uses the default probability; flavour items refill
 /// a little slower so the map doesn't saturate with buffs.
 fn build_spawn_budgets(items: &[ItemState]) -> Vec<SpawnBudget> {
     use ItemKind::*;
     let mut budgets = Vec::new();
-    for kind in [Gold, Speed, Multiplier, Trap] {
+    for kind in [Gold, Speed, Multiplier] {
         let target = items.iter().filter(|it| it.kind == kind).count();
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };

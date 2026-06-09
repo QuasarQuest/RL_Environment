@@ -1,9 +1,9 @@
 """Feature extractor networks for ATB observations (single-agent gold rush).
 
-Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
-  [0     : 8750)   main egocentric crop  — (14, 25, 25) logically
-  [8750  : 10195)  minimap               — (5, 17, 17) logically
-  [10195 : 10231)  cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
+Both extractors consume a flat float32 buffer of shape (OBS_TOTAL,) = (8692,):
+  [0    : 7500)   main egocentric crop  — (12, 25, 25) logically
+  [7500 : 8656)   minimap               — (4, 17, 17) logically
+  [8656 : 8692)   cluster features      — (36,) = 9 regions × (dx, dy, pathdist, count)
 
 Channel layout (sim/src/rl/obs.rs is authoritative):
   Spatial:
@@ -11,20 +11,18 @@ Channel layout (sim/src/rl/obs.rs is authoritative):
     1  BASE          own base tile
     2  GOLD          gold item
     3  OBSTACLE      impassable wall
-    4  SPEED         speed-boost item (tier-encoded 0.33/0.66/1.0)
+    4  SPEED         speed-boost item (1.0 where present)
     5  MULT          score-multiplier item
-    6  TRAP          trap hazard item (navigator routes around these)
   Broadcast:
-    7  CARRYING        gold carried
-    8  BASE_DX         direction to own base X
-    9  BASE_DY         direction to own base Y
-    10 TIME_REMAINING  fraction of match left ∈ [0,1]
-    11 SPEED_REMAINING speed buff ticks left ∈ [0,1]
-    12 MULT_CHARGE     1.0 while a multiplier charge is held (spent at deposit)
-    13 TRAP_REMAINING  trap immobility ticks left ∈ [0,1]
+    6  CARRYING        gold carried
+    7  BASE_DX         direction to own base X
+    8  BASE_DY         direction to own base Y
+    9  TIME_REMAINING  fraction of match left ∈ [0,1]
+    10 SPEED_REMAINING speed buff ticks left ∈ [0,1]
+    11 MULT_CHARGE     1.0 while a multiplier charge is held (spent at deposit)
 
-  Minimap channels (5, 17, 17):
-    0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_MULT   4  MM_TRAP
+  Minimap channels (4, 17, 17):
+    0  MM_OBSTACLE   1  MM_GOLD   2  MM_SPEED   3  MM_MULT
 
   Cluster features (36 floats = 9 regions × [dx_norm, dy_norm, pathdist_norm, count_norm]):
     One entry per fixed 3×3 map region; zero for regions with no gold. dx/dy point to
@@ -73,22 +71,22 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # ── Observation layout (must match sim/src/rl/obs.rs) ────────────────────────
 # Single-agent gold rush. Crop channels: OOB, BASE, GOLD, OBSTACLE, SPEED, MULT,
-# TRAP, CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, MULT_CHARGE, TRAP_REM.
+# CARRYING, BASE_DX, BASE_DY, TIME_REMAINING, SPEED_REM, MULT_CHARGE.
 
-OBS_CHANNELS = 14  # Slow removed (-2 vs the old 16); see sim/src/rl/obs.rs
+OBS_CHANNELS = 12  # Slow + Trap removed (-4 vs the old 16); see sim/src/rl/obs.rs
 OBS_CROP_H = 25
 OBS_CROP_W = 25
-OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 8750
+OBS_CROP_DIM = OBS_CHANNELS * OBS_CROP_H * OBS_CROP_W  # 7500
 
-MM_CHANNELS = 5   # obstacle, gold, speed, mult, trap
+MM_CHANNELS = 4   # obstacle, gold, speed, mult
 MM_H = 17
 MM_W = 17
-MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1445
+MM_DIM = MM_CHANNELS * MM_H * MM_W  # 1156
 
 CLUSTER_K = 9  # fixed 3×3 spatial region grid (see sim/src/engine/clusters.rs)
 CLUSTER_FEATURES = CLUSTER_K * 4  # 36 — 9 regions × [dx, dy, pathdist, count]
 
-OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 10231
+OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 8692
 
 # Action space size. Must match ACTION_SIZE in src/rl/action.rs (CLUSTER_K region-nav
 # slots + NavigateToBase + NavigateToSpeed + NavigateToMultiplier + Wait).
@@ -118,17 +116,17 @@ class AtbMlpExtractor(BaseFeaturesExtractor):
 class AtbCnnExtractor(BaseFeaturesExtractor):
     """Three-branch extractor for egocentric crop, global minimap, and cluster features.
 
-    Input: flat (OBS_TOTAL,) = (10231,) buffer — split internally.
+    Input: flat (OBS_TOTAL,) = (8692,) buffer — split internally.
 
-    Crop branch  (14, 25, 25):
-      Conv(14→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
+    Crop branch  (12, 25, 25):
+      Conv(12→32, 3×3, pad=1, s=1) → ReLU   # (32, 25, 25)
       Conv(32→64, 3×3, pad=1, s=1) → ReLU   # (64, 25, 25)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64, 13, 13)
       Conv(64→64, 3×3, pad=1, s=2) → ReLU   # (64,  7,  7)  ← new
       Flatten → Linear(3136→256) → LayerNorm(256) → ReLU
 
-    Minimap branch (5, 17, 17):
-      Conv(5→16,  3×3, pad=1, s=1) → ReLU   # (16, 17, 17)
+    Minimap branch (4, 17, 17):
+      Conv(4→16,  3×3, pad=1, s=1) → ReLU   # (16, 17, 17)
       Conv(16→32, 3×3, s=2)        → ReLU   # (32,  8,  8)  ← stride-2 added
       Flatten → Linear(2048→128) → LayerNorm(128) → ReLU
 

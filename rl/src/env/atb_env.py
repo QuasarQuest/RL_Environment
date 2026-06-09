@@ -5,10 +5,10 @@ This class exists so the factory's eval path and DummyVecEnv work correctly.
 
 Observation layout
 ------------------
-Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (10231,):
-  [0    : 8750)   main egocentric crop  — (14, 25, 25)
-  [8750 : 10195)  minimap               — ( 5, 17, 17)
-  [10195: 10231)  cluster features      — (36,)
+Rust returns a flat float32 buffer of shape (OBS_TOTAL,) = (8692,):
+  [0    : 7500)   main egocentric crop  — (12, 25, 25)
+  [7500 : 8656)   minimap               — ( 4, 17, 17)
+  [8656 : 8692)   cluster features      — (36,)
 
 AtbCnnExtractor in policy.py splits and reshapes internally.
 
