@@ -11,9 +11,11 @@
 
     // One speed item; density trimmed ~20% (0.4 → 0.32).
     item_density: (
-        gold:       1.0,
-        speed:      0.32,
-        multiplier: 0.2,
+        gold:       0.5,
+        speed:      0.12,
+        multiplier: 0.05,
+        // Gold in 2–3-tile clumps + sparse singletons (count unchanged; 0 = uniform).
+        gold_clustering: ( clustered_fraction: 0.7, clump_size: (2, 3), radius: 1 ),
     ),
 
     // option_gamma is the per-tick discount; it MUST equal ppo.gamma (configs/ppo)

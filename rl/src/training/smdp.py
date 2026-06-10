@@ -18,8 +18,8 @@ Wire both in train.py:
     model  = Algo(..., rollout_buffer_class=rb_cls)
     callbacks += [SmdpDiscountCallback()]
 
-recurrent_ppo uses RecurrentRolloutBuffer and is not covered here; with it the
-callback simply no-ops (the buffer has no `option_ticks`), falling back to plain γ.
+Algos without an SMDP buffer fall back to plain γ: smdp_buffer_class returns None
+and the callback no-ops (the buffer has no `option_ticks`).
 """
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def smdp_buffer_class(algo: str):
         return SmdpMaskableRolloutBuffer if _MASKABLE else None
     if algo == "ppo":
         return SmdpRolloutBuffer
-    return None  # recurrent_ppo: plain γ (RecurrentRolloutBuffer not subclassed)
+    return None  # unsupported algo: plain γ
 
 
 class SmdpDiscountCallback(BaseCallback):
@@ -112,7 +112,7 @@ class SmdpDiscountCallback(BaseCallback):
     SB3 calls callback.on_step() once per env step, BEFORE rollout_buffer.add, so
     writing ``option_ticks[buffer.pos]`` lands in the slot add() is about to fill —
     aligning the discount with the transition's reward. No-ops if the buffer is not
-    an SMDP buffer (e.g. recurrent_ppo) or the env lacks option_ticks (single-env).
+    an SMDP buffer or the env lacks option_ticks (single-env).
     """
 
     def _find_env(self) -> "BatchVecEnv | None":

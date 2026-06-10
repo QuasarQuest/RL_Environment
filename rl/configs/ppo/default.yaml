@@ -45,16 +45,7 @@ learning_rate_final: 1.0e-4
 target_kl: 0.02
 
 # ── Network Architecture ──────────────────────────────────────────────────────
-# Lean pi/vf heads — LSTM already provides rich temporal representation.
-# Deep heads add cost without benefit for a 13-action discrete space.
+# Lean pi/vf heads — deep heads add cost without benefit for a 13-action discrete
+# space, and the gold rush is fully observable so no temporal memory is needed.
 net_arch_pi: [64]
 net_arch_vf: [64]
-
-# ── LSTM (recurrent_ppo only) ─────────────────────────────────────────────────
-# 128 instead of 256.
-# Hidden state ops scale with hidden²: 128 is ~4× cheaper per step than 256.
-# 128 units is sufficient to track one enemy's last-seen position, HP trend,
-# and movement pattern — the full temporal requirement through stage 6 self-play.
-# (NetHack NLE, far more complex, uses 512; Griddly 1v1 converges with 64–128.)
-lstm_hidden_size: 128
-n_lstm_layers:    1

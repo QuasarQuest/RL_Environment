@@ -181,6 +181,13 @@ fn spawn_sim_entities(commands: &mut Commands, bridge: &SimBridge) {
             Transform::from_xyz(0.0, 0.0, 1.0),
         ));
     }
+    spawn_item_entities(commands, bridge);
+}
+
+/// Spawn one ItemMarker per current sim item. The pool is index-keyed, so it must match
+/// the live item list — rebuilt on restart (item count/kinds change per episode) rather
+/// than reused from a previous episode, which would strand markers with stale kinds.
+fn spawn_item_entities(commands: &mut Commands, bridge: &SimBridge) {
     for (i, item) in bridge.sim.items.iter().enumerate() {
         commands.spawn((
             ItemMarker,
@@ -253,11 +260,13 @@ pub fn handle_load_request(
 }
 
 pub fn step_sim(
+    mut commands: Commands,
     mut bridge:  ResMut<SimBridge>,
     mut timer:   ResMut<TickTimer>,
     cfg:         Res<SimConfig>,
     time:        Res<Time>,
     mut restart: ResMut<RestartPending>,
+    item_q:      Query<Entity, With<ItemMarker>>,
 ) {
     if restart.0 {
         bridge.sim.reset();
@@ -267,7 +276,10 @@ pub fn step_sim(
         bridge.episode_reward    = 0.0;
         bridge.bt_target_cluster = None;
         bridge.onnx_action       = None;
-        if let Some(ref mut p) = bridge.policy { p.reset(); }
+        // The new episode has a fresh item set (different count/kinds/positions); rebuild
+        // the index-keyed marker pool so it matches, instead of carrying stale markers.
+        for e in item_q.iter() { commands.entity(e).despawn(); }
+        spawn_item_entities(&mut commands, &bridge);
         restart.0 = false;
     }
 
@@ -300,7 +312,7 @@ pub fn step_sim(
                     if need_new {
                         let obs  = bridge.sim.obs_buf.to_vec();
                         let mask = bridge.sim.action_mask();
-                        let act  = bridge.policy.as_mut().unwrap().act_masked(&obs, &mask);
+                        let act  = bridge.policy.as_ref().unwrap().act_masked(&obs, &mask);
                         bridge.onnx_action       = Some(act);
                         bridge.onnx_anchor_gold  = agent_gold;
                         bridge.onnx_anchor_score = agent_score;
@@ -476,7 +488,7 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
     }
 }
 
-fn item_color(kind: ItemKind) -> Color {
+pub(crate) fn item_color(kind: ItemKind) -> Color {
     use crate::style::color::{ITEM_GOLD, ITEM_MULT, ITEM_SPEED};
     match kind {
         ItemKind::Gold       => ITEM_GOLD,

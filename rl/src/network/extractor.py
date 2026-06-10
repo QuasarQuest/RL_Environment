@@ -43,7 +43,6 @@ Key changes vs original:
   mm_cnn    : added stride=2 to 2nd conv
               spatial: 17×17 → 17×17 → 8×8  (flat: 7200 → 2048)
   mm_head   : 7200→128  →  2048→128  (same output, cheaper input)
-  lstm      : 256 → 128  (set in default.yaml)
 
 Parameter counts (features_dim=256):
   Component    Original     Slim       Factor
@@ -53,10 +52,8 @@ Parameter counts (features_dim=256):
   mm_head       921,984    262,528      3.5×
   cluster           416        416     —
   fusion        107,264    107,264     —
-  lstm (256)    525,312        —
-  lstm (128)        —      197,120      2.7×
   ─────────────────────────────────────────
-  TOTAL      13,352,800  1,472,416      9.1×
+  TOTAL      12,827,488  1,275,296     10.1×
 
 Architecture is fixed across all 6 curriculum stages — sized for stage 6
 self-play, which is still well within the 1–2M param SOTA sweet spot.

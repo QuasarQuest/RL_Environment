@@ -17,6 +17,8 @@ use rustc_hash::FxHashSet;
 
 use crate::config;
 use crate::entity::{AgentState, ItemState};
+use crate::entity::item::ItemKind;
+use crate::engine::spawner;
 use crate::world::{
     config::{WorldConfig, SPAWN_POCKET_RADIUS},
     coords::GridPos,
@@ -172,12 +174,13 @@ pub fn spawn_items(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridPos], 
 fn spawn_items_internal(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridPos], rng: &mut SmallRng) -> Vec<ItemState> {
     let blocked: FxHashSet<GridPos> = spawn_positions.iter().copied().collect();
 
-    let mut free_tiles: Vec<GridPos> = (0..cfg.height as i32)
+    let free_tiles: Vec<GridPos> = (0..cfg.height as i32)
         .flat_map(|y| (0..cfg.width as i32).map(move |x| GridPos::new(x, y)))
         .filter(|p| grid.get(p.x, p.y) == Some(Tile::Free) && !blocked.contains(p))
         .collect();
 
     let free_count = free_tiles.len();
+    let free_set: FxHashSet<GridPos> = free_tiles.iter().copied().collect();
     let item_cfgs  = item_configs_for_free_count(cfg, free_count);
     let mut items  = Vec::new();
 
@@ -187,16 +190,84 @@ fn spawn_items_internal(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridP
     let mut taken: FxHashSet<GridPos> = FxHashSet::default();
     for ic in &item_cfgs {
         let target = (ic.max_on_map / 2).max(1);
-        free_tiles.shuffle(rng);
-        let mut placed = 0;
-        for &seed in free_tiles.iter() {
-            if placed >= target { break; }
-            if !taken.insert(seed) { continue; }
-            items.push(ItemState { pos: seed, kind: ic.kind });
-            placed += 1;
+        if ic.kind == ItemKind::Gold && cfg.item_density.gold_clustering.enabled() {
+            place_gold_clustered(&mut items, target, &free_set, &mut taken, cfg, rng);
+            continue;
+        }
+        // Non-gold (speed/multiplier): distribute around the map, far from gold clusters
+        // and each other (farthest-point sampling; see spawner::pick_distributed).
+        let avail: Vec<GridPos> = free_tiles.iter().copied().filter(|p| !taken.contains(p)).collect();
+        let avoid: Vec<GridPos> = items.iter().map(|i| i.pos).collect();
+        for pos in spawner::pick_distributed(&avail, &avoid, target, rng) {
+            taken.insert(pos);
+            items.push(ItemState { pos, kind: ic.kind });
         }
     }
 
     items
+}
+
+/// Place `target` gold as small clumps plus scattered singletons (see GoldClusterConfig).
+/// `free_set` is the set of placeable tiles (free, outside the pocket); `taken` is the
+/// running set of already-occupied tiles so nothing ever stacks. Never places more than
+/// `target` gold and silently places fewer if the map runs out of room.
+fn place_gold_clustered(
+    items:    &mut Vec<ItemState>,
+    target:   usize,
+    free_set: &FxHashSet<GridPos>,
+    taken:    &mut FxHashSet<GridPos>,
+    cfg:      &WorldConfig,
+    rng:      &mut SmallRng,
+) {
+    let gc = &cfg.item_density.gold_clustering;
+    let (lo, hi) = gc.clamped_clump();
+    let n_clustered = ((target as f32) * gc.clustered_fraction.clamp(0.0, 1.0)).round() as usize;
+
+    // Shuffled pool of all placeable tiles — clump centres and scattered singletons are
+    // both drawn from its front, skipping any tile already taken.
+    let mut pool: Vec<GridPos> = free_set.iter().copied().collect();
+    pool.shuffle(rng);
+    let mut cursor = 0usize;
+    let next_free = |cursor: &mut usize, taken: &FxHashSet<GridPos>| -> Option<GridPos> {
+        while *cursor < pool.len() {
+            let p = pool[*cursor];
+            *cursor += 1;
+            if !taken.contains(&p) { return Some(p); }
+        }
+        None
+    };
+
+    // ── Clumps ──
+    let mut placed = 0usize;
+    while placed < n_clustered {
+        let Some(centre) = next_free(&mut cursor, taken) else { break };
+        taken.insert(centre);
+        items.push(ItemState { pos: centre, kind: ItemKind::Gold });
+        placed += 1;
+
+        // Remaining members of this clump, drawn from free tiles within `radius`.
+        let want = rng.random_range(lo..=hi).min(n_clustered - placed + 1);
+        let mut neigh: Vec<GridPos> = (-gc.radius..=gc.radius)
+            .flat_map(|dy| (-gc.radius..=gc.radius).map(move |dx| (dx, dy)))
+            .filter(|&(dx, dy)| dx != 0 || dy != 0)
+            .map(|(dx, dy)| GridPos::new(centre.x + dx, centre.y + dy))
+            .filter(|p| free_set.contains(p) && !taken.contains(p))
+            .collect();
+        neigh.shuffle(rng);
+        for p in neigh.into_iter().take(want.saturating_sub(1)) {
+            if placed >= n_clustered { break; }
+            taken.insert(p);
+            items.push(ItemState { pos: p, kind: ItemKind::Gold });
+            placed += 1;
+        }
+    }
+
+    // ── Scattered singletons ── (the remaining budget)
+    while placed < target {
+        let Some(p) = next_free(&mut cursor, taken) else { break };
+        taken.insert(p);
+        items.push(ItemState { pos: p, kind: ItemKind::Gold });
+        placed += 1;
+    }
 }
 

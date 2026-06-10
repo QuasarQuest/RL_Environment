@@ -2,10 +2,10 @@
 
 `make_eval_callback` selects the correct eval base for the algorithm:
 maskable_ppo needs sb3-contrib's MaskableEvalCallback (it fetches action masks
-and passes them into predict); every other algo (ppo, recurrent_ppo) must use
-the stock EvalCallback. Using the maskable base with a non-maskable model (e.g.
-RecurrentPPO) would pass an `action_masks` kwarg its predict() rejects and crash
-evaluation — so the base is chosen by algo, not by import availability.
+and passes them into predict); plain ppo must use the stock EvalCallback. Using
+the maskable base with a non-maskable model would pass an `action_masks` kwarg its
+predict() rejects and crash evaluation — so the base is chosen by algo, not by
+import availability.
 """
 from __future__ import annotations
 

@@ -84,11 +84,52 @@ pub struct ItemDensityConfig {
     pub speed: f32,
     #[serde(default)]
     pub multiplier: f32,
+    /// Controls how gold is laid out spatially. Omit (or `clustered_fraction: 0`) for
+    /// the legacy uniform-random scatter; otherwise gold forms small clumps plus some
+    /// sparse singletons. Total gold COUNT is unchanged — only its grouping.
+    #[serde(default)]
+    pub gold_clustering: GoldClusterConfig,
 }
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, speed: 0.0, multiplier: 0.0 }
+        Self {
+            gold: DEFAULT_GOLD_DENSITY,
+            speed: 0.0,
+            multiplier: 0.0,
+            gold_clustering: GoldClusterConfig::default(),
+        }
+    }
+}
+
+/// Spatial grouping for gold (objective pickups). A `clustered_fraction` of the gold is
+/// placed in clumps of `clump_size.0..=clump_size.1` tiles within Chebyshev `radius` of
+/// a clump centre; the remainder is scattered as lone singletons. Runtime respawns reuse
+/// the same radius to keep new gold near existing gold so clumps don't erode to uniform
+/// as the agent eats them. `clustered_fraction == 0` ⇒ legacy uniform scatter.
+#[derive(Debug, Deserialize, Clone)]
+pub struct GoldClusterConfig {
+    #[serde(default)]
+    pub clustered_fraction: f32,
+    #[serde(default = "default_clump_size")]
+    pub clump_size: (usize, usize),
+    #[serde(default = "default_clump_radius")]
+    pub radius: i32,
+}
+
+impl Default for GoldClusterConfig {
+    fn default() -> Self {
+        Self { clustered_fraction: 0.0, clump_size: default_clump_size(), radius: default_clump_radius() }
+    }
+}
+
+impl GoldClusterConfig {
+    /// Whether clustered placement is active (false ⇒ legacy uniform scatter).
+    pub fn enabled(&self) -> bool { self.clustered_fraction > 0.0 }
+    /// Clamped, sane (min, max) clump size — min ≥ 1 and max ≥ min.
+    pub fn clamped_clump(&self) -> (usize, usize) {
+        let lo = self.clump_size.0.max(1);
+        (lo, self.clump_size.1.max(lo))
     }
 }
 
@@ -177,6 +218,8 @@ fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
 fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
 fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
 fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
+fn default_clump_size()         -> (usize, usize) { (2, 3) }
+fn default_clump_radius()       -> i32 { 1 }
 fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
 fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
 fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }

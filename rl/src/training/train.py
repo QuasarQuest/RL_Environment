@@ -50,7 +50,7 @@ from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
 from network.export import export_to_onnx
-from network.policy import ATB_POLICY_KWARGS, ATB_RECURRENT_POLICY_KWARGS
+from network.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.callbacks import (
     CheckpointCallback,
@@ -99,21 +99,7 @@ def _print_arch(model) -> None:
     else:
         console.print(f"  [dim]extractor[/dim]       : {type(fe).__name__}  obs={obs}")
 
-    if hasattr(policy, "lstm_actor"):
-        lstm = policy.lstm_actor
-        console.print(f"  [dim]lstm[/dim]            : hidden={lstm.hidden_size}  layers={lstm.num_layers}")
-        if hasattr(policy, "mlp_extractor"):
-            mlp = policy.mlp_extractor
-            pi_mid = _seq_str(mlp.policy_net)
-            vf_mid = _seq_str(mlp.value_net)
-            if pi_mid:
-                console.print(f"  [dim]pi_mlp[/dim]         : {pi_mid}")
-            if vf_mid:
-                console.print(f"  [dim]vf_mlp[/dim]         : {vf_mid}")
-        if hasattr(policy, "action_net"):
-            console.print(f"  [dim]pi[/dim]              : Linear(→{policy.action_net.out_features})")
-        console.print(f"  [dim]vf[/dim]              : Linear(→1)")
-    elif hasattr(policy, "mlp_extractor"):
+    if hasattr(policy, "mlp_extractor"):
         mlp = policy.mlp_extractor
         pi_mid = _seq_str(mlp.policy_net)
         vf_mid = _seq_str(mlp.value_net)
@@ -316,18 +302,10 @@ def train(cfg: DictConfig) -> None:
         eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
         _sync_vecnorm_stats(vec_normalize, eval_normalize)
     else:
-        if t_cfg.algo == "recurrent_ppo":
-            policy_kwargs = {
-                **ATB_RECURRENT_POLICY_KWARGS,
-                "lstm_hidden_size": p_cfg.lstm_hidden_size,
-                "n_lstm_layers": p_cfg.n_lstm_layers,
-                "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
-            }
-        else:
-            policy_kwargs = {
-                **ATB_POLICY_KWARGS,
-                "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
-            }
+        policy_kwargs = {
+            **ATB_POLICY_KWARGS,
+            "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
+        }
         model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,

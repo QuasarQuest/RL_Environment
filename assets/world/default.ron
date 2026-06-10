@@ -10,9 +10,17 @@
 
     // One speed item; density trimmed ~20% (0.15 → 0.12).
     item_density: (
-        gold:       0.5,
+        gold:       0.35,
         speed:      0.12,
         multiplier: 0.05,
+        // Gold layout: most of it in 2–3-tile clumps (radius 1 = the 8 neighbours),
+        // the rest as sparse singletons. Total gold count is unchanged. Set
+        // clustered_fraction: 0 for the old uniform scatter.
+        gold_clustering: (
+            clustered_fraction: 0.7,
+            clump_size:         (2, 3),
+            radius:             1,
+        ),
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

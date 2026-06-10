@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use atb::world::config::SPAWN_POCKET_RADIUS;
-use crate::sim_bridge::{SimBridge, AgentIndex, AgentMarker, ItemIndex, ItemMarker};
+use crate::sim_bridge::{SimBridge, AgentIndex, AgentMarker, ItemIndex, ItemMarker, item_color};
 use crate::style::color::SPAWN_POCKET_FILL;
 use crate::viz::grid_offset::GridOffset;
 
@@ -54,13 +54,18 @@ pub fn sync_agent_transforms(
 pub fn sync_item_transforms(
     bridge:    Res<SimBridge>,
     offset:    Res<GridOffset>,
-    mut query: Query<(&ItemIndex, &mut Transform, &mut Visibility), With<ItemMarker>>,
+    mut query: Query<(&ItemIndex, &mut Transform, &mut Visibility, &mut Sprite), With<ItemMarker>>,
 ) {
+    // The sim's item list is dynamic: pickup uses Vec::swap_remove and respawn pushes,
+    // so the KIND living at a given index changes over time. Re-sync the sprite colour
+    // from the current item each frame — not just its position — or a marker keeps its
+    // original kind's colour and appears to be a different item sitting on this tile.
     let items = bridge.items();
-    for (idx, mut transform, mut vis) in query.iter_mut() {
+    for (idx, mut transform, mut vis, mut sprite) in query.iter_mut() {
         if let Some(item) = items.get(idx.0) {
             let world = offset.world_pos(item.pos.x, item.pos.y);
             transform.translation = Vec3::new(world.x, world.y, 0.5);
+            sprite.color = item_color(item.kind);
             *vis = Visibility::Visible;
         } else {
             *vis = Visibility::Hidden;

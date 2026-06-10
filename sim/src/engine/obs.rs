@@ -129,14 +129,16 @@ pub fn build_obs_into(
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
         let base = cluster_start + k * 4;
         if let Some(c) = maybe_cluster {
-            // Pick the region's gold with the smallest true path distance; fall back
-            // to the Chebyshev-nearest for direction if none is reachable.
-            let path_nearest = c.golds.iter()
-                .filter_map(|&g| crate::engine::nav::dist_at(&dist, grid, g).map(|d| (d, g)))
-                .min_by_key(|&(d, _)| d);
-            let (target, pathdist) = match path_nearest {
-                Some((d, g)) => (Some(g), (d as f32 / path_norm).min(1.0)),
-                None         => (c.nearest_gold(agent.pos), 1.0), // all walled off
+            // Pick the region's path-nearest reachable gold (BFS around walls) — the
+            // same target resolve_nav_goal will drive to and the action mask permits.
+            // Fall back to the Chebyshev-nearest for direction only if none is
+            // reachable (region fully walled off → pathdist saturates at 1.0).
+            let (target, pathdist) = match c.nearest_reachable_gold(&dist, grid) {
+                Some(g) => {
+                    let d = crate::engine::nav::dist_at(&dist, grid, g).unwrap_or(0);
+                    (Some(g), (d as f32 / path_norm).min(1.0))
+                }
+                None => (c.nearest_gold(agent.pos), 1.0), // all walled off
             };
             if let Some(g) = target {
                 buf[base]     = (g.x - ax) as f32 / gw as f32;

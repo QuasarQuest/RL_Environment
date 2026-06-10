@@ -12,9 +12,8 @@ Slim architecture notes
 -----------------------
 features_dim=256 is shared across all 6 curriculum stages.
 The extractor itself is now ~1.19M params (down from ~12.65M).
-LSTM hidden size is controlled via ppo config YAML (lstm_hidden_size: 128).
-net_arch heads are intentionally lean — the LSTM already provides a rich
-temporal representation; deep pi/vf heads add cost without benefit here.
+net_arch heads are intentionally lean — deep pi/vf heads add cost without benefit
+for a 13-action discrete space.
 """
 from __future__ import annotations
 
@@ -30,26 +29,13 @@ ATB_MLP_POLICY_KWARGS = dict(
     net_arch=dict(pi=[64], vf=[64]),
 )
 
-# ── CNN + minimap (current, non-recurrent) ────────────────────────────────────
+# ── CNN + minimap (current) ───────────────────────────────────────────────────
 # normalize_images=False: obs are already float32 in [0,1]; SB3 must NOT ÷255.
 
 ATB_CNN_POLICY_KWARGS = dict(
     features_extractor_class=AtbCnnExtractor,
     features_extractor_kwargs=dict(features_dim=256),
-    net_arch=dict(pi=[64], vf=[64]),  # slim: was [128, 64] — LSTM replaces depth
-    normalize_images=False,
-)
-
-# ── RecurrentPPO (LSTM) ───────────────────────────────────────────────────────
-# Uses MlpLstmPolicy — AtbCnnExtractor feeds into the LSTM layer.
-# normalize_images=False: obs are already float32 in [0,1]; SB3 must NOT ÷255.
-# lstm_hidden_size / n_lstm_layers are injected by train.py from PpoConfig,
-# so they are NOT set here — keeping this dict minimal avoids surprises when
-# overriding from YAML.
-
-ATB_RECURRENT_POLICY_KWARGS = dict(
-    features_extractor_class=AtbCnnExtractor,
-    features_extractor_kwargs=dict(features_dim=256),
+    net_arch=dict(pi=[64], vf=[64]),  # slim heads — extractor carries the capacity
     normalize_images=False,
 )
 
