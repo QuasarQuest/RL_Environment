@@ -53,23 +53,14 @@ pub fn build_obs_into(
 
     // ── Broadcast: agent scalars ──────────────────────────────────────────────
 
-    buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane]
-        .fill(agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
-
-    let base_dx = (agent.base_pos.x - ax) as f32 / gw as f32;
-    let base_dy = (agent.base_pos.y - ay) as f32 / gh as f32;
-    buf[CH_BASE_DX * plane..(CH_BASE_DX + 1) * plane].fill(base_dx);
-    buf[CH_BASE_DY * plane..(CH_BASE_DY + 1) * plane].fill(base_dy);
-
-    buf[CH_TIME_REMAINING * plane..(CH_TIME_REMAINING + 1) * plane]
-        .fill(time_remaining.clamp(0.0, 1.0));
-
-    // Active buff timers, normalised by their longest possible window.
-    buf[CH_SPEED_REMAINING * plane..(CH_SPEED_REMAINING + 1) * plane]
-        .fill((agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
-    // Multiplier is a held charge (not a timer): 1.0 while one is banked-up to spend.
-    buf[CH_MULT_CHARGE * plane..(CH_MULT_CHARGE + 1) * plane]
-        .fill((agent.mult_charge > 0) as u8 as f32);
+    let mut bcast = |ch: usize, v: f32| buf[ch * plane..(ch + 1) * plane].fill(v);
+    bcast(CH_CARRYING, agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
+    bcast(CH_BASE_DX, (agent.base_pos.x - ax) as f32 / gw as f32);
+    bcast(CH_BASE_DY, (agent.base_pos.y - ay) as f32 / gh as f32);
+    bcast(CH_TIME_REMAINING, time_remaining.clamp(0.0, 1.0));
+    bcast(CH_SPEED_REMAINING, (agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
+    // Multiplier is a held charge, not a timer: 1.0 while one is banked to spend.
+    bcast(CH_MULT_CHARGE, (agent.mult_charge > 0) as u8 as f32);
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 

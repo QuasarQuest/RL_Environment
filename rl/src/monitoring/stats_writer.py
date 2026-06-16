@@ -20,7 +20,7 @@ from typing import Iterable, Mapping
 # any file (the HDF5 C lib reads it at open time) — set it before importing h5py.
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
-import h5py  # noqa: E402  (kept after the env-var default above)
+import h5py
 import numpy as np
 
 

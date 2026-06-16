@@ -13,7 +13,6 @@ Adding a new algorithm
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from hydra.core.config_store import ConfigStore

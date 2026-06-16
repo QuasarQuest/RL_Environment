@@ -156,6 +156,7 @@ fn path_next_dir(current: GridPos, path: &VecDeque<GridPos>) -> Option<Dir> {
 
 /// Per-agent A* path cache. Recomputes only when the goal changes or the path is
 /// consumed.
+#[derive(Default)]
 pub struct NavCache {
     path:        VecDeque<GridPos>,
     cached_goal: Option<GridPos>,
@@ -164,10 +165,6 @@ pub struct NavCache {
 impl NavCache {
     pub fn new() -> Self { Self::default() }
     pub fn path(&self) -> &VecDeque<GridPos> { &self.path }
-}
-
-impl Default for NavCache {
-    fn default() -> Self { Self { path: VecDeque::new(), cached_goal: None } }
 }
 
 /// Navigate one step toward `target` using cached A*.

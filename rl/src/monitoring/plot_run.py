@@ -21,7 +21,6 @@ app = typer.Typer(add_completion=False)
 try:
     import matplotlib.gridspec as gridspec
     import matplotlib.pyplot as plt
-    import numpy as np
     import pandas as pd
     from monitoring.stats_reader import read_stats
 except ImportError as e:
@@ -80,7 +79,7 @@ def _plot_single(df: pd.DataFrame, name: str, window: int, out: Optional[Path]) 
         ]
         ax.text(0.05, 0.95, "\n".join(lines), transform=ax.transAxes, fontsize=9,
                 verticalalignment="top", fontfamily="monospace",
-                bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.5))
+                bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.5})
 
     _finish(fig, out)
 

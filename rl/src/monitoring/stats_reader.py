@@ -22,7 +22,7 @@ from typing import Iterable
 # could block the trainer's concurrent append. Must precede the h5py import.
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
-import h5py  # noqa: E402
+import h5py
 import numpy as np
 import pandas as pd
 
@@ -38,7 +38,7 @@ def read_stats(path: str | Path) -> pd.DataFrame:
     with h5py.File(path, "r") as f:
         if "episodes" not in f:
             raise ValueError(f"No 'episodes' group in {path}")
-        data = {k: f["episodes"][k][:] for k in f["episodes"].keys()}
+        data = {k: f["episodes"][k][:] for k in f["episodes"]}
     df = pd.DataFrame(data)
     if "timestep" in df.columns:
         df = df.sort_values("timestep").reset_index(drop=True)

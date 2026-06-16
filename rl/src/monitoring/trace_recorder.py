@@ -49,7 +49,7 @@ from typing import Optional, cast
 # I/O never collides with a concurrent stats reader. Must precede the h5py import.
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
-import h5py  # noqa: E402
+import h5py
 import numpy as np
 import torch as th
 import typer
@@ -291,7 +291,7 @@ def record(
                 "gold_carried": int(gold_carried), "score": int(score),
                 "value": float(value),
                 "chosen_action": int(action),
-                "option_ticks": int(len(trace)),
+                "option_ticks": len(trace),
                 "option_reward": float(trace[:, 9].sum()) if len(trace) else 0.0,   # undiscounted Σ r_total
                 "option_return": float((trace[:, 9] * trace[:, 10]).sum()) if len(trace) else 0.0,  # Σ γᵗ r
                 "is_cluster": bool(is_cluster_t[0]),
@@ -369,7 +369,7 @@ def summary(
 
     with h5py.File(path, "r") as f:
         names = [n.decode() if isinstance(n, bytes) else str(n) for n in f.attrs["action_names"]]
-        eps = [k for k in f.keys() if k.startswith("episode_")]
+        eps = [k for k in f if k.startswith("episode_")]
         for ek in eps:
             d = f[ek]["decisions"]
             acts = d["chosen_action"][:]
@@ -524,7 +524,7 @@ def _render(tr: _Trace, i: int, axes) -> None:
             fill=False, edgecolor="red", lw=2.0, zorder=2))
         tx, ty = ax + cdx[a] * tr.gw, ay + cdy[a] * tr.gh
         ax_grid.annotate("", xy=(tx, ty), xytext=(ax, ay),
-                         arrowprops=dict(arrowstyle="->", color="red", lw=1.5), zorder=6)
+                         arrowprops={"arrowstyle": "->", "color": "red", "lw": 1.5}, zorder=6)
     act_name = tr.names[a] if a < len(tr.names) else f"act{a}"
     ax_grid.set_title(f"decision {i+1}/{tr.n}  tick={int(tr.scalar('tick', i))}\n"
                       f"action={act_name}  carried={carried}  score={score}  V={value:.2f}",

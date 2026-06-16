@@ -64,17 +64,47 @@ pub fn pick_distributed(
     chosen
 }
 
+/// Connected-clump decomposition of `golds`, linking two positions when within Chebyshev
+/// `r` of each other. Returns `(comp_of, sizes)` where `comp_of[i]` is the clump id of
+/// `golds[i]` and `sizes[id]` is that clump's member count. Used to cap clump growth.
+fn clump_components(golds: &[GridPos], r: i32) -> (Vec<usize>, Vec<usize>) {
+    let n = golds.len();
+    let mut comp_of = vec![usize::MAX; n];
+    let mut sizes: Vec<usize> = Vec::new();
+    for start in 0..n {
+        if comp_of[start] != usize::MAX { continue; }
+        let id = sizes.len();
+        let mut stack = vec![start];
+        comp_of[start] = id;
+        let mut size = 0usize;
+        while let Some(i) = stack.pop() {
+            size += 1;
+            for j in 0..n {
+                if comp_of[j] == usize::MAX
+                    && (golds[i].x - golds[j].x).abs().max((golds[i].y - golds[j].y).abs()) <= r {
+                    comp_of[j] = id;
+                    stack.push(j);
+                }
+            }
+        }
+        sizes.push(size);
+    }
+    (comp_of, sizes)
+}
+
 pub struct SpawnBudget {
     pub kind:       ItemKind,
     pub spawn_prob: f32,
     pub target:     usize,
-    /// When `Some((radius, bias))`, each new item of this kind lands within Chebyshev
-    /// `radius` of an existing same-kind item with probability `bias`, and anywhere free
-    /// otherwise. This holds the layout at its initial clumped-vs-sparse mix (see
-    /// GoldClusterConfig): always clustering would grow clumps into ever-larger blobs,
-    /// never clustering would erode them to uniform. Falls back to anywhere free when no
+    /// When `Some((radius, bias, max_clump))`, each new item of this kind lands within
+    /// Chebyshev `radius` of an existing same-kind item with probability `bias`, and
+    /// anywhere free otherwise. This holds the layout at its initial clumped-vs-sparse mix
+    /// (see GoldClusterConfig). `max_clump` hard-caps the size of a connected clump: a
+    /// candidate tile is rejected outright if dropping an item there would merge/grow a
+    /// connected (Chebyshev `radius`) group beyond `max_clump`, so clumps can never erode
+    /// to uniform *nor* swell into oversized blobs. Falls back to anywhere free when no
     /// same-kind item remains on the map.
-    pub cluster: Option<(i32, f32)>,
+    pub cluster: Option<(i32, f32, usize)>,
 }
 
 /// Called every tick from SimCore::step. May push new items into `items`.
@@ -113,16 +143,32 @@ pub fn tick_spawns(
 
         match budget.cluster {
             // ── Clustered kind (gold): partition into tiles near an existing same-kind
-            // item vs the rest, and pick each spawn near-or-scattered by `bias`. ──
-            Some((r, bias)) => {
+            // item vs the rest, and pick each spawn near-or-scattered by `bias`. Tiles
+            // that would push a connected clump past `max_clump` are dropped entirely so
+            // clumps never grow into oversized blobs. ──
+            Some((r, bias, max_clump)) => {
+                let golds: Vec<GridPos> = items.iter()
+                    .filter(|i| i.kind == budget.kind).map(|i| i.pos).collect();
+                let (comp_of, sizes) = clump_components(&golds, r);
+
+                // Reusable per-candidate marker so we sum each adjacent clump only once.
+                let mut seen_gen = vec![0u32; sizes.len()];
+                let mut gen = 0u32;
+
                 let (mut near, mut rest): (Vec<GridPos>, Vec<GridPos>) = (Vec::new(), Vec::new());
                 for p in candidates {
-                    if items.iter().any(|i| i.kind == budget.kind
-                        && (i.pos.x - p.x).abs().max((i.pos.y - p.y).abs()) <= r) {
-                        near.push(p);
-                    } else {
-                        rest.push(p);
+                    gen += 1;
+                    // Size of the clump this tile would form: itself plus every distinct
+                    // existing clump it touches within `r`.
+                    let mut resulting = 1usize;
+                    for (gi, g) in golds.iter().enumerate() {
+                        if (g.x - p.x).abs().max((g.y - p.y).abs()) <= r {
+                            let c = comp_of[gi];
+                            if seen_gen[c] != gen { seen_gen[c] = gen; resulting += sizes[c]; }
+                        }
                     }
+                    if resulting > max_clump { continue; }      // would overgrow → never place here
+                    if resulting > 1 { near.push(p) } else { rest.push(p) }
                 }
                 for _ in 0..n_spawn {
                     let use_near = !near.is_empty()

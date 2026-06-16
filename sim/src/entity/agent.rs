@@ -4,10 +4,6 @@ use crate::world::coords::GridPos;
 pub enum Dir { N, S, E, W, NE, NW, SE, SW }
 
 impl Dir {
-    pub fn all() -> &'static [Dir; 8] {
-        &[Dir::N, Dir::S, Dir::E, Dir::W, Dir::NE, Dir::NW, Dir::SE, Dir::SW]
-    }
-
     pub fn delta(self) -> (i32, i32) {
         match self {
             Dir::N  => ( 0,  1), Dir::S  => ( 0, -1),
@@ -16,13 +12,8 @@ impl Dir {
             Dir::SE => ( 1, -1), Dir::SW => (-1, -1),
         }
     }
-
-    pub fn is_diagonal(self) -> bool {
-        matches!(self, Dir::NE | Dir::NW | Dir::SE | Dir::SW)
-    }
 }
 
-/// Internal movement action used by both the RL agent (via A* goal navigation)
 /// Internal movement action used by the RL agent via A* goal navigation.
 /// Single-agent gold rush — no combat actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

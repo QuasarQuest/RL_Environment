@@ -501,7 +501,7 @@ impl SimCore {
         let prev = self.agents[0].pos;
         // Returns true iff the agent stepped straight into a wall.
         let wall_hit = physics::apply_action(
-            &mut self.agents, &self.grid, 0, act, self.tick, Some(goal),
+            &mut self.agents, &self.grid, 0, act, Some(goal),
         );
         // Still en route only if the step made progress; arrival/blockage ends the option.
         self.en_route = self.agents[0].pos != prev;
@@ -669,8 +669,9 @@ fn build_spawn_budgets(items: &[ItemState], cfg: &WorldConfig) -> Vec<SpawnBudge
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };
         // Gold keeps its clumpy layout on respawn; other kinds spawn anywhere free.
+        // Carry the max clump size so respawns can't grow a clump past its build cap.
         let cluster = (kind == Gold && gc.enabled())
-            .then_some((gc.radius, gc.clustered_fraction.clamp(0.0, 1.0)));
+            .then_some((gc.radius, gc.clustered_fraction.clamp(0.0, 1.0), gc.clamped_clump().1));
         budgets.push(SpawnBudget { kind, spawn_prob, target, cluster });
     }
     budgets

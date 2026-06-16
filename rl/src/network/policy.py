@@ -23,21 +23,21 @@ from network.extractor import AtbCnnExtractor, AtbMlpExtractor
 
 # ── MLP (legacy) ──────────────────────────────────────────────────────────────
 
-ATB_MLP_POLICY_KWARGS = dict(
-    features_extractor_class=AtbMlpExtractor,
-    features_extractor_kwargs=dict(features_dim=128),
-    net_arch=dict(pi=[64], vf=[64]),
-)
+ATB_MLP_POLICY_KWARGS = {
+    "features_extractor_class": AtbMlpExtractor,
+    "features_extractor_kwargs": {"features_dim": 128},
+    "net_arch": {"pi": [64], "vf": [64]},
+}
 
 # ── CNN + minimap (current) ───────────────────────────────────────────────────
 # normalize_images=False: obs are already float32 in [0,1]; SB3 must NOT ÷255.
 
-ATB_CNN_POLICY_KWARGS = dict(
-    features_extractor_class=AtbCnnExtractor,
-    features_extractor_kwargs=dict(features_dim=256),
-    net_arch=dict(pi=[64], vf=[64]),  # slim heads — extractor carries the capacity
-    normalize_images=False,
-)
+ATB_CNN_POLICY_KWARGS = {
+    "features_extractor_class": AtbCnnExtractor,
+    "features_extractor_kwargs": {"features_dim": 256},
+    "net_arch": {"pi": [64], "vf": [64]},  # slim heads — extractor carries the capacity
+    "normalize_images": False,
+}
 
 # Canonical alias — swap RHS to switch pipelines.
 ATB_POLICY_KWARGS = ATB_CNN_POLICY_KWARGS

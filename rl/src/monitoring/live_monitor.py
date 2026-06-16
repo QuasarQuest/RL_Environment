@@ -46,7 +46,7 @@ def _read_hdf5(path: Path) -> pd.DataFrame | None:
         with h5py.File(path, "r") as f:
             if "episodes" not in f:
                 return None
-            data = {k: f["episodes"][k][:] for k in f["episodes"].keys()}
+            data = {k: f["episodes"][k][:] for k in f["episodes"]}
         df = pd.DataFrame(data)
         if df.empty:
             return None

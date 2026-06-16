@@ -87,7 +87,7 @@ class CheckpointCallback(BaseCallback):
             self.vec_normalize.save(str(path) + "_vecnorm.pkl")
 
     def _try_export_onnx(self, tag: str) -> None:
-        from network.export import export_to_onnx  # noqa: PLC0415
+        from network.export import export_to_onnx
 
         out_dir = self._models_dir / tag
         out_dir.mkdir(parents=True, exist_ok=True)

@@ -63,7 +63,7 @@ class _VecNormOnnxEvalMixin(_EvalBase):
         return result
 
     def _try_export_onnx(self) -> None:
-        from network.export import export_to_onnx  # noqa: PLC0415
+        from network.export import export_to_onnx
 
         assert self._onnx_path is not None  # only called from _on_step under this guard
         vn_path = (

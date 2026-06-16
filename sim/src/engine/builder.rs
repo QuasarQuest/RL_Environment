@@ -75,7 +75,7 @@ pub fn build_episode(cfg: &WorldConfig, rng: &mut SmallRng) -> WorldSnapshot {
     // Items never spawn inside the spawn pocket (the agent always starts on a clear
     // patch of gold-free, item-free tiles around its base).
     let pocket = spawn_pocket(base, w, h);
-    let items = spawn_items_internal(cfg, &grid, &pocket, rng);
+    let items = spawn_items(cfg, &grid, &pocket, rng);
     WorldSnapshot { grid, agents, items }
 }
 
@@ -166,12 +166,7 @@ fn carve_line(tiles: &mut [Tile], w: i32, h: i32, a: GridPos, b: GridPos) {
     }
 }
 
-/// Item placement — called on every reset with the env's own RNG for reproducibility.
-pub fn spawn_items(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridPos], rng: &mut SmallRng) -> Vec<ItemState> {
-    spawn_items_internal(cfg, grid, spawn_positions, rng)
-}
-
-fn spawn_items_internal(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridPos], rng: &mut SmallRng) -> Vec<ItemState> {
+fn spawn_items(cfg: &WorldConfig, grid: &Grid, spawn_positions: &[GridPos], rng: &mut SmallRng) -> Vec<ItemState> {
     let blocked: FxHashSet<GridPos> = spawn_positions.iter().copied().collect();
 
     let free_tiles: Vec<GridPos> = (0..cfg.height as i32)
@@ -241,6 +236,13 @@ fn place_gold_clustered(
     let mut placed = 0usize;
     while placed < n_clustered {
         let Some(centre) = next_free(&mut cursor, taken) else { break };
+        // Keep distinct clumps from merging into an oversized blob: reject a centre that
+        // sits within 2*radius of existing gold (clump members live within `radius` of a
+        // centre, so 2*radius of clearance guarantees two clumps never touch).
+        if items.iter().any(|i| i.kind == ItemKind::Gold
+            && (i.pos.x - centre.x).abs().max((i.pos.y - centre.y).abs()) <= 2 * gc.radius) {
+            continue;
+        }
         taken.insert(centre);
         items.push(ItemState { pos: centre, kind: ItemKind::Gold });
         placed += 1;

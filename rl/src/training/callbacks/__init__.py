@@ -12,9 +12,9 @@ __all__ = [
     "EntropyCoefScheduleCallback",
     "EpisodeStatsCallback",
     "EvalWithVecNorm",
-    "make_eval_callback",
     "PeriodicPlotCallback",
     "PolicyTelemetryCallback",
     "RichLogCallback",
     "kv_table",
+    "make_eval_callback",
 ]

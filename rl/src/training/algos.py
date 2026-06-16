@@ -32,7 +32,7 @@ from typing import Any, Protocol, Type, runtime_checkable
 import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
+from stable_baselines3.common.type_aliases import GymEnv, Schedule
 
 try:
     from sb3_contrib import MaskablePPO

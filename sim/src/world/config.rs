@@ -23,17 +23,14 @@ pub const SPAWN_POCKET_RADIUS: i32 = 3;
 
 // ── Obstacle generation ───────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObstacleProfile {
     Blocks,
     Walls,
     Scatter,
+    #[default]
     Mixed,
     None,
-}
-
-impl Default for ObstacleProfile {
-    fn default() -> Self { ObstacleProfile::Mixed }
 }
 
 /// Explicit cluster-based obstacle descriptor (old-style config).
@@ -49,14 +46,11 @@ pub struct ObstacleCluster {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct ObstacleConfig {
-    #[serde(default = "default_obstacle_density")]
     pub density: f32,
-    #[serde(default)]
     pub profile: ObstacleProfile,
-    #[serde(default = "default_max_block_fraction")]
     pub max_block_fraction: f32,
-    #[serde(default = "default_max_wall_fraction")]
     pub max_wall_fraction: f32,
 }
 
@@ -77,17 +71,13 @@ impl Default for ObstacleConfig {
 // objective; the speed boost and the multiplier are the gold-rush flavour items.
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct ItemDensityConfig {
-    #[serde(default = "default_gold_density")]
     pub gold: f32,
-    #[serde(default)]
     pub speed: f32,
-    #[serde(default)]
     pub multiplier: f32,
-    /// Controls how gold is laid out spatially. Omit (or `clustered_fraction: 0`) for
-    /// the legacy uniform-random scatter; otherwise gold forms small clumps plus some
-    /// sparse singletons. Total gold COUNT is unchanged — only its grouping.
-    #[serde(default)]
+    /// Omit (or `clustered_fraction: 0`) for legacy uniform scatter; otherwise gold
+    /// forms small clumps plus sparse singletons. Total gold COUNT is unchanged.
     pub gold_clustering: GoldClusterConfig,
 }
 
@@ -108,18 +98,16 @@ impl Default for ItemDensityConfig {
 /// the same radius to keep new gold near existing gold so clumps don't erode to uniform
 /// as the agent eats them. `clustered_fraction == 0` ⇒ legacy uniform scatter.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct GoldClusterConfig {
-    #[serde(default)]
     pub clustered_fraction: f32,
-    #[serde(default = "default_clump_size")]
     pub clump_size: (usize, usize),
-    #[serde(default = "default_clump_radius")]
     pub radius: i32,
 }
 
 impl Default for GoldClusterConfig {
     fn default() -> Self {
-        Self { clustered_fraction: 0.0, clump_size: default_clump_size(), radius: default_clump_radius() }
+        Self { clustered_fraction: 0.0, clump_size: (2, 3), radius: 1 }
     }
 }
 
@@ -135,17 +123,13 @@ impl GoldClusterConfig {
 
 impl ItemDensityConfig {
     pub fn to_spawn_configs(&self, free_tiles: usize) -> Vec<ItemSpawnConfig> {
-        let mut out = Vec::new();
-        let mut push = |kind: ItemKind, per_hundred: f32| {
-            let initial = ((free_tiles as f32) * per_hundred / 100.0).round() as usize;
-            if initial > 0 {
-                out.push(ItemSpawnConfig { kind, max_on_map: (initial * 2).max(1) });
-            }
-        };
-        push(ItemKind::Gold,       self.gold);
-        push(ItemKind::Speed,      self.speed);
-        push(ItemKind::Multiplier, self.multiplier);
-        out
+        [(ItemKind::Gold, self.gold), (ItemKind::Speed, self.speed), (ItemKind::Multiplier, self.multiplier)]
+            .into_iter()
+            .filter_map(|(kind, per_hundred)| {
+                let initial = (free_tiles as f32 * per_hundred / 100.0).round() as usize;
+                (initial > 0).then(|| ItemSpawnConfig { kind, max_on_map: (initial * 2).max(1) })
+            })
+            .collect()
     }
 }
 
@@ -154,23 +138,16 @@ impl ItemDensityConfig {
 /// Per-stage reward weights. Serde defaults match the stage-1 constants below so
 /// omitting this section from a RON file is always safe.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct RewardConfig {
-    #[serde(default = "default_reward_tick")]
     pub tick: f32,
-    #[serde(default = "default_reward_pickup")]
     pub pickup: f32,
-    #[serde(default = "default_reward_deposit")]
     pub deposit: f32,
-    /// Small penalty when a Move action is blocked by a wall (no position change).
-    #[serde(default)]
     pub wall_hit: f32,
     /// Per-tick discount applied WITHIN a navigation option: the option's return is
     /// Σ γᵗ rₜ over the ticks it ran (semi-MDP option return). This is what makes a
-    /// nearer reward worth more than a farther one — a pickup that takes 50 ticks is
-    /// discounted to ~γ⁵⁰ of its value, a 5-tick pickup to ~γ⁵ — so the policy learns
-    /// to prefer closer/efficient targets. Must match the PPO `gamma` so the
+    /// nearer reward worth more than a farther one. Must match the PPO `gamma` so the
     /// intra-option discounting is consistent with the learner's cross-step discount.
-    #[serde(default = "default_option_gamma")]
     pub option_gamma: f32,
 }
 
@@ -211,19 +188,6 @@ pub struct WorldConfig {
     #[serde(default)]
     pub reward: RewardConfig,
 }
-
-// ── Serde default fns ────────────────────────────────────────────────────────
-
-fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
-fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
-fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
-fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
-fn default_clump_size()         -> (usize, usize) { (2, 3) }
-fn default_clump_radius()       -> i32 { 1 }
-fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
-fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
-fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
-fn default_option_gamma()       -> f32 { RewardConfig::DEFAULT_OPTION_GAMMA }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 

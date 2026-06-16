@@ -304,7 +304,7 @@ def train(cfg: DictConfig) -> None:
     else:
         policy_kwargs = {
             **ATB_POLICY_KWARGS,
-            "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
+            "net_arch": {"pi": list(p_cfg.net_arch_pi), "vf": list(p_cfg.net_arch_vf)},
         }
         model = algo_spec.constructor(
             policy=algo_spec.policy,
