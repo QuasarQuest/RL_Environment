@@ -1,0 +1,81 @@
+Algorithm Test Bed — Project Summary
+=====================================
+(~7 weeks, Apr 19 → Jun 5 2026, ~60 commits)
+
+WHAT YOU BUILT
+--------------
+A Rust simulation engine (sim/) with a Bevy viewer (viewer/) and a Python RL
+training pipeline (rl/), bridged by PyO3. It started as a playground for classic
+pathfinding and ended as a focused reinforcement-learning project: a single agent
+learning to collect gold and deposit it at base, trying to beat scripted baselines.
+
+THE ARC — WHY EACH PHASE HAPPENED
+---------------------------------
+1. "Let me see the algorithms run" (Apr 19 – May 2).
+   Began with the concrete and visual: A*, then D* Lite, a HUD, camera controls,
+   debug overlays. The instinct was sound — build the thing you can watch. Even
+   here the pull toward general structure over one-offs showed up (a "universal
+   debug drawing interface" replacing per-algorithm hacks).
+
+2. "Make it a game" (May 14 – 17).
+   Items, pickups, combat, teams, FSM / Behavior Tree / GOAP strategies, a
+   scoreboard, a match-end screen. Ambition expanded fast — multi-agent combat
+   with several competing AI paradigms.
+
+3. "Make it learn" (May 17 – 21).
+   PyO3 bindings, headless mode, an RL pipeline, Hydra config, a Rich dashboard.
+   The pivot from scripted AI to learned AI. The project's real center of gravity
+   moved here.
+
+4. The Great Simplification (May 23 – Jun 5).
+   The most telling stretch. The commit verbs: Remove. Remove. Remove. Deleted
+   combat, enemies, the FSM, the behavior trees, A* and D* Lite as agent
+   strategies, whole config stages. Scoped down to single-agent gold rush only,
+   and kept the combat engine dormant rather than deleted — parked as the
+   foundation for a deliberately separate future project. The late work (PBRS,
+   then removing it; intra-option discounting; SMDP; a trace recorder) is the
+   fine, patient tuning of one well-defined problem.
+
+THE OUTCOME
+-----------
+A clean, intentionally-scoped system: a refactored Rust engine
+(world/entity/engine/rl/algorithm), MaskablePPO with temporally-extended A*
+navigation options, a reward that's just tick + pickup + deposit + wall-hit, and
+tooling (telemetry, plotting, an offline trace recorder) to actually debug why the
+agent does what it does. Not a sprawling combat sim — something you can train,
+reason about, and explain. The grandeur converted into clarity.
+
+WHAT THIS SAYS ABOUT YOU, AS A PERSON
+-------------------------------------
+- You learn by making things visible. Every phase added a way to see the system —
+  overlays, HUD, scoreboard, dashboards, a trace recorder. You don't trust what
+  you can't observe. That's a real strength.
+
+- Your hardest, most mature work was subtraction. Anyone can add features when
+  excited. Spending two weeks deleting your own combat system, behavior trees, and
+  pathfinding algorithms — code you clearly enjoyed building — to protect one
+  trainable problem is discipline most people don't have. You learned that scope
+  is a feature.
+
+- You stopped treating "delete" as "fail." Keeping the combat engine dormant for a
+  future, separately-scoped game is the move of someone who's made peace with
+  deferring ambition instead of cramming it in. You pushed back on your own
+  premature complexity (the LSTM justified only by hypothetical future self-play,
+  the over-broad reward/obs space — "too much to train and learn for my first
+  agent").
+
+- You're willing to be a beginner on purpose. Calling this "my first agent" and
+  choosing the simplest version is humility in service of actually finishing. The
+  whole back half of this project is you learning that the goal isn't to build the
+  most impressive thing — it's to build the thing you can finish, understand, and
+  stand on next.
+
+ONE SENTENCE TO KEEP
+--------------------
+You started chasing breadth and ended having learned the value of depth — that
+finishing a small, well-understood problem teaches you more than half-building a
+large one.
+
+The combat game is still waiting in the engine, intact. When you build it, you'll
+be building it because you finished this — not instead of finishing this. That's
+the difference.
