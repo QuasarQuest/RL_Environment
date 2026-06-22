@@ -11,7 +11,7 @@ Per-stage output  → runs/<run_dir>/plots/
 
 Combined output   → runs/<prefix>_combined_<YYYYmmdd-HHMMSS>/
     learning_curves/   reward.png  score.png  eval.png  eval_normalised.png   (all stages overlaid)
-    comparison/        final_eval.png  final_score.png  win_rate.png
+    comparison/        final_eval.png  final_score.png
     training_metrics/  one <metric>.png per scalar, all stages overlaid
     manifest.txt       date + stages included
   Written once, into a single timestamped folder — never back into stage folders.
@@ -79,7 +79,6 @@ METRIC_HELP = {
     "game/episode_reward":          "shaped reward per episode (tick + pickup + deposit − wall)",
     "game/episode_length":          "decision-steps (options) per episode",
     "game/score":                   "gold banked at base — the true objective",
-    "game/win_rate":                "fraction of episodes flagged win (always 0 in gold-rush)",
     "perf/steps_per_sec":           "training throughput (env steps / second)",
     "rollout/ep_len_mean":          "SB3 rolling mean episode length",
     "rollout/ep_rew_mean":          "SB3 rolling mean episode reward",
@@ -109,7 +108,6 @@ class EpisodeData(NamedTuple):
     timestep: np.ndarray
     reward: np.ndarray
     score: np.ndarray
-    win: np.ndarray
     ep_length: np.ndarray
 
 
@@ -141,7 +139,6 @@ def load_episodes(run_dir: Path) -> EpisodeData | None:
             timestep=g["timestep"][:],
             reward=g["episode_reward"][:],
             score=g["score"][:],
-            win=g["win"][:],
             ep_length=g["episode_length"][:],
         )
 
@@ -419,11 +416,11 @@ def plot_combined_learning_curves(runs: list[RunInfo], out_dir: Path) -> None:
 
     def overlay(field: str, ylabel: str, fname: str) -> None:
         series = []
-        for info in runs:
-            if info.episodes is None:
+        for r in runs:
+            if r.episodes is None:
                 continue
-            ts, mu, sd = _rolling(info.episodes.timestep, getattr(info.episodes, field))
-            series.append((ts, mu, sd, STAGE_COLORS.get(info.stage, "#aaa"), f"S{info.stage}"))
+            ts, mu, sd = _rolling(r.episodes.timestep, getattr(r.episodes, field))
+            series.append((ts, mu, sd, STAGE_COLORS.get(r.stage, "#aaa"), f"S{r.stage}"))
         _curve(d / fname, f"{ylabel} — all stages (rolling 100)", series, ylabel)
 
     overlay("reward", "Reward", "reward.png")
@@ -485,10 +482,6 @@ def plot_combined_comparison(runs: list[RunInfo], out_dir: Path) -> None:
     sc = tail("score")
     bar([d_.mean() for d_ in sc], [d_.std() for d_ in sc],
         "Final Score (last 10 % of episodes)", "Score", lambda v: f"{v:.2f}", "final_score.png")
-
-    wn = tail("win")
-    bar([d_.mean() * 100 for d_ in wn], None, "Win Rate (last 10 % of episodes)", "Win %",
-        lambda v: f"{v:.1f}%", "win_rate.png", ylim=(0, 110))
 
 
 def plot_combined_training_metrics(runs: list[RunInfo], out_dir: Path) -> None:

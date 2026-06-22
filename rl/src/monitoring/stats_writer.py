@@ -7,8 +7,18 @@ new writer with the same `append`/`flush` interface.
 """
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 from typing import Iterable, Mapping
+
+# HDF5 ≥1.10 takes an advisory flock() on open. With the trainer writing while a
+# read-only monitor (live_monitor / stats_reader / plot_run) polls the same file,
+# the exclusive write-open is refused with BlockingIOError (errno 11, EAGAIN) and
+# the whole run aborts. There is only ever one writer here and the monitors are
+# read-only, so disabling the advisory lock is safe. Must be set before h5py opens
+# any file (the HDF5 C lib reads it at open time) — set it before importing h5py.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 import h5py
 import numpy as np
@@ -42,6 +52,23 @@ class HDF5StatsWriter:
         for row in rows:
             self.append(row)
 
+    # Retry the open a few times before giving up: even with locking disabled this
+    # guards against a transient OS-level contention so a stray hiccup never kills a
+    # multi-hour run over a stats write.
+    _OPEN_RETRIES = 5
+    _OPEN_BACKOFF_S = 0.2
+
+    def _open_append(self) -> h5py.File:
+        last_err: OSError | None = None
+        for attempt in range(self._OPEN_RETRIES):
+            try:
+                return h5py.File(self.path, "a")
+            except (BlockingIOError, OSError) as err:
+                last_err = err
+                time.sleep(self._OPEN_BACKOFF_S * (attempt + 1))
+        assert last_err is not None
+        raise last_err
+
     def flush(self) -> None:
         """Write the buffer to disk. Idempotent on an empty buffer."""
         if not self._buffer:
@@ -50,7 +77,7 @@ class HDF5StatsWriter:
         keys = list(self._buffer[0].keys())
         arrays = {k: np.array([row[k] for row in self._buffer]) for k in keys}
 
-        with h5py.File(self.path, "a") as f:
+        with self._open_append() as f:
             grp = f.require_group(self.GROUP)
             for k, arr in arrays.items():
                 if k in grp:

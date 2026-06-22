@@ -23,17 +23,14 @@ pub const SPAWN_POCKET_RADIUS: i32 = 3;
 
 // ── Obstacle generation ───────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObstacleProfile {
     Blocks,
     Walls,
     Scatter,
+    #[default]
     Mixed,
     None,
-}
-
-impl Default for ObstacleProfile {
-    fn default() -> Self { ObstacleProfile::Mixed }
 }
 
 /// Explicit cluster-based obstacle descriptor (old-style config).
@@ -49,14 +46,11 @@ pub struct ObstacleCluster {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct ObstacleConfig {
-    #[serde(default = "default_obstacle_density")]
     pub density: f32,
-    #[serde(default)]
     pub profile: ObstacleProfile,
-    #[serde(default = "default_max_block_fraction")]
     pub max_block_fraction: f32,
-    #[serde(default = "default_max_wall_fraction")]
     pub max_wall_fraction: f32,
 }
 
@@ -74,47 +68,68 @@ impl Default for ObstacleConfig {
 // ── Item density ──────────────────────────────────────────────────────────────
 //
 // Per-kind spawn density, expressed as items per 100 free tiles. Gold is the
-// objective; the three speed tiers, the slow hazard and the multiplier are the
-// gold-rush flavour items. Rarer tiers simply get a lower density.
+// objective; the speed boost and the multiplier are the gold-rush flavour items.
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct ItemDensityConfig {
-    #[serde(default = "default_gold_density")]
     pub gold: f32,
-    #[serde(default)]
-    pub speed1: f32,
-    #[serde(default)]
-    pub speed2: f32,
-    #[serde(default)]
-    pub speed3: f32,
-    #[serde(default)]
-    pub slow: f32,
-    #[serde(default)]
+    pub speed: f32,
     pub multiplier: f32,
+    /// Omit (or `clustered_fraction: 0`) for legacy uniform scatter; otherwise gold
+    /// forms small clumps plus sparse singletons. Total gold COUNT is unchanged.
+    pub gold_clustering: GoldClusterConfig,
 }
 
 impl Default for ItemDensityConfig {
     fn default() -> Self {
-        Self { gold: DEFAULT_GOLD_DENSITY, speed1: 0.0, speed2: 0.0, speed3: 0.0, slow: 0.0, multiplier: 0.0 }
+        Self {
+            gold: DEFAULT_GOLD_DENSITY,
+            speed: 0.0,
+            multiplier: 0.0,
+            gold_clustering: GoldClusterConfig::default(),
+        }
+    }
+}
+
+/// Spatial grouping for gold (objective pickups). A `clustered_fraction` of the gold is
+/// placed in clumps of `clump_size.0..=clump_size.1` tiles within Chebyshev `radius` of
+/// a clump centre; the remainder is scattered as lone singletons. Runtime respawns reuse
+/// the same radius to keep new gold near existing gold so clumps don't erode to uniform
+/// as the agent eats them. `clustered_fraction == 0` ⇒ legacy uniform scatter.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct GoldClusterConfig {
+    pub clustered_fraction: f32,
+    pub clump_size: (usize, usize),
+    pub radius: i32,
+}
+
+impl Default for GoldClusterConfig {
+    fn default() -> Self {
+        Self { clustered_fraction: 0.0, clump_size: (2, 3), radius: 1 }
+    }
+}
+
+impl GoldClusterConfig {
+    /// Whether clustered placement is active (false ⇒ legacy uniform scatter).
+    pub fn enabled(&self) -> bool { self.clustered_fraction > 0.0 }
+    /// Clamped, sane (min, max) clump size — min ≥ 1 and max ≥ min.
+    pub fn clamped_clump(&self) -> (usize, usize) {
+        let lo = self.clump_size.0.max(1);
+        (lo, self.clump_size.1.max(lo))
     }
 }
 
 impl ItemDensityConfig {
     pub fn to_spawn_configs(&self, free_tiles: usize) -> Vec<ItemSpawnConfig> {
-        let mut out = Vec::new();
-        let mut push = |kind: ItemKind, per_hundred: f32| {
-            let initial = ((free_tiles as f32) * per_hundred / 100.0).round() as usize;
-            if initial > 0 {
-                out.push(ItemSpawnConfig { kind, max_on_map: (initial * 2).max(1) });
-            }
-        };
-        push(ItemKind::Gold,       self.gold);
-        push(ItemKind::Speed1,     self.speed1);
-        push(ItemKind::Speed2,     self.speed2);
-        push(ItemKind::Speed3,     self.speed3);
-        push(ItemKind::Slow,       self.slow);
-        push(ItemKind::Multiplier, self.multiplier);
-        out
+        [(ItemKind::Gold, self.gold), (ItemKind::Speed, self.speed), (ItemKind::Multiplier, self.multiplier)]
+            .into_iter()
+            .filter_map(|(kind, per_hundred)| {
+                let initial = (free_tiles as f32 * per_hundred / 100.0).round() as usize;
+                (initial > 0).then(|| ItemSpawnConfig { kind, max_on_map: (initial * 2).max(1) })
+            })
+            .collect()
     }
 }
 
@@ -123,41 +138,34 @@ impl ItemDensityConfig {
 /// Per-stage reward weights. Serde defaults match the stage-1 constants below so
 /// omitting this section from a RON file is always safe.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 pub struct RewardConfig {
-    #[serde(default = "default_reward_tick")]
     pub tick: f32,
-    #[serde(default = "default_reward_pickup")]
     pub pickup: f32,
-    #[serde(default = "default_reward_deposit")]
     pub deposit: f32,
-    /// Small penalty when a Move action is blocked by a wall (no position change).
-    #[serde(default)]
     pub wall_hit: f32,
     /// Per-tick discount applied WITHIN a navigation option: the option's return is
     /// Σ γᵗ rₜ over the ticks it ran (semi-MDP option return). This is what makes a
-    /// nearer reward worth more than a farther one — a pickup that takes 50 ticks is
-    /// discounted to ~γ⁵⁰ of its value, a 5-tick pickup to ~γ⁵ — so the policy learns
-    /// to prefer closer/efficient targets. Must match the PPO `gamma` so the
+    /// nearer reward worth more than a farther one. Must match the PPO `gamma` so the
     /// intra-option discounting is consistent with the learner's cross-step discount.
-    #[serde(default = "default_option_gamma")]
     pub option_gamma: f32,
 }
 
 impl RewardConfig {
-    pub const DEFAULT_TICK:         f32 = -0.0005;
-    pub const DEFAULT_PICKUP:       f32 =  0.5;
-    pub const DEFAULT_DEPOSIT:      f32 =  5.0;
-    pub const DEFAULT_OPTION_GAMMA: f32 =  0.99;
+    pub const DEFAULT_TICK:           f32 = -0.0005;
+    pub const DEFAULT_PICKUP:         f32 =  0.5;
+    pub const DEFAULT_DEPOSIT:        f32 =  5.0;
+    pub const DEFAULT_OPTION_GAMMA:   f32 =  0.99;
 }
 
 impl Default for RewardConfig {
     fn default() -> Self {
         Self {
-            tick:         Self::DEFAULT_TICK,
-            pickup:       Self::DEFAULT_PICKUP,
-            deposit:      Self::DEFAULT_DEPOSIT,
-            wall_hit:     0.0,
-            option_gamma: Self::DEFAULT_OPTION_GAMMA,
+            tick:           Self::DEFAULT_TICK,
+            pickup:         Self::DEFAULT_PICKUP,
+            deposit:        Self::DEFAULT_DEPOSIT,
+            wall_hit:       0.0,
+            option_gamma:   Self::DEFAULT_OPTION_GAMMA,
         }
     }
 }
@@ -180,17 +188,6 @@ pub struct WorldConfig {
     #[serde(default)]
     pub reward: RewardConfig,
 }
-
-// ── Serde default fns ────────────────────────────────────────────────────────
-
-fn default_obstacle_density()   -> f32 { DEFAULT_OBSTACLE_DENSITY }
-fn default_max_block_fraction() -> f32 { DEFAULT_MAX_BLOCK_FRACTION }
-fn default_max_wall_fraction()  -> f32 { DEFAULT_MAX_WALL_FRACTION }
-fn default_gold_density()       -> f32 { DEFAULT_GOLD_DENSITY }
-fn default_reward_tick()        -> f32 { RewardConfig::DEFAULT_TICK }
-fn default_reward_pickup()      -> f32 { RewardConfig::DEFAULT_PICKUP }
-fn default_reward_deposit()     -> f32 { RewardConfig::DEFAULT_DEPOSIT }
-fn default_option_gamma()       -> f32 { RewardConfig::DEFAULT_OPTION_GAMMA }
 
 // ── WorldConfig methods ───────────────────────────────────────────────────────
 

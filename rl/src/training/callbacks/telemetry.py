@@ -21,7 +21,12 @@ exposes it; the single-env DummyVecEnv path is silently skipped.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 from stable_baselines3.common.callbacks import BaseCallback
+
+if TYPE_CHECKING:
+    from env.batch_vec_env import BatchVecEnv
 
 
 class PolicyTelemetryCallback(BaseCallback):
@@ -41,14 +46,16 @@ class PolicyTelemetryCallback(BaseCallback):
         self._optlen_sum = 0.0
         self._optlen_n = 0
 
-    def _find_telemetry_env(self):
+    def _find_telemetry_env(self) -> "BatchVecEnv | None":
         """Unwrap VecNormalize etc. to the env exposing decision_telemetry()."""
         env = self.training_env
         seen = 0
         while env is not None and not hasattr(env, "decision_telemetry") and seen < 8:
             env = getattr(env, "venv", None)
             seen += 1
-        return env if (env is not None and hasattr(env, "decision_telemetry")) else None
+        if env is not None and hasattr(env, "decision_telemetry"):
+            return cast("BatchVecEnv", env)
+        return None
 
     def _on_step(self) -> bool:
         env = self._find_telemetry_env()

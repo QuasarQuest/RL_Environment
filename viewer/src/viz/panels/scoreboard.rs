@@ -3,12 +3,12 @@ use bevy::color::Alpha;
 use atb::engine::AgentState;
 use crate::sim_bridge::SimBridge;
 use crate::style::{ThemeColor, UiRoot, SIZE_SM, SIZE_XL, TOOLBAR_H};
-use crate::style::color::{team_color, SURFACE_HIGHLIGHT, GREEN_400, RED_500, VIOLET_400, ROW_STRIPE};
+use crate::style::color::{team_color, SURFACE_HIGHLIGHT, GREEN_400, VIOLET_400, ROW_STRIPE};
 use crate::team::Team;
 use super::components::{
     TabScoreboard, TabScoreboardContent, ScoreboardRow,
     ScoreboardTeamScore,
-    ScoreboardRowSpeed, ScoreboardRowSlow, ScoreboardRowMult, ScoreboardRowGold, ScoreboardRowScore,
+    ScoreboardRowSpeed, ScoreboardRowMult, ScoreboardRowGold, ScoreboardRowScore,
 };
 
 const F_AGENT: f32 = 15.0;
@@ -18,11 +18,10 @@ const F_AVG:   f32 = 16.0;
 
 const W_AGENT: f32 = 180.0;
 const W_SPEED: f32 =  60.0;
-const W_SLOW:  f32 =  60.0;
 const W_MULT:  f32 =  60.0;
 const W_GOLD:  f32 =  56.0;
 const W_SCORE: f32 =  72.0;
-const TOTAL_W: f32 = 16.0 + W_AGENT + W_SPEED + W_SLOW + W_MULT + W_GOLD + W_SCORE + 16.0;
+const TOTAL_W: f32 = 16.0 + W_AGENT + W_SPEED + W_MULT + W_GOLD + W_SCORE + 16.0;
 
 pub fn spawn_tab_scoreboard(mut commands: Commands) {
     let bg     = ThemeColor::Background.resolve();
@@ -50,7 +49,7 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
         ZIndex(200),
     )).with_children(|panel| {
         // Column header row. Buff headers are tinted with their buff colour so the
-        // columns double as a legend (speed=green, slow=red, mult=violet).
+        // columns double as a legend (speed=green, mult=violet).
         panel.spawn((
             Node {
                 flex_direction: FlexDirection::Row,
@@ -65,7 +64,6 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             let gold_hdr = ThemeColor::AccentGold.resolve();
             hdr_cell(hdr, "AGENT", W_AGENT, dim);
             hdr_cell(hdr, "SPEED", W_SPEED, GREEN_400);
-            hdr_cell(hdr, "SLOW",  W_SLOW,  RED_500);
             hdr_cell(hdr, "MULT",  W_MULT,  VIOLET_400);
             hdr_cell(hdr, "GOLD",  W_GOLD,  gold_hdr);
             hdr_cell(hdr, "SCORE", W_SCORE, dim);
@@ -87,7 +85,7 @@ pub fn spawn_tab_scoreboard(mut commands: Commands) {
             BorderColor::all(border),
         )).with_children(|f| {
             f.spawn((
-                Text::new("Hold TAB · buff columns show ticks remaining"),
+                Text::new("Hold TAB · SPEED = ticks left · MULT = charge held"),
                 TextFont  { font_size: SIZE_SM, ..default() },
                 TextColor(dim),
             ));
@@ -112,6 +110,11 @@ fn buff_text(ticks: u16) -> String {
 /// Buff cell colour: the buff's colour when active, dim when inactive.
 fn buff_color(ticks: u16, active: Color, dim: Color) -> Color {
     if ticks > 0 { active } else { dim }
+}
+
+/// Multiplier cell: "×2" while a charge is held (to spend on the next deposit), else "–".
+fn charge_text(charge: u8) -> String {
+    if charge > 0 { "×2".to_string() } else { "–".to_string() }
 }
 
 fn stat_cell<M: Component>(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color, size: f32, marker: M) {
@@ -217,8 +220,7 @@ pub fn build_scoreboard_rows(
                         Node { width: Val::Px(W_AGENT), ..default() },
                     ));
                     stat_cell(row, &buff_text(agent.speed_buff), W_SPEED, buff_color(agent.speed_buff, GREEN_400,  dim), F_STAT,  ScoreboardRowSpeed(agent_idx));
-                    stat_cell(row, &buff_text(agent.slow_buff),  W_SLOW,  buff_color(agent.slow_buff,  RED_500,    dim), F_STAT,  ScoreboardRowSlow(agent_idx));
-                    stat_cell(row, &buff_text(agent.mult_buff),  W_MULT,  buff_color(agent.mult_buff,  VIOLET_400, dim), F_STAT,  ScoreboardRowMult(agent_idx));
+                    stat_cell(row, &charge_text(agent.mult_charge), W_MULT, if agent.mult_charge > 0 { VIOLET_400 } else { dim }, F_STAT, ScoreboardRowMult(agent_idx));
                     stat_cell(row, &agent.gold_carried.to_string(), W_GOLD,  gold_carry_color,       F_STAT,  ScoreboardRowGold(agent_idx));
                     stat_cell(row, &agent.score.to_string(),        W_SCORE, score_c,                F_SCORE, ScoreboardRowScore(agent_idx));
                 });
@@ -237,7 +239,6 @@ pub fn refresh_scoreboard_stats(
     bridge: Res<SimBridge>,
     mut qs: ParamSet<(
         Query<(&mut Text, &mut TextColor, &ScoreboardRowSpeed)>,
-        Query<(&mut Text, &mut TextColor, &ScoreboardRowSlow)>,
         Query<(&mut Text, &mut TextColor, &ScoreboardRowMult)>,
         Query<(&mut Text, &mut TextColor, &ScoreboardRowGold)>,
         Query<(&mut Text, &ScoreboardRowScore)>,
@@ -258,26 +259,20 @@ pub fn refresh_scoreboard_stats(
     }
     for (mut text, mut color, marker) in qs.p1().iter_mut() {
         if let Some(a) = agents.get(marker.0) {
-            *text  = Text::new(buff_text(a.slow_buff));
-            *color = TextColor(buff_color(a.slow_buff, RED_500, dim));
+            *text  = Text::new(charge_text(a.mult_charge));
+            *color = TextColor(if a.mult_charge > 0 { VIOLET_400 } else { dim });
         }
     }
     for (mut text, mut color, marker) in qs.p2().iter_mut() {
-        if let Some(a) = agents.get(marker.0) {
-            *text  = Text::new(buff_text(a.mult_buff));
-            *color = TextColor(buff_color(a.mult_buff, VIOLET_400, dim));
-        }
-    }
-    for (mut text, mut color, marker) in qs.p3().iter_mut() {
         if let Some(a) = agents.get(marker.0) {
             *text  = Text::new(a.gold_carried.to_string());
             *color = TextColor(if a.gold_carried > 0 { gold_c } else { primary });
         }
     }
-    for (mut text, marker) in qs.p4().iter_mut() {
+    for (mut text, marker) in qs.p3().iter_mut() {
         if let Some(a) = agents.get(marker.0) { *text = Text::new(a.score.to_string()); }
     }
-    for (mut text, marker) in qs.p5().iter_mut() {
+    for (mut text, marker) in qs.p4().iter_mut() {
         *text = Text::new(bridge.team_score(marker.0).to_string());
     }
 }

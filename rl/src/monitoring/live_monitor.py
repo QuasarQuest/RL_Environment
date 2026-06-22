@@ -15,8 +15,13 @@ Options
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
+
+# Disable HDF5's advisory lock so this poller never holds a read lock that blocks the
+# trainer's concurrent append. Must precede the h5py import below.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 import numpy as np
 import typer
@@ -41,7 +46,7 @@ def _read_hdf5(path: Path) -> pd.DataFrame | None:
         with h5py.File(path, "r") as f:
             if "episodes" not in f:
                 return None
-            data = {k: f["episodes"][k][:] for k in f["episodes"].keys()}
+            data = {k: f["episodes"][k][:] for k in f["episodes"]}
         df = pd.DataFrame(data)
         if df.empty:
             return None
@@ -56,12 +61,11 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     n = len(df)
     tail = df.tail(window)
 
-    reward_mean = tail["episode_reward"].mean()
-    reward_std = tail["episode_reward"].std(ddof=0)
-    reward_max = df["episode_reward"].max()
-    length_mean = tail["episode_length"].mean()
-    score_mean = tail["score"].mean() if "score" in tail.columns else float("nan")
-    win_rate = tail["win"].mean() if "win" in tail.columns else float("nan")
+    reward_mean = float(tail["episode_reward"].mean())
+    reward_std = float(tail["episode_reward"].std(ddof=0))
+    reward_max = float(df["episode_reward"].max())
+    length_mean = float(tail["episode_length"].mean())
+    score_mean = float(tail["score"].mean()) if "score" in tail.columns else float("nan")
     last_step = int(df["timestep"].max()) if "timestep" in df.columns else 0
 
     table = Table(
@@ -85,13 +89,12 @@ def _make_table(path: Path, df: pd.DataFrame, window: int, interval: int) -> Tab
     table.add_row("reward max (all time)", _fmt(reward_max))
     table.add_row(f"ep length mean (last {window})", _fmt(length_mean, ".1f"))
     table.add_row(f"score mean (last {window})", _fmt(score_mean))
-    table.add_row(f"win rate   (last {window})", _fmt(win_rate, ".1%"))
 
     # Trend arrow: compare last window/2 to previous window/2
     half = max(window // 2, 1)
     if n >= window:
-        prev_mean = df["episode_reward"].iloc[-window:-half].mean()
-        curr_mean = df["episode_reward"].iloc[-half:].mean()
+        prev_mean = float(df["episode_reward"].iloc[-window:-half].mean())
+        curr_mean = float(df["episode_reward"].iloc[-half:].mean())
         delta = curr_mean - prev_mean
         arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "→")
         colour = "green" if delta > 0 else ("red" if delta < 0 else "yellow")

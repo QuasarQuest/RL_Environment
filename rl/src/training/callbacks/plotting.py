@@ -51,7 +51,7 @@ class PeriodicPlotCallback(BaseCallback):
         env = {**os.environ, "MPLBACKEND": "Agg"}  # headless render, no GUI needed
         self.run_dir.mkdir(parents=True, exist_ok=True)
         log = self.run_dir / "plot.log"
-        self._logfh = open(log, "a")  # noqa: SIM115 — kept open for the child's lifetime
+        self._logfh = open(log, "a")
         self._proc = subprocess.Popen(
             [sys.executable, str(self.plot_script),
              "--dirs", str(self.run_dir), "--no-show"],
@@ -77,11 +77,11 @@ class PeriodicPlotCallback(BaseCallback):
         if self._proc is not None and self._proc.poll() is None:
             try:
                 self._proc.wait(timeout=180)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 pass
         self._spawn()
         if self._proc is not None:
             try:
                 self._proc.wait(timeout=300)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 pass

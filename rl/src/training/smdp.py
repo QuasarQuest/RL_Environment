@@ -18,14 +18,19 @@ Wire both in train.py:
     model  = Algo(..., rollout_buffer_class=rb_cls)
     callbacks += [SmdpDiscountCallback()]
 
-recurrent_ppo uses RecurrentRolloutBuffer and is not covered here; with it the
-callback simply no-ops (the buffer has no `option_ticks`), falling back to plain γ.
+Algos without an SMDP buffer fall back to plain γ: smdp_buffer_class returns None
+and the callback no-ops (the buffer has no `option_ticks`).
 """
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
+
+if TYPE_CHECKING:
+    from env.batch_vec_env import BatchVecEnv
 
 try:
     from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
@@ -35,7 +40,18 @@ except ImportError:
     _MASKABLE = False
 
 
-class _SmdpGaeMixin:
+# At runtime the mixin is combined with a concrete RolloutBuffer subclass (see
+# SmdpRolloutBuffer / SmdpMaskableRolloutBuffer), inheriting gamma, gae_lambda,
+# buffer_size, n_envs, values, rewards, advantages, returns, … from it. Declaring
+# RolloutBuffer as the static base (type-checking only) lets the checker resolve
+# those without changing the runtime MRO — the real base comes from the subclass.
+if TYPE_CHECKING:
+    _BufBase = RolloutBuffer
+else:
+    _BufBase = object
+
+
+class _SmdpGaeMixin(_BufBase):
     """Override GAE to discount each transition by γ^(option_ticks) instead of γ.
 
     Mirrors stable_baselines3.common.buffers.RolloutBuffer.compute_returns_and_advantage
@@ -43,26 +59,32 @@ class _SmdpGaeMixin:
     per-env ``self.gamma ** self.option_ticks[step]``.
     """
 
-    def reset(self) -> None:
-        super().reset()  # type: ignore[misc]
-        # Default 1 → γ^1 = γ (plain PPO) until the callback writes real option lengths.
-        self.option_ticks = np.ones((self.buffer_size, self.n_envs), dtype=np.float32)  # type: ignore[attr-defined]
+    #: Per-(step, env) option length k; γ^k replaces the scalar γ in GAE. Populated
+    #: in reset() and overwritten each step by SmdpDiscountCallback.
+    option_ticks: np.ndarray
 
-    def compute_returns_and_advantage(self, last_values, dones) -> None:  # type: ignore[override]
+    def reset(self) -> None:
+        super().reset()
+        # Default 1 → γ^1 = γ (plain PPO) until the callback writes real option lengths.
+        self.option_ticks = np.ones((self.buffer_size, self.n_envs), dtype=np.float32)
+
+    def compute_returns_and_advantage(self, last_values, dones) -> None:
         last_values = last_values.clone().cpu().numpy().flatten()
         last_gae_lam = 0.0
-        for step in reversed(range(self.buffer_size)):  # type: ignore[attr-defined]
-            if step == self.buffer_size - 1:  # type: ignore[attr-defined]
+        for step in reversed(range(self.buffer_size)):
+            if step == self.buffer_size - 1:
                 next_non_terminal = 1.0 - dones.astype(np.float32)
                 next_values = last_values
             else:
-                next_non_terminal = 1.0 - self.episode_starts[step + 1]  # type: ignore[attr-defined]
-                next_values = self.values[step + 1]  # type: ignore[attr-defined]
-            disc = self.gamma ** self.option_ticks[step]  # γ^k, per env  # type: ignore[attr-defined]
-            delta = self.rewards[step] + disc * next_values * next_non_terminal - self.values[step]  # type: ignore[attr-defined]
-            last_gae_lam = delta + disc * self.gae_lambda * next_non_terminal * last_gae_lam  # type: ignore[attr-defined]
-            self.advantages[step] = last_gae_lam  # type: ignore[attr-defined]
-        self.returns = self.advantages + self.values  # type: ignore[attr-defined]
+                next_non_terminal = 1.0 - self.episode_starts[step + 1]
+                next_values = self.values[step + 1]
+            disc = self.gamma ** self.option_ticks[step]  # γ^k, per env
+            delta = (self.rewards[step]
+                     + disc * next_values * next_non_terminal
+                     - self.values[step])
+            last_gae_lam = delta + disc * self.gae_lambda * next_non_terminal * last_gae_lam
+            self.advantages[step] = last_gae_lam
+        self.returns = self.advantages + self.values
 
 
 class SmdpRolloutBuffer(_SmdpGaeMixin, RolloutBuffer):
@@ -81,7 +103,7 @@ def smdp_buffer_class(algo: str):
         return SmdpMaskableRolloutBuffer if _MASKABLE else None
     if algo == "ppo":
         return SmdpRolloutBuffer
-    return None  # recurrent_ppo: plain γ (RecurrentRolloutBuffer not subclassed)
+    return None  # unsupported algo: plain γ
 
 
 class SmdpDiscountCallback(BaseCallback):
@@ -90,19 +112,21 @@ class SmdpDiscountCallback(BaseCallback):
     SB3 calls callback.on_step() once per env step, BEFORE rollout_buffer.add, so
     writing ``option_ticks[buffer.pos]`` lands in the slot add() is about to fill —
     aligning the discount with the transition's reward. No-ops if the buffer is not
-    an SMDP buffer (e.g. recurrent_ppo) or the env lacks option_ticks (single-env).
+    an SMDP buffer or the env lacks option_ticks (single-env).
     """
 
-    def _find_env(self):
+    def _find_env(self) -> "BatchVecEnv | None":
         env = self.training_env
         seen = 0
         while env is not None and not hasattr(env, "option_ticks") and seen < 8:
             env = getattr(env, "venv", None)
             seen += 1
-        return env if (env is not None and hasattr(env, "option_ticks")) else None
+        if env is not None and hasattr(env, "option_ticks"):
+            return cast("BatchVecEnv", env)
+        return None
 
     def _on_step(self) -> bool:
-        buf = getattr(self.model, "rollout_buffer", None)
+        buf: Any = getattr(self.model, "rollout_buffer", None)
         if buf is None or not hasattr(buf, "option_ticks"):
             return True
         env = self._find_env()

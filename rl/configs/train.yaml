@@ -11,9 +11,8 @@ defaults:
 
 train:
   run_name: run
-  # MaskablePPO (feedforward) — gold rush is fully observable, so no LSTM.
-  # Action masking forbids provably-useless actions (empty regions, base when
-  # empty-handed); Wait is never masked. See sim/src/engine action_mask().
+  # MaskablePPO — action masking forbids provably-useless actions (empty regions,
+  # base when empty-handed); Wait is never masked. See sim/src/engine action_mask().
   algo: maskable_ppo
   # NOTE: with temporally-extended options (SimCore::step_option) one timestep is
   # one high-level DECISION (a full A* traversal), not one sim tick — so this goes

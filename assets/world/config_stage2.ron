@@ -1,20 +1,22 @@
-// Stage 2 — adds light obstacles and the speed/slow items. 1000-tick episodes.
-// The agent learns to detour for speed boosts (3 rarity tiers) and avoid the
-// slow-down hazard while routing gold around scattered obstacles.
+// Stage 2 — adds light obstacles and the speed item. 2000-tick episodes (doubled
+// from 1000 for the half-rate movement cadence). The agent learns to detour for the
+// single speed boost (one tile every tick while active) around scattered obstacles.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 1000,
+    match_duration_ticks: 2000,
 
     obstacles: ( density: 0.06, profile: Mixed ),
 
+    // One speed item; density trimmed ~20% (0.5 → 0.4).
     item_density: (
-        gold:   2.0,
-        speed1: 0.5,   // common  — 40-tick 2× boost
-        speed2: 0.25,  // uncommon — 80-tick
-        speed3: 0.1,   // rare    — 160-tick
-        slow:   0.4,   // hazard  — 60-tick 0.5× (avoid it)
+        gold:  1.0,
+        speed: 0.2,
+        // Gold in 2–3-tile clumps + sparse singletons (count unchanged; 0 = uniform).
+        gold_clustering: ( clustered_fraction: 0.7, clump_size: (2, 3), radius: 1 ),
     ),
 
-    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),
+    // option_gamma is the per-tick discount; it MUST equal ppo.gamma (configs/ppo)
+    // — one rate at two hierarchy levels, asserted at startup (training/train.py).
+    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01, option_gamma: 0.99 ),
 )

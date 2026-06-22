@@ -27,7 +27,7 @@
 // strategic call — which region, and when to bank — not the micro-pathing.
 //
 // NOTE: CLUSTER_K here must match CLUSTER_K in rl/action.rs and rl/obs.rs, and
-// ACTION_SIZE in rl/action.rs is sized as CLUSTER_K + 7 direct/nav actions.
+// ACTION_SIZE in rl/action.rs is sized as CLUSTER_K + 4 (base, speed, mult, wait).
 
 use crate::world::coords::GridPos;
 
@@ -56,12 +56,23 @@ impl GoldCluster {
             .copied()
     }
 
-    /// Mean position of all gold pieces in the cluster.
-    pub fn centroid(&self) -> (f32, f32) {
-        let n = self.golds.len() as f32;
-        let cx = self.golds.iter().map(|g| g.x as f32).sum::<f32>() / n;
-        let cy = self.golds.iter().map(|g| g.y as f32).sum::<f32>() / n;
-        (cx, cy)
+    /// Gold piece in the cluster with the smallest TRUE path distance (BFS around
+    /// walls), given a precomputed `dist_field`. `None` if every gold in the region
+    /// is walled off from the field's origin. This is the path-aware analogue of
+    /// `nearest_gold` and is the single source of truth for "which gold does region
+    /// k commit to": the observation (obs.rs), the nav target (resolve_nav_goal) and
+    /// the action mask all resolve through it, so the policy is shown, navigated to,
+    /// and permitted exactly the same reachable target — no straight-line vs.
+    /// path-aware mismatch that could strand the agent on unreachable gold.
+    pub fn nearest_reachable_gold(
+        &self,
+        dist: &[i32],
+        grid: &crate::world::grid::Grid,
+    ) -> Option<GridPos> {
+        self.golds.iter()
+            .filter_map(|&g| crate::engine::nav::dist_at(dist, grid, g).map(|d| (d, g)))
+            .min_by_key(|&(d, _)| d)
+            .map(|(_, g)| g)
     }
 }
 

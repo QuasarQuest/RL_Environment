@@ -13,17 +13,12 @@ maskable_ppo  : PPO with per-step action masking (sb3-contrib). This is the
                 (AtbEnv / BatchVecEnv) and MaskablePPO consumes them via
                 env_method, so provably-useless actions (empty regions, base when
                 empty-handed) are forbidden; Wait is never masked.
-recurrent_ppo : PPO + LSTM (sb3-contrib). Optional — for partially-observable
-                variants where temporal memory helps. NOTE: eval must use the
-                standard (non-maskable) EvalCallback for this algo — see
-                training/callbacks/eval.py:make_eval_callback.
 
 Policy choice
 -------------
-ppo / maskable_ppo use "MlpPolicy"; recurrent_ppo uses "MlpLstmPolicy". In all
-cases the observation space is flat (10222,) and AtbCnnExtractor handles the CNN
-internally — SB3 routes the policy string through the custom
-features_extractor_class set in the policy_kwargs (see network/policy.py).
+Both algos use "MlpPolicy": the observation space is flat (10222,) and
+AtbCnnExtractor handles the CNN internally — SB3 routes the policy string through
+the custom features_extractor_class set in the policy_kwargs (see network/policy.py).
 
 Switching back to the legacy flat-vector pipeline:
   - policy.py:   ATB_POLICY_KWARGS = ATB_MLP_POLICY_KWARGS
@@ -37,7 +32,7 @@ from typing import Any, Protocol, Type, runtime_checkable
 import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
+from stable_baselines3.common.type_aliases import GymEnv, Schedule
 
 try:
     from sb3_contrib import MaskablePPO
@@ -46,14 +41,6 @@ try:
 except ImportError:
     _MASKABLE_AVAILABLE = False
     MaskablePPO = None  # type: ignore[assignment,misc]
-
-try:
-    from sb3_contrib import RecurrentPPO
-
-    _RECURRENT_AVAILABLE = True
-except ImportError:
-    _RECURRENT_AVAILABLE = False
-    RecurrentPPO = None  # type: ignore[assignment,misc]
 
 
 # ---------------------------------------------------------------------------
@@ -129,21 +116,9 @@ def _make_maskable_spec() -> AlgoSpec:
     )
 
 
-def _make_recurrent_spec() -> AlgoSpec:
-    assert RecurrentPPO is not None  # only called when _RECURRENT_AVAILABLE
-    return AlgoSpec(
-        name="recurrent_ppo",
-        cls=RecurrentPPO,
-        policy="MlpLstmPolicy",  # flat obs + LSTM; custom extractor injected via policy_kwargs
-        supports_discrete=True,
-        supports_continuous=False,
-    )
-
-
 ALGOS: dict[str, AlgoSpec] = {
     "ppo": PPO_SPEC,
     **({"maskable_ppo": _make_maskable_spec()} if _MASKABLE_AVAILABLE else {}),
-    **({"recurrent_ppo": _make_recurrent_spec()} if _RECURRENT_AVAILABLE else {}),
 }
 
 

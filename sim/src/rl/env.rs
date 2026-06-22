@@ -17,8 +17,8 @@
 // All three are now absorbed into the single parallel step pass.
 //
 // Scaling note: gather was O(n_envs × OBS_TOTAL) serial memcpy. With
-// OBS_TOTAL = 10222 (8750 crop + 1445 minimap + 27 cluster) at n_envs = 256
-// that is ~2.6M f32 copies (~10.5MB) per step. The obs copy is now distributed
+// OBS_TOTAL = 8692 (7500 crop + 1156 minimap + 36 cluster) at n_envs = 256
+// that is ~2.2M f32 copies (~8.9MB) per step. The obs copy is now distributed
 // across Rayon threads, each writing its own non-overlapping OBS_TOTAL-float
 // slice of obs_flat (well above a cache line, so no false sharing on obs; the
 // adjacent single-element writes into rews/dones can share a line only at the
@@ -224,11 +224,8 @@ impl BatchEnv {
         self.envs[i].items.iter()
             .map(|it| (it.pos.x, it.pos.y, match it.kind {
                 ItemKind::Gold       => 0,
-                ItemKind::Speed1     => 1,
-                ItemKind::Speed2     => 2,
-                ItemKind::Speed3     => 3,
-                ItemKind::Slow       => 4,
-                ItemKind::Multiplier => 5,
+                ItemKind::Speed      => 1,
+                ItemKind::Multiplier => 4,
             }))
             .collect()
     }

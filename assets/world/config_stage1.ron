@@ -1,14 +1,21 @@
 // Stage 1 — single-agent gold rush. Open 50×50 map, gold only, no obstacles.
-// Short 500-tick episodes: enough to explore and learn pick-up → deposit routing.
+// 1000-tick episodes: enough to explore and learn pick-up → deposit routing. (Doubled
+// from 500 for the half-rate movement cadence, so the agent covers the same ground.)
 // Base position is randomised per episode inside a 7×7 spawn pocket (engine/builder.rs).
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 500,
+    match_duration_ticks: 1000,
 
     obstacles: ( density: 0.0, profile: None ),
 
-    item_density: ( gold: 2.0 ),
+    item_density: (
+        gold: 1.5,
+        // Gold in 2–3-tile clumps + sparse singletons (count unchanged; 0 = uniform).
+        gold_clustering: ( clustered_fraction: 0.7, clump_size: (2, 3), radius: 1 ),
+    ),
 
-    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),
+    // option_gamma is the per-tick discount; it MUST equal ppo.gamma (configs/ppo)
+    // — one rate at two hierarchy levels, asserted at startup (training/train.py).
+    reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01, option_gamma: 0.99 ),
 )

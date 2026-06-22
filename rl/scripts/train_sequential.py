@@ -47,9 +47,9 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 # ── Per-stage timesteps (override all with --timesteps) ───────────────────────
 
 DEFAULT_TIMESTEPS: dict[int, int] = {
-    1: 1_500_000,
-    2: 2_000_000,
-    3: 2_500_000,
+    1: 1_750_000,
+    2: 2_500_000,
+    3: 3_000_000,
 }
 
 PLOT_SCRIPT = SCRIPT_DIR / "plot_runs.py"

@@ -12,9 +12,13 @@
 // Reward is intentionally MINIMAL and event-based: the agent learns purely from
 // game outcomes — gold picked up, gold banked — plus a tiny per-step time cost
 // and the wall_hit penalty. There is deliberately NO approach/navigation shaping
-// (the policy discovers where to go from the observation alone). With the
-// temporally-extended options in SimCore::step_option each pickup/deposit lands
-// at an option boundary, so credit assignment is already short.
+// and NO buff-use shaping (the policy discovers where to go from the observation
+// alone). With the temporally-extended options in SimCore::step_option each
+// pickup/deposit lands at an option boundary, so credit assignment is already short.
+//
+// The score multiplier needs no dedicated signal: a deposit made with a multiplier
+// charge banks 2× the gold, so `deposit` (which scales with the score gained) is
+// already doubled for it — the incentive to grab and spend a charge is emergent.
 //
 // Combat (kill / death) was removed — this agent is gold rush only.
 //
@@ -62,10 +66,13 @@ pub fn compute_components(
     prev_score: u32,
     wall_hit:   bool,
 ) -> RewardBreakdown {
+    let score_gain = agent.score.saturating_sub(prev_score) as f32;
     RewardBreakdown {
         tick:    cfg.tick,
         pickup:  cfg.pickup  * agent.gold_carried.saturating_sub(prev_gold) as f32,
-        deposit: cfg.deposit * agent.score.saturating_sub(prev_score)       as f32,
+        // A multiplier-charge deposit banks 2× the gold, so score_gain (and thus this
+        // term) already doubles for it — no separate buff-use bonus needed.
+        deposit: cfg.deposit * score_gain,
         wall:    if wall_hit { cfg.wall_hit } else { 0.0 },
     }
 }

@@ -7,7 +7,6 @@ use bevy::prelude::*;
 
 // Per-row live-update markers — keyed by agent index (usize).
 #[derive(Component)] pub struct ScoreboardRowSpeed(pub usize);
-#[derive(Component)] pub struct ScoreboardRowSlow(pub usize);
 #[derive(Component)] pub struct ScoreboardRowMult(pub usize);
 #[derive(Component)] pub struct ScoreboardRowGold(pub usize);
 #[derive(Component)] pub struct ScoreboardRowScore(pub usize);

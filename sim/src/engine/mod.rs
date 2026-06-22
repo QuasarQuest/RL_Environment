@@ -4,7 +4,7 @@
 // (single-agent gold rush: no enemies, no combat).
 //
 // Per-tick step order (`tick_once`):
-//   tick_buffs (speed/slow/multiplier decay)
+//   tick_buffs (speed-buff decay)
 //   → find_clusters (gold clustering for this tick)
 //   → resolve RL action → A* navigate one step (or Wait)
 //   → pickup → auto_deposit → spawner
@@ -36,23 +36,25 @@ use rand::SeedableRng;
 use rand::rngs::{SmallRng, SysRng};
 use rustc_hash::FxHashSet;
 
-use crate::config::AGENT_MAX_GOLD;
+use crate::config::{AGENT_MAX_GOLD, MOVE_ENERGY_BASE, MOVE_ENERGY_SPEED, MOVE_ENERGY_STEP, MULT_CHARGE_MAX};
 use crate::entity::item::ItemKind;
 use crate::rl::action::{
-    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_NEAREST, ACTION_SIZE,
+    int_to_rl_action, RlAction, ACTION_BASE, ACTION_MULT, ACTION_SIZE,
     ACTION_SPEED, ACTION_WAIT, CLUSTER_K,
 };
 use crate::rl::obs::OBS_TOTAL;
 use crate::rl::reward;
 use crate::world::{config::WorldConfig, coords::GridPos, grid::Grid};
-use self::clusters::{GoldCluster, find_clusters, region_of, chebyshev};
+use self::clusters::{GoldCluster, find_clusters, region_of};
 use self::nav::{navigate_action, NavCache};
 use self::obs::build_obs_into;
 use self::spawner::{SpawnBudget, DEFAULT_SPAWN_PROB, tick_spawns};
 
 /// Maximum sim ticks a single navigation option runs before control returns to
-/// the policy. Generous enough to cross the map with margin.
-pub const MAX_OPTION_TICKS: u64 = 96;
+/// the policy. Generous enough to cross the map with margin — at the base movement
+/// cadence (one tile every other tick) ~192 ticks covers ~96 tiles of travel, so a
+/// far-corner goal on a 50×50 map is still reachable inside one option.
+pub const MAX_OPTION_TICKS: u64 = 192;
 
 /// Per-decision telemetry, captured at each option boundary (the moment the policy
 /// commits to a high-level action). Used to answer "does the agent skip nearby gold
@@ -117,6 +119,19 @@ pub struct SimCore {
     prev_gold:   u8,
     prev_score:  u32,
     prev_pos:    GridPos,
+    /// Buff state at the current tick's start. Like prev_gold/prev_score, captured in
+    /// tick_once so the option loop can detect a buff pickup (speed/multiplier) — which
+    /// changes neither gold_carried nor score — and return control to the policy instead
+    /// of letting the item-nav option sweep the map for the next buff to the tick cap.
+    prev_speed_buff: u16,
+    prev_mult_charge: u8,
+
+    /// True while the agent is actively pursuing its nav goal — it either stepped or
+    /// is resting between movement-cadence steps. The option loop keeps running while
+    /// this holds and ends the option once it goes false (arrival, a wall block, or no
+    /// valid target). Replaces the old "position unchanged ⇒ arrived" inference, which
+    /// the half-cadence base movement would otherwise trip on every rest tick.
+    en_route:    bool,
 
     /// Telemetry for the most recent high-level decision (option boundary).
     last_decision: DecisionTelem,
@@ -130,6 +145,22 @@ pub struct SimCore {
 
     /// The RL agent's A* path cache.
     nav_cache: NavCache,
+
+    /// Cluster nav goal committed at the current option's first tick: the region's
+    /// path-nearest reachable gold. Held for the option's duration so the controller
+    /// drives to the exact gold the policy was shown in the observation, and so the
+    /// path-aware BFS runs once per option rather than once per tick. Cleared at each
+    /// option boundary; recomputed if the committed gold is collected mid-option.
+    committed_cluster_goal: Option<GridPos>,
+
+    /// Item nav goal (speed/multiplier) committed at the current option's first tick:
+    /// the path-nearest REACHABLE item of the requested kind. Held for the option's
+    /// duration — exactly like `committed_cluster_goal` — so the controller drives to a
+    /// fixed tile instead of re-running a Chebyshev `nearest_item` every tick, whose
+    /// argmin flips between near-equidistant items as the agent moves and makes it
+    /// oscillate / run past the one it was approaching. Cleared at each option boundary;
+    /// recomputed if the committed item is collected (or vanishes) mid-option.
+    committed_item_goal: Option<GridPos>,
 
     rng: SmallRng,
 
@@ -160,7 +191,7 @@ impl SimCore {
 
         let initial_pos    = snap.agents[0].pos;
         let gold_positions = gold_positions_of(&snap.items);
-        let spawn_budgets  = build_spawn_budgets(&snap.items);
+        let spawn_budgets  = build_spawn_budgets(&snap.items, &world_cfg);
         let spawn_block    = builder::spawn_pocket(
             initial_pos, snap.grid.width as i32, snap.grid.height as i32,
         ).into_iter().collect();
@@ -178,10 +209,14 @@ impl SimCore {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
+            prev_speed_buff: 0, prev_mult_charge: 0,
+            en_route: false,
             last_decision: DecisionTelem::default(),
             last_option_ticks: 1,
             gold_positions, spawn_budgets, spawn_block,
             nav_cache: NavCache::new(),
+            committed_cluster_goal: None,
+            committed_item_goal: None,
             rng,
             obs_buf,
             trace_enabled: false,
@@ -197,16 +232,21 @@ impl SimCore {
         self.items  = snap.items;
 
         self.gold_positions = gold_positions_of(&self.items);
-        self.spawn_budgets  = build_spawn_budgets(&self.items);
+        self.spawn_budgets  = build_spawn_budgets(&self.items, &self.world_cfg);
         self.spawn_block    = builder::spawn_pocket(
             self.agents[0].pos, self.grid.width as i32, self.grid.height as i32,
         ).into_iter().collect();
         self.nav_cache = NavCache::new();
+        self.committed_cluster_goal = None;
+        self.committed_item_goal = None;
 
         self.tick       = 0;
         self.prev_gold  = 0;
         self.prev_score = 0;
+        self.prev_speed_buff = 0;
+        self.prev_mult_charge = 0;
         self.prev_pos   = self.agents[0].pos;
+        self.en_route   = false;
         self.last_decision = DecisionTelem::default();
 
         self.build_observation();
@@ -215,6 +255,8 @@ impl SimCore {
     fn tick_once(&mut self, rl_action: RlAction) -> (reward::RewardBreakdown, bool) {
         self.prev_gold  = self.agents[0].gold_carried;
         self.prev_score = self.agents[0].score;
+        self.prev_speed_buff = self.agents[0].speed_buff;
+        self.prev_mult_charge = self.agents[0].mult_charge;
         self.prev_pos   = self.agents[0].pos;
 
         self.tick += 1;
@@ -248,6 +290,9 @@ impl SimCore {
 
     /// Single-tick step (viewer path).
     pub fn step(&mut self, action: u32) -> (f32, bool) {
+        // Each single-tick call is its own decision — resolve the nav goals fresh.
+        self.committed_cluster_goal = None;
+        self.committed_item_goal = None;
         let (rb, done) = self.tick_once(int_to_rl_action(action));
         self.build_observation();
         (rb.total(), done)
@@ -269,6 +314,10 @@ impl SimCore {
         // Capture decision telemetry at the option boundary (before stepping).
         self.last_decision = self.decision_telem(rl_action);
         if self.trace_enabled { self.trace.clear(); }
+        // New option → drop the previous option's committed goals so the first tick
+        // resolves a fresh path-nearest target for the region/item just chosen.
+        self.committed_cluster_goal = None;
+        self.committed_item_goal = None;
         let gamma = self.world_cfg.reward.option_gamma;
         let mut total_rew = 0.0f32;
         let mut discount = 1.0f32;
@@ -301,11 +350,22 @@ impl SimCore {
             if !rl_action.is_navigation() { break false; }    // Wait: single tick
             if option_ticks >= MAX_OPTION_TICKS { break false; }
             // A reward-relevant event occurred this tick → return control to the policy.
+            // Buff pickups (speed/multiplier) change neither gold_carried nor score, so
+            // they must be checked explicitly — otherwise a NavSpeed/NavMultiplier option
+            // would grab its target and keep sweeping the map for the next buff to the
+            // tick cap instead of letting the policy re-decide. Compare with `>` (not
+            // `!=`): speed_buff is a per-tick countdown (tick_buffs decrements it every
+            // tick), so only an INCREASE marks a fresh pickup; mult_charge likewise rises
+            // on pickup and falls on the deposit that consumes it (already caught by score).
             if self.agents[0].gold_carried != self.prev_gold
-                || self.agents[0].score    != self.prev_score
+                || self.agents[0].score      != self.prev_score
+                || self.agents[0].speed_buff  > self.prev_speed_buff
+                || self.agents[0].mult_charge > self.prev_mult_charge
             { break false; }
-            // No movement this tick → arrived at the goal, blocked, or no valid target.
-            if self.agents[0].pos == self.prev_pos { break false; }
+            // Option ends once the agent stops pursuing its goal — arrived, wall-blocked
+            // or no valid target. A cadence "rest" tick (no step, but still en route)
+            // is NOT an ending, so the option survives the base half-speed movement.
+            if !self.en_route { break false; }
         };
         self.last_option_ticks = option_ticks;
         self.build_observation();
@@ -332,10 +392,10 @@ impl SimCore {
     /// Per-decision action mask: `valid[i] == true` iff action `i` is worth taking.
     /// `Wait` is never masked so there is always a legal action.
     ///
-    ///   - cluster k : valid iff region k holds gold AND the agent can carry more
+    ///   - cluster k : valid iff region k holds REACHABLE gold AND the agent can carry more
     ///   - base      : valid iff the agent is carrying gold
-    ///   - speed     : valid iff a speed-boost item exists on the map
-    ///   - multiplier: valid iff a multiplier item exists on the map
+    ///   - speed     : valid iff a REACHABLE speed-boost item exists on the map
+    ///   - multiplier: valid iff a REACHABLE multiplier item exists AND no charge is held
     ///   - wait      : always valid (fallback)
     pub fn action_mask(&self) -> [bool; ACTION_SIZE] {
         let mut mask = [false; ACTION_SIZE];
@@ -343,26 +403,46 @@ impl SimCore {
 
         let agent = &self.agents[0];
 
+        // One BFS distance field from the agent, shared by every reachability gate below.
+        // The gate matters because a target that is Chebyshev-near but walled off keeps an
+        // action "valid": the greedy eval policy commits to it, A* finds no path → Wait,
+        // the agent never moves, the obs never changes, and argmax re-selects the same dead
+        // action every decision (an absorbing stall — observed freezing the agent for 900+
+        // ticks). This is the same BFS decision_telem/resolve_nav_goal already run per
+        // option, so it adds no asymptotic cost.
+        let dist = nav::dist_field(&self.grid, agent.pos);
+        let reachable = |p: GridPos| nav::dist_at(&dist, &self.grid, p).is_some();
+
         if agent.gold_carried < AGENT_MAX_GOLD {
             let clusters = find_clusters(
                 &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
             );
             for (k, slot) in mask.iter_mut().take(CLUSTER_K).enumerate() {
-                if clusters[k].is_some() { *slot = true; }
+                if let Some(c) = clusters[k].as_ref() {
+                    if c.nearest_reachable_gold(&dist, &self.grid).is_some() {
+                        *slot = true;
+                    }
+                }
             }
         }
         if agent.gold_carried > 0 {
             mask[ACTION_BASE as usize] = true;
         }
-        if self.items.iter().any(|it| it.kind.is_speed()) {
+        if self.items.iter().any(|it| it.kind.is_speed() && reachable(it.pos)) {
             mask[ACTION_SPEED as usize] = true;
         }
-        if self.items.iter().any(|it| it.kind == ItemKind::Multiplier) {
+        // Multiplier is only valid when the agent can actually bank a charge. Once it
+        // already holds one (mult_charge == MULT_CHARGE_MAX), a multiplier item it steps
+        // onto is left in place (pickup.rs refuses it at capacity so it isn't wasted), so
+        // the item persists on the map. Without this guard the greedy policy keeps
+        // selecting Mult, navigates to the item it is already standing on (A* empty →
+        // Wait), the obs never changes, and the agent stalls on the item forever instead
+        // of depositing. The reachability gate guards the walled-off variant of the same
+        // stall.
+        if agent.mult_charge < MULT_CHARGE_MAX
+            && self.items.iter().any(|it| it.kind == ItemKind::Multiplier && reachable(it.pos))
+        {
             mask[ACTION_MULT as usize] = true;
-        }
-        // Nearest-gold: valid whenever any gold exists and the agent can carry more.
-        if agent.gold_carried < AGENT_MAX_GOLD && !self.gold_positions.is_empty() {
-            mask[ACTION_NEAREST as usize] = true;
         }
         mask
     }
@@ -379,51 +459,91 @@ impl SimCore {
         );
     }
 
-    /// Resolve the RL action to a navigation goal and execute one A* step toward it.
-    /// Returns `wall_hit` — true when a Move was attempted but the agent did not
-    /// advance (blocked). `Wait` and goals with no valid target are no-ops.
+    /// Resolve the RL action to a navigation goal and, subject to the movement
+    /// cadence, execute at most one A* step toward it. Returns `wall_hit` — true when
+    /// a step was attempted but the agent walked straight into a wall. As a side effect
+    /// sets `self.en_route` (see the field doc): true while the agent is still pursuing
+    /// the goal (it stepped, or it is resting between cadence steps), false once it has
+    /// arrived, is wall-blocked, or has no valid target.
+    ///
+    /// Movement cadence: each tick the agent gains move energy (base vs. speed-buffed)
+    /// and only steps a tile once it reaches `MOVE_ENERGY_STEP`. Base steps every other
+    /// tick; a speed buff steps every tick — capped at one tile/tick so a speed move
+    /// never teleports two tiles.
     fn apply_rl_action(
         &mut self,
         rl_action: RlAction,
         clusters:  &[Option<GoldCluster>; CLUSTER_K],
     ) -> bool {
-        match rl_action {
-            RlAction::Wait => false,
-            nav_action => {
-                let goal = self.resolve_nav_goal(nav_action, clusters);
-                if let Some(goal) = goal {
-                    let act = navigate_action(
-                        &self.agents[0], goal, &self.grid, &mut self.nav_cache,
-                    );
-                    // Returns true iff the agent stepped straight into a wall.
-                    physics::apply_action(
-                        &mut self.agents, &self.grid, 0, act, self.tick, Some(goal),
-                    )
-                } else {
-                    false
-                }
-            }
+        let nav_action = match rl_action {
+            RlAction::Wait => { self.en_route = false; return false; }
+            nav => nav,
+        };
+
+        // Advance the movement-cadence accumulator; rest this tick if it hasn't yet
+        // reached the step threshold (still en route — the option keeps running).
+        let rate = if self.agents[0].speed_buff > 0 { MOVE_ENERGY_SPEED } else { MOVE_ENERGY_BASE };
+        self.agents[0].move_energy = self.agents[0].move_energy.saturating_add(rate);
+        if self.agents[0].move_energy < MOVE_ENERGY_STEP {
+            self.en_route = true;
+            return false;
         }
+        self.agents[0].move_energy -= MOVE_ENERGY_STEP;
+
+        let Some(goal) = self.resolve_nav_goal(nav_action, clusters) else {
+            self.en_route = false; // no valid target
+            return false;
+        };
+
+        let act = navigate_action(
+            &self.agents[0], goal, &self.grid, &mut self.nav_cache,
+        );
+        let prev = self.agents[0].pos;
+        // Returns true iff the agent stepped straight into a wall.
+        let wall_hit = physics::apply_action(
+            &mut self.agents, &self.grid, 0, act, Some(goal),
+        );
+        // Still en route only if the step made progress; arrival/blockage ends the option.
+        self.en_route = self.agents[0].pos != prev;
+        wall_hit
     }
 
     /// Resolve a navigation RlAction to a concrete GridPos target.
     /// None if the target is unavailable (empty cluster, no such item on the map).
+    ///
+    /// For a cluster the target is the region's PATH-nearest reachable gold (BFS
+    /// around walls) — the exact gold the obs reported and the mask permits — not the
+    /// Chebyshev-nearest, which could be walled off and strand the controller on a
+    /// `Wait` it can never escape. Resolved once per option and cached in
+    /// `committed_cluster_goal`, so the per-tick cost is a cheap membership check and
+    /// the BFS runs only on the option's first tick (or after the target is banked).
     fn resolve_nav_goal(
-        &self,
+        &mut self,
         action:   RlAction,
         clusters: &[Option<GoldCluster>; CLUSTER_K],
     ) -> Option<GridPos> {
         let pos = self.agents[0].pos;
         match action {
-            RlAction::NavigateToCluster(k) => clusters.get(k as usize)
-                .and_then(|c| c.as_ref())
-                .and_then(|c| c.nearest_gold(pos)),
+            RlAction::NavigateToCluster(k) => {
+                if let Some(g) = self.committed_cluster_goal {
+                    if self.gold_positions.contains(&g) {
+                        return Some(g);
+                    }
+                }
+                let c = clusters.get(k as usize)?.as_ref()?;
+                let dist = nav::dist_field(&self.grid, pos);
+                // Path-nearest reachable gold; fall back to Chebyshev-nearest only if
+                // the whole region is walled off (the mask forbids that region under
+                // MaskablePPO, so this fallback only matters for the unmasked path).
+                let g = c.nearest_reachable_gold(&dist, &self.grid)
+                    .or_else(|| c.nearest_gold(pos));
+                self.committed_cluster_goal = g;
+                g
+            }
             RlAction::NavigateToBase        => Some(self.agents[0].base_pos),
-            RlAction::NavigateToSpeed       => self.nearest_item(pos, |k| k.is_speed()),
-            RlAction::NavigateToMultiplier  => self.nearest_item(pos, |k| k == ItemKind::Multiplier),
-            RlAction::NavigateToNearestGold => self.gold_positions.iter()
-                .min_by_key(|&&g| chebyshev(pos, g))
-                .copied(),
+            RlAction::NavigateToSpeed       => self.committed_item_goal(pos, |k| k.is_speed()),
+            RlAction::NavigateToMultiplier  =>
+                self.committed_item_goal(pos, |k| k == ItemKind::Multiplier),
             RlAction::Wait                  => None,
         }
     }
@@ -441,27 +561,25 @@ impl SimCore {
         let own_has_gold =
             self.agents[0].gold_carried < AGENT_MAX_GOLD && clusters[own].is_some();
 
-        // Which gold this action commits to (and whether it's a region pick that can
-        // "skip" local gold). `region = None` for nearest-gold — by construction it
-        // takes the closest gold, so it is never a skip.
+        // Which gold this action commits to (and the region it targets, so we can tell
+        // whether it "skips" gold in the agent's own region). Only the region-nav
+        // actions commit to gold; everything else is a non-gold goal. Uses the same
+        // path-nearest reachable gold the controller will actually drive to, so the
+        // reported `chosen_dist` matches the agent's real route.
+        let field = nav::dist_field(&self.grid, pos);
         let target: Option<(GridPos, Option<usize>)> = match action {
             RlAction::NavigateToCluster(k) => {
                 let kk = k as usize;
                 clusters.get(kk).and_then(|c| c.as_ref())
-                    .and_then(|c| c.nearest_gold(pos))
+                    .and_then(|c| c.nearest_reachable_gold(&field, &self.grid)
+                        .or_else(|| c.nearest_gold(pos)))
                     .map(|g| (g, Some(kk)))
             }
-            RlAction::NavigateToNearestGold => self.gold_positions.iter()
-                .min_by_key(|&&g| chebyshev(pos, g))
-                .copied()
-                .map(|g| (g, None)),
             _ => None,
         };
 
         match target {
             Some((g, region)) => {
-                // Path-aware distance (around walls), not Chebyshev.
-                let field = nav::dist_field(&self.grid, pos);
                 let chosen_dist = nav::dist_at(&field, &self.grid, g).unwrap_or(-1);
                 let skipped_own = own_has_gold && matches!(region, Some(k) if k != own);
                 DecisionTelem { is_cluster: true, own_has_gold, skipped_own, chosen_dist }
@@ -479,6 +597,41 @@ impl SimCore {
             .filter(|it| pred(it.kind))
             .min_by_key(|it| (it.pos.x - from.x).abs().max((it.pos.y - from.y).abs()))
             .map(|it| it.pos)
+    }
+
+    /// Item of the matching kind with the smallest TRUE path distance (BFS around
+    /// walls) from `from`. The path-aware analogue of `nearest_item` — the controller
+    /// drives to the tile it can actually reach soonest, never one that is Chebyshev-near
+    /// but walled off. `None` if no matching item is reachable.
+    fn nearest_reachable_item(
+        &self, from: GridPos, pred: impl Fn(ItemKind) -> bool,
+    ) -> Option<GridPos> {
+        let dist = nav::dist_field(&self.grid, from);
+        self.items.iter()
+            .filter(|it| pred(it.kind))
+            .filter_map(|it| nav::dist_at(&dist, &self.grid, it.pos).map(|d| (d, it.pos)))
+            .min_by_key(|&(d, _)| d)
+            .map(|(_, p)| p)
+    }
+
+    /// Resolve an item-nav goal, committing to it for the whole option (see
+    /// `committed_item_goal` field). Returns the held target while that item still
+    /// exists on the map; otherwise picks the path-nearest reachable item of the kind
+    /// (Chebyshev fallback only if every match is walled off, which the mask forbids
+    /// under MaskablePPO) and commits to it. Holding the target for the option is what
+    /// stops the agent oscillating between near-equidistant items.
+    fn committed_item_goal(
+        &mut self, from: GridPos, pred: impl Fn(ItemKind) -> bool,
+    ) -> Option<GridPos> {
+        if let Some(g) = self.committed_item_goal {
+            if self.items.iter().any(|it| it.pos == g && pred(it.kind)) {
+                return Some(g);
+            }
+        }
+        let g = self.nearest_reachable_item(from, &pred)
+            .or_else(|| self.nearest_item(from, &pred));
+        self.committed_item_goal = g;
+        g
     }
 
     /// The RL agent's current A* path (remaining waypoints toward the last goal).
@@ -507,14 +660,19 @@ fn gold_positions_of(items: &[ItemState]) -> Vec<GridPos> {
 /// One spawn budget per item kind currently present, each refilled toward its
 /// initial on-map count. Gold uses the default probability; flavour items refill
 /// a little slower so the map doesn't saturate with buffs.
-fn build_spawn_budgets(items: &[ItemState]) -> Vec<SpawnBudget> {
+fn build_spawn_budgets(items: &[ItemState], cfg: &WorldConfig) -> Vec<SpawnBudget> {
     use ItemKind::*;
+    let gc = &cfg.item_density.gold_clustering;
     let mut budgets = Vec::new();
-    for kind in [Gold, Speed1, Speed2, Speed3, Slow, Multiplier] {
+    for kind in [Gold, Speed, Multiplier] {
         let target = items.iter().filter(|it| it.kind == kind).count();
         if target == 0 { continue; }
         let spawn_prob = if kind == Gold { DEFAULT_SPAWN_PROB } else { DEFAULT_SPAWN_PROB * 0.5 };
-        budgets.push(SpawnBudget { kind, spawn_prob, target });
+        // Gold keeps its clumpy layout on respawn; other kinds spawn anywhere free.
+        // Carry the max clump size so respawns can't grow a clump past its build cap.
+        let cluster = (kind == Gold && gc.enabled())
+            .then_some((gc.radius, gc.clustered_fraction.clamp(0.0, 1.0), gc.clamped_clump().1));
+        budgets.push(SpawnBudget { kind, spawn_prob, target, cluster });
     }
     budgets
 }

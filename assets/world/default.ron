@@ -1,20 +1,26 @@
 // Default config — loaded by the viewer. Showcase map with every item type so all
-// mechanics are visible: gold, the three speed tiers, the slow hazard and the
-// score multiplier, with moderate obstacles. Base is randomised per episode.
+// mechanics are visible: gold, the speed item and the score multiplier (a charge
+// that doubles the next deposit). Base randomised per episode.
 (
     width:  50,
     height: 50,
-    match_duration_ticks: 1500,
+    match_duration_ticks: 3000,
 
-    obstacles: ( density: 0.10, profile: Mixed ),
+    obstacles: ( density: 0.15, profile: Mixed ),
 
+    // One speed item; density trimmed ~20% (0.15 → 0.12).
     item_density: (
-        gold:       2.0,
-        speed1:     0.5,
-        speed2:     0.25,
-        speed3:     0.1,
-        slow:       0.4,
-        multiplier: 0.2,
+        gold:       0.35,
+        speed:      0.12,
+        multiplier: 0.05,
+        // Gold layout: most of it in 2–3-tile clumps (radius 1 = the 8 neighbours),
+        // the rest as sparse singletons. Total gold count is unchanged. Set
+        // clustered_fraction: 0 for the old uniform scatter.
+        gold_clustering: (
+            clustered_fraction: 0.7,
+            clump_size:         (2, 3),
+            radius:             1,
+        ),
     ),
 
     reward: ( tick: -0.0005, pickup: 0.5, deposit: 5.0, wall_hit: -0.01 ),

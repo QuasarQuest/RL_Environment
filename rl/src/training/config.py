@@ -13,7 +13,6 @@ Adding a new algorithm
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from hydra.core.config_store import ConfigStore
@@ -50,16 +49,10 @@ class PpoConfig:
     vf_coef: float = MISSING
     max_grad_norm: float = MISSING
     target_kl: float = MISSING
-    # pi/vf head depth — applied for all algos including recurrent_ppo.
-    # [64] is lean and converges fast for the single-agent gold rush; raise it if
-    # the richer item set ever needs more head capacity.
-    # For recurrent_ppo these control the MLP layers inserted between the
-    # LSTM output and the final action/value heads.
+    # pi/vf head depth. [64] is lean and converges fast for the single-agent gold
+    # rush; raise it if the richer item set ever needs more head capacity.
     net_arch_pi: list[int] = field(default_factory=lambda: [64])
     net_arch_vf: list[int] = field(default_factory=lambda: [64])
-    # LSTM params — only used when algo=recurrent_ppo.
-    lstm_hidden_size: int = 256
-    n_lstm_layers: int = 1
 
 
 @dataclass

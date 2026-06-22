@@ -40,15 +40,15 @@ _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
 # ---------------------------------------------------------------------------
 
 def _sample_ppo(trial: optuna.Trial, cfg: TuneConfig) -> dict[str, Any]:
-    return dict(
-        learning_rate=trial.suggest_float("learning_rate", cfg.lr_min, cfg.lr_max, log=True),
-        clip_range=trial.suggest_float("clip_range", cfg.clip_range_min, cfg.clip_range_max),
-        ent_coef=trial.suggest_float("ent_coef", cfg.ent_coef_min, cfg.ent_coef_max),
-        gamma=trial.suggest_float("gamma", cfg.gamma_min, cfg.gamma_max),
-        gae_lambda=trial.suggest_float("gae_lambda", cfg.gae_lambda_min, cfg.gae_lambda_max),
-        batch_size=trial.suggest_categorical("batch_size", cfg.batch_size_opts),
-        n_epochs=trial.suggest_categorical("n_epochs", cfg.n_epochs_opts),
-    )
+    return {
+        "learning_rate": trial.suggest_float("learning_rate", cfg.lr_min, cfg.lr_max, log=True),
+        "clip_range": trial.suggest_float("clip_range", cfg.clip_range_min, cfg.clip_range_max),
+        "ent_coef": trial.suggest_float("ent_coef", cfg.ent_coef_min, cfg.ent_coef_max),
+        "gamma": trial.suggest_float("gamma", cfg.gamma_min, cfg.gamma_max),
+        "gae_lambda": trial.suggest_float("gae_lambda", cfg.gae_lambda_min, cfg.gae_lambda_max),
+        "batch_size": trial.suggest_categorical("batch_size", cfg.batch_size_opts),
+        "n_epochs": trial.suggest_categorical("n_epochs", cfg.n_epochs_opts),
+    }
 
 
 # ---------------------------------------------------------------------------

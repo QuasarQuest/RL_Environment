@@ -27,6 +27,14 @@ Usage
 from __future__ import annotations
 
 import os
+
+# Disable HDF5's advisory file lock before anything opens a stats/trace .h5. With a
+# read-only monitor polling the same file, the trainer's append-mode open would
+# otherwise be refused with BlockingIOError (errno 11) and abort the run. Single
+# writer + read-only monitors ⇒ safe. See monitoring/stats_writer.py for the rationale.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+
+import math
 import time
 from pathlib import Path
 
@@ -42,7 +50,7 @@ from stable_baselines3.common.vec_env import VecNormalize
 
 from env.factory import build_vec_env
 from network.export import export_to_onnx
-from network.policy import ATB_POLICY_KWARGS, ATB_RECURRENT_POLICY_KWARGS
+from network.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.callbacks import (
     CheckpointCallback,
@@ -91,21 +99,7 @@ def _print_arch(model) -> None:
     else:
         console.print(f"  [dim]extractor[/dim]       : {type(fe).__name__}  obs={obs}")
 
-    if hasattr(policy, "lstm_actor"):
-        lstm = policy.lstm_actor
-        console.print(f"  [dim]lstm[/dim]            : hidden={lstm.hidden_size}  layers={lstm.num_layers}")
-        if hasattr(policy, "mlp_extractor"):
-            mlp = policy.mlp_extractor
-            pi_mid = _seq_str(mlp.policy_net)
-            vf_mid = _seq_str(mlp.value_net)
-            if pi_mid:
-                console.print(f"  [dim]pi_mlp[/dim]         : {pi_mid}")
-            if vf_mid:
-                console.print(f"  [dim]vf_mlp[/dim]         : {vf_mid}")
-        if hasattr(policy, "action_net"):
-            console.print(f"  [dim]pi[/dim]              : Linear(→{policy.action_net.out_features})")
-        console.print(f"  [dim]vf[/dim]              : Linear(→1)")
-    elif hasattr(policy, "mlp_extractor"):
+    if hasattr(policy, "mlp_extractor"):
         mlp = policy.mlp_extractor
         pi_mid = _seq_str(mlp.policy_net)
         vf_mid = _seq_str(mlp.value_net)
@@ -176,6 +170,47 @@ os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 register_configs()
 
 
+def _env_option_gamma(vec_env) -> float | None:
+    """Read the env's intra-option discount (reward.option_gamma) from the Rust core.
+
+    Walks down VecEnv wrappers (e.g. VecNormalize) to the BatchVecEnv, whose
+    ``.batch.reward_weights()`` returns (tick, pickup, deposit, wall_hit, option_gamma).
+    Returns None if no introspectable batch env is found (check is then skipped).
+    """
+    env = vec_env
+    for _ in range(8):
+        if env is None:
+            break
+        if hasattr(env, "batch"):
+            return float(env.batch.reward_weights()[4])
+        env = getattr(env, "venv", None)
+    return None
+
+
+def _assert_gamma_consistency(vec_env, ppo_gamma: float) -> None:
+    """Fail fast if PPO γ (yaml) and the env's intra-option γ (RON) disagree.
+
+    These are the SAME per-tick discount applied at two levels of the option
+    hierarchy: ``reward.option_gamma`` discounts ticks WITHIN an option (the Rust
+    reward sum), and ``ppo.gamma`` discounts BETWEEN options (training/smdp.py
+    raises it to γ^option_ticks). The semi-MDP formulation is only consistent when
+    they are equal — but they live in different files (configs/ppo/*.yaml vs
+    assets/world/config_stage*.ron), so a silent desync is easy. Treat option_gamma
+    (the env) as the single source of truth and assert ppo.gamma matches it.
+    """
+    opt_gamma = _env_option_gamma(vec_env)
+    if opt_gamma is None:
+        return
+    if not math.isclose(opt_gamma, ppo_gamma, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError(
+            f"gamma mismatch: ppo.gamma={ppo_gamma} (configs/ppo/*.yaml) != "
+            f"reward.option_gamma={opt_gamma} (assets/world/config_stage*.ron). "
+            "These must match — they are one per-tick discount at two levels of the "
+            "option hierarchy (see training/smdp.py). Set ppo.gamma to the RON's "
+            "option_gamma (or vice versa) so they agree."
+        )
+
+
 @hydra.main(config_path=str(_RL_ROOT / "configs"), config_name="train", version_base="1.3")
 def train(cfg: DictConfig) -> None:
     raw: dict = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)  # type: ignore[assignment]
@@ -184,10 +219,10 @@ def train(cfg: DictConfig) -> None:
     e_cfg = EnvConfig(**raw["env"])
 
     algo_spec = get_algo(t_cfg.algo)
-    run_dir  = Path(HydraConfig.get().runtime.output_dir)
+    run_dir = Path(HydraConfig.get().runtime.output_dir)
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    run_tag  = run_dir.name
+    run_tag = run_dir.name
     _dev = get_device(t_cfg.device)
     if _dev.type == "cuda" and _dev.index is None:
         import torch
@@ -224,6 +259,8 @@ def train(cfg: DictConfig) -> None:
 
     # Environments.
     vec_env = build_vec_env(e_cfg)
+    # One per-tick discount, two config files — fail fast if they desync.
+    _assert_gamma_consistency(vec_env, p_cfg.gamma)
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
     eval_env = build_vec_env(e_cfg, eval_mode=True)
     eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
@@ -265,18 +302,10 @@ def train(cfg: DictConfig) -> None:
         eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
         _sync_vecnorm_stats(vec_normalize, eval_normalize)
     else:
-        if t_cfg.algo == "recurrent_ppo":
-            policy_kwargs = {
-                **ATB_RECURRENT_POLICY_KWARGS,
-                "lstm_hidden_size": p_cfg.lstm_hidden_size,
-                "n_lstm_layers": p_cfg.n_lstm_layers,
-                "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
-            }
-        else:
-            policy_kwargs = {
-                **ATB_POLICY_KWARGS,
-                "net_arch": dict(pi=list(p_cfg.net_arch_pi), vf=list(p_cfg.net_arch_vf)),
-            }
+        policy_kwargs = {
+            **ATB_POLICY_KWARGS,
+            "net_arch": {"pi": list(p_cfg.net_arch_pi), "vf": list(p_cfg.net_arch_vf)},
+        }
         model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,

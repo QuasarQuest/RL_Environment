@@ -13,7 +13,6 @@ fn action_color(action: RlAction) -> Color {
         RlAction::NavigateToBase        => ORANGE_400,
         RlAction::NavigateToSpeed       => LIME_400,
         RlAction::NavigateToMultiplier  => VIOLET_400,
-        RlAction::NavigateToNearestGold => CYAN_400,
         RlAction::Wait                  => GRAY_400,
     }
 }

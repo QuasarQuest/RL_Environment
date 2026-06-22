@@ -24,22 +24,32 @@ pub const DEFAULT_TICKS_PER_SECOND: f32 = 10.0;
 pub const AGENT_MAX_GOLD:      u8  = 5;
 
 // ── Item buffs (ticks) ─────────────────────────────────────────────────────────
-// Speed boosts: all give 2× move speed; the three tiers differ only in how long
-// the window lasts (rarer tier → longer). Slow halves move speed; Multiplier
-// doubles deposit value. SPEED_BUFF_MAX is the normaliser for the speed obs channel.
-pub const SPEED1_TICKS: u16 =  40;
-pub const SPEED2_TICKS: u16 =  80;
-pub const SPEED3_TICKS: u16 = 160;
-pub const SLOW_TICKS:   u16 =  60;
-pub const MULT_TICKS:   u16 = 100;
+// Speed boost: a single speed item. While the buff is active the agent moves at the
+// full per-tick cadence (a step every tick) instead of the base half-cadence (a step
+// every other tick) — a 2× speed-up that never teleports two tiles (see the movement
+// cadence constants below). SPEED_BUFF_MAX is the normaliser for the speed obs
+// channel. (The old Slow hazard was removed.)
+pub const SPEED_TICKS: u16 = 160;
 
-/// Normalisers for the buff-remaining observation channels (longest window per buff).
-pub const SPEED_BUFF_MAX: u16 = SPEED3_TICKS;
-pub const SLOW_BUFF_MAX:  u16 = SLOW_TICKS;
-pub const MULT_BUFF_MAX:  u16 = MULT_TICKS;
+// ── Movement cadence (energy system) ────────────────────────────────────────────
+// The agent never moves more than one tile per tick. Each tick it accumulates move
+// energy and steps one tile the moment that energy reaches MOVE_ENERGY_STEP, then
+// subtracts the threshold. Base gains MOVE_ENERGY_BASE/tick → a step every other
+// tick; an active speed buff gains MOVE_ENERGY_SPEED/tick → a step every tick. Same
+// 2× advantage as the old two-tile jump, but capped at one tile/tick so a speed move
+// can never overshoot a turn.
+pub const MOVE_ENERGY_STEP:  u8 = 2;
+pub const MOVE_ENERGY_BASE:  u8 = 1;
+pub const MOVE_ENERGY_SPEED: u8 = 2;
 
-/// Score multiplier applied to a deposit while `mult_buff > 0`.
+/// Normaliser for the speed-remaining observation channel (longest buff window).
+pub const SPEED_BUFF_MAX: u16 = SPEED_TICKS;
+
+/// The score multiplier is a consumable charge (not a timed window): picking one up
+/// holds a single charge; the next deposit consumes it and is worth this many times
+/// its gold. Capacity is intentionally 1 — "use it on your next bank".
 pub const DEPOSIT_MULTIPLIER: u32 = 2;
+pub const MULT_CHARGE_MAX:    u8  = 1;
 
 // ── Viewer-compat constant ──────────────────────────────────────────────────────
 // Combat is gone, but the agent's inert `hearts` field (read only by the viewer's

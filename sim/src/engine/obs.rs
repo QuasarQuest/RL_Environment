@@ -4,26 +4,26 @@
 // Writes into a caller-supplied buffer — no per-step heap allocation.
 //
 // Single-agent gold rush: the agent observes gold, the base, obstacles and the
-// three flavour items (speed boost, slow hazard, score multiplier), plus its own
-// carried gold and active buff timers.
+// two flavour items (speed boost, score multiplier), plus its own carried gold
+// and active buff timers.
 //
 // Buffer layout (OBS_TOTAL floats):
 //   [0 .. OBS_DIM)                  egocentric crop  (OBS_CHANNELS × 25 × 25)
 //   [OBS_DIM .. OBS_DIM+MM_DIM)     minimap          (MM_CHANNELS  × 17 × 17)
-//   [OBS_DIM+MM_DIM .. OBS_TOTAL)   cluster features (CLUSTER_K × 3)
+//   [OBS_DIM+MM_DIM .. OBS_TOTAL)   cluster features (CLUSTER_K × 4)
 //
 // Channel layout is defined in rl/obs.rs (authoritative constants).
 
-use crate::config::{AGENT_MAX_GOLD, MULT_BUFF_MAX, SLOW_BUFF_MAX, SPEED_BUFF_MAX};
+use crate::config::{AGENT_MAX_GOLD, SPEED_BUFF_MAX};
 use crate::entity::AgentState;
 use crate::entity::item::{ItemKind, ItemState};
 use crate::engine::clusters::GoldCluster;
 use crate::rl::action::CLUSTER_K;
 use crate::rl::obs::{
-    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_HAZARD, CH_MULT,
-    CH_MULT_REMAINING, CH_OBSTACLE, CH_OOB, CH_SLOW_REMAINING, CH_SPEED,
+    CH_BASE, CH_BASE_DX, CH_BASE_DY, CH_CARRYING, CH_GOLD, CH_MULT,
+    CH_MULT_CHARGE, CH_OBSTACLE, CH_OOB, CH_SPEED,
     CH_SPEED_REMAINING, CH_TIME_REMAINING,
-    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SLOW, MM_CH_SPEED,
+    MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SPEED,
     MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
 use crate::world::coords::GridPos;
@@ -32,16 +32,6 @@ use crate::world::tile::Tile;
 
 // Normaliser for cluster gold count (agent rarely sees more than this in one cluster).
 const CLUSTER_COUNT_NORM: f32 = 25.0;
-
-/// Crop-channel value for a speed item, encoding the tier in [0,1].
-fn speed_tier_value(kind: ItemKind) -> f32 {
-    match kind {
-        ItemKind::Speed1 => 1.0 / 3.0,
-        ItemKind::Speed2 => 2.0 / 3.0,
-        ItemKind::Speed3 => 1.0,
-        _ => 0.0,
-    }
-}
 
 pub fn build_obs_into(
     buf:            &mut [f32],
@@ -63,24 +53,14 @@ pub fn build_obs_into(
 
     // ── Broadcast: agent scalars ──────────────────────────────────────────────
 
-    buf[CH_CARRYING * plane..(CH_CARRYING + 1) * plane]
-        .fill(agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
-
-    let base_dx = (agent.base_pos.x - ax) as f32 / gw as f32;
-    let base_dy = (agent.base_pos.y - ay) as f32 / gh as f32;
-    buf[CH_BASE_DX * plane..(CH_BASE_DX + 1) * plane].fill(base_dx);
-    buf[CH_BASE_DY * plane..(CH_BASE_DY + 1) * plane].fill(base_dy);
-
-    buf[CH_TIME_REMAINING * plane..(CH_TIME_REMAINING + 1) * plane]
-        .fill(time_remaining.clamp(0.0, 1.0));
-
-    // Active buff timers, normalised by their longest possible window.
-    buf[CH_SPEED_REMAINING * plane..(CH_SPEED_REMAINING + 1) * plane]
-        .fill((agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
-    buf[CH_SLOW_REMAINING * plane..(CH_SLOW_REMAINING + 1) * plane]
-        .fill((agent.slow_buff as f32 / SLOW_BUFF_MAX as f32).min(1.0));
-    buf[CH_MULT_REMAINING * plane..(CH_MULT_REMAINING + 1) * plane]
-        .fill((agent.mult_buff as f32 / MULT_BUFF_MAX as f32).min(1.0));
+    let mut bcast = |ch: usize, v: f32| buf[ch * plane..(ch + 1) * plane].fill(v);
+    bcast(CH_CARRYING, agent.gold_carried as f32 / AGENT_MAX_GOLD as f32);
+    bcast(CH_BASE_DX, (agent.base_pos.x - ax) as f32 / gw as f32);
+    bcast(CH_BASE_DY, (agent.base_pos.y - ay) as f32 / gh as f32);
+    bcast(CH_TIME_REMAINING, time_remaining.clamp(0.0, 1.0));
+    bcast(CH_SPEED_REMAINING, (agent.speed_buff as f32 / SPEED_BUFF_MAX as f32).min(1.0));
+    // Multiplier is a held charge, not a timer: 1.0 while one is banked to spend.
+    bcast(CH_MULT_CHARGE, (agent.mult_charge > 0) as u8 as f32);
 
     // ── Tile scan: OOB + base + obstacles ────────────────────────────────────
 
@@ -112,17 +92,15 @@ pub fn build_obs_into(
         }
     }
 
-    // ── Flavour items (crop): speed / hazard / multiplier ────────────────────
+    // ── Flavour items (crop): speed / multiplier ─────────────────────────────
 
     for it in items {
         let cx = it.pos.x - ax + centre;
         let cy = it.pos.y - ay + centre;
         if !in_crop(cx, cy) { continue; }
         match it.kind {
-            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 =>
-                buf[pixel(CH_SPEED, cx, cy)] = speed_tier_value(it.kind),
-            ItemKind::Slow       => buf[pixel(CH_HAZARD, cx, cy)] = 1.0,
-            ItemKind::Multiplier => buf[pixel(CH_MULT,   cx, cy)] = 1.0,
+            ItemKind::Speed      => buf[pixel(CH_SPEED, cx, cy)] = 1.0,
+            ItemKind::Multiplier => buf[pixel(CH_MULT, cx, cy)] = 1.0,
             ItemKind::Gold       => {} // already drawn from gold_positions
         }
     }
@@ -142,14 +120,16 @@ pub fn build_obs_into(
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
         let base = cluster_start + k * 4;
         if let Some(c) = maybe_cluster {
-            // Pick the region's gold with the smallest true path distance; fall back
-            // to the Chebyshev-nearest for direction if none is reachable.
-            let path_nearest = c.golds.iter()
-                .filter_map(|&g| crate::engine::nav::dist_at(&dist, grid, g).map(|d| (d, g)))
-                .min_by_key(|&(d, _)| d);
-            let (target, pathdist) = match path_nearest {
-                Some((d, g)) => (Some(g), (d as f32 / path_norm).min(1.0)),
-                None         => (c.nearest_gold(agent.pos), 1.0), // all walled off
+            // Pick the region's path-nearest reachable gold (BFS around walls) — the
+            // same target resolve_nav_goal will drive to and the action mask permits.
+            // Fall back to the Chebyshev-nearest for direction only if none is
+            // reachable (region fully walled off → pathdist saturates at 1.0).
+            let (target, pathdist) = match c.nearest_reachable_gold(&dist, grid) {
+                Some(g) => {
+                    let d = crate::engine::nav::dist_at(&dist, grid, g).unwrap_or(0);
+                    (Some(g), (d as f32 / path_norm).min(1.0))
+                }
+                None => (c.nearest_gold(agent.pos), 1.0), // all walled off
             };
             if let Some(g) = target {
                 buf[base]     = (g.x - ax) as f32 / gw as f32;
@@ -202,8 +182,7 @@ fn build_minimap(
     // Flavour items.
     for it in items {
         let ch = match it.kind {
-            ItemKind::Speed1 | ItemKind::Speed2 | ItemKind::Speed3 => MM_CH_SPEED,
-            ItemKind::Slow       => MM_CH_SLOW,
+            ItemKind::Speed      => MM_CH_SPEED,
             ItemKind::Multiplier => MM_CH_MULT,
             ItemKind::Gold       => continue,
         };

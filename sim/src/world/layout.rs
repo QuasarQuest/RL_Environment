@@ -66,9 +66,11 @@ pub fn place_obstacles(
 
     let max_attempts = target * 500;
     let mut attempts = 0usize;
+    // Running obstacle count, incremented as tiles are stamped — avoids an
+    // O(width·height) rescan of the whole grid on every placement attempt.
+    let mut current = 0usize;
 
     loop {
-        let current = tiles.iter().filter(|&&t| t == Tile::Obstacle).count();
         if current >= target || attempts >= max_attempts { break; }
         attempts += 1;
 
@@ -89,6 +91,7 @@ pub fn place_obstacles(
                     for dy in 0..bh {
                         for dx in 0..bw {
                             tiles[idx(ox + dx, oy + dy)] = Tile::Obstacle;
+                            current += 1;
                         }
                     }
                 }
@@ -115,8 +118,8 @@ pub fn place_obstacles(
                     (oy..=end_y).all(|y| { let i = idx(ox, y);  tiles[i] == Tile::Free && !protected[i] })
                 };
                 if clear {
-                    if horiz { for x in ox..=end_x { tiles[idx(x, oy)] = Tile::Obstacle; } }
-                    else      { for y in oy..=end_y { tiles[idx(ox, y)] = Tile::Obstacle; } }
+                    if horiz { for x in ox..=end_x { tiles[idx(x, oy)] = Tile::Obstacle; current += 1; } }
+                    else      { for y in oy..=end_y { tiles[idx(ox, y)] = Tile::Obstacle; current += 1; } }
                 }
             }
 
@@ -126,6 +129,7 @@ pub fn place_obstacles(
                 let i = idx(x, y);
                 if tiles[i] == Tile::Free && !protected[i] {
                     tiles[i] = Tile::Obstacle;
+                    current += 1;
                 }
             }
         }
