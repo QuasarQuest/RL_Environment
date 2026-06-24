@@ -42,54 +42,76 @@ fn diagonal_clear(grid: &Grid, fx: i32, fy: i32, dx: i32, dy: i32) -> bool {
     is_walkable(grid, fx + dx, fy) && is_walkable(grid, fx, fy + dy)
 }
 
+// All legal 8-connected neighbors of `from`: walkable tiles, with a diagonal blocked
+// unless both adjacent cardinals are clear. Shared by A* and dist_field's BFS so the
+// two always agree on exactly which moves exist.
+fn walkable_neighbors(grid: &Grid, from: GridPos) -> impl Iterator<Item = GridPos> + '_ {
+    DIRS.iter().filter_map(move |&(dx, dy, _)| {
+        if dx != 0 && dy != 0 && !diagonal_clear(grid, from.x, from.y, dx, dy) {
+            return None;
+        }
+        let (nx, ny) = (from.x + dx, from.y + dy);
+        is_walkable(grid, nx, ny).then(|| GridPos::new(nx, ny))
+    })
+}
+
+// Follow the back-pointers from goal to start, yielding the start→goal path with
+// start excluded (the agent already stands there).
+fn reconstruct_path(
+    came_from: &HashMap<GridPos, GridPos>,
+    start: GridPos,
+    goal: GridPos,
+) -> VecDeque<GridPos> {
+    let mut path = VecDeque::new();
+    let mut cur = goal;
+    while cur != start {
+        path.push_front(cur);
+        match came_from.get(&cur) {
+            Some(&prev) => cur = prev,
+            None => break,
+        }
+    }
+    path
+}
+
 fn astar(grid: &Grid, start: GridPos, goal: GridPos) -> VecDeque<GridPos> {
-    if start == goal { return VecDeque::new(); }
+    if start == goal {
+        return VecDeque::new();
+    }
 
-    // Cross-product tie-breaking: nodes on the start→goal line score 0, deviating
-    // nodes score higher. Reverse(cross) as the second key breaks ties toward the
-    // straight line, preventing the "right-hook" artifact from lexicographic order.
-    let sdx = start.x - goal.x;
-    let sdy = start.y - goal.y;
-    let cross = |n: GridPos| -> i32 {
-        ((n.x - goal.x) * sdy - sdx * (n.y - goal.y)).abs()
-    };
+    // Tie-break toward the straight start→goal line. `deviation` is the magnitude of
+    // the cross product of the start→goal vector with the goal→node vector — i.e. how
+    // far the node sits off that line. Breaking equal-f ties by it (smallest first)
+    // keeps the path straight instead of hooking to one side, the artifact you get
+    // from plain lexicographic ordering.
+    let (sdx, sdy) = (start.x - goal.x, start.y - goal.y);
+    let deviation = |n: GridPos| ((n.x - goal.x) * sdy - sdx * (n.y - goal.y)).abs();
 
-    let mut open: BinaryHeap<(Reverse<i32>, Reverse<i32>, i32, GridPos)> = BinaryHeap::new();
+    // Open set ordered by (f-score, deviation) ascending — Reverse flips Rust's
+    // max-heap so the cheapest node pops first. f = g + heuristic estimate to goal.
+    // Each entry also carries its g so we can skip stale duplicates a node left in the
+    // heap from before a cheaper route to it was found.
+    let mut open = BinaryHeap::new();
     let mut came_from: HashMap<GridPos, GridPos> = HashMap::new();
-    let mut g_score:   HashMap<GridPos, i32>     = HashMap::new();
+    let mut g_score: HashMap<GridPos, i32> = HashMap::new();
 
     g_score.insert(start, 0);
-    open.push((Reverse(chebyshev(start, goal)), Reverse(cross(start)), 0, start));
+    open.push((Reverse(chebyshev(start, goal)), Reverse(deviation(start)), 0, start));
 
     while let Some((_, _, g, current)) = open.pop() {
         if current == goal {
-            let mut path = VecDeque::new();
-            let mut cur = current;
-            while cur != start {
-                path.push_front(cur);
-                match came_from.get(&cur) {
-                    Some(&prev) => cur = prev,
-                    None        => break,
-                }
-            }
-            return path;
+            return reconstruct_path(&came_from, start, goal);
         }
-        if g > *g_score.get(&current).unwrap_or(&i32::MAX) { continue; }
-
-        for &(dx, dy, _) in &DIRS {
-            let nx = current.x + dx;
-            let ny = current.y + dy;
-            if dx != 0 && dy != 0 && !diagonal_clear(grid, current.x, current.y, dx, dy) {
-                continue;
-            }
-            if !is_walkable(grid, nx, ny) { continue; }
-            let neighbor = GridPos::new(nx, ny);
+        if g > g_score[&current] {
+            continue; // a cheaper route to `current` was already expanded
+        }
+        for neighbor in walkable_neighbors(grid, current) {
             let tentative_g = g + 1;
             if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
                 g_score.insert(neighbor, tentative_g);
                 came_from.insert(neighbor, current);
                 let f = tentative_g + chebyshev(neighbor, goal);
-                open.push((Reverse(f), Reverse(cross(neighbor)), tentative_g, neighbor));
+                open.push((Reverse(f), Reverse(deviation(neighbor)), tentative_g, neighbor));
             }
         }
     }
@@ -117,18 +139,11 @@ pub fn dist_field(grid: &Grid, start: GridPos) -> Vec<i32> {
     q.push_back(start);
     while let Some(c) = q.pop_front() {
         let d = dist[idx(c.x, c.y)];
-        for &(dx, dy, _) in &DIRS {
-            let (nx, ny) = (c.x + dx, c.y + dy);
-            if dx != 0 && dy != 0 && !diagonal_clear(grid, c.x, c.y, dx, dy) {
-                continue;
-            }
-            if !is_walkable(grid, nx, ny) {
-                continue;
-            }
-            let ni = idx(nx, ny);
+        for n in walkable_neighbors(grid, c) {
+            let ni = idx(n.x, n.y);
             if dist[ni] == -1 {
                 dist[ni] = d + 1;
-                q.push_back(GridPos::new(nx, ny));
+                q.push_back(n);
             }
         }
     }
