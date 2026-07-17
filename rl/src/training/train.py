@@ -37,6 +37,7 @@ os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 import math
 import time
 from pathlib import Path
+from typing import cast
 
 import hydra
 import torch.nn as nn
@@ -46,7 +47,7 @@ from omegaconf import DictConfig, OmegaConf
 from rich.columns import Columns
 from rich.console import Console
 from stable_baselines3.common.utils import get_device
-from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 
 from env.factory import build_vec_env
 from network.export import export_to_onnx
@@ -162,7 +163,6 @@ load_dotenv()
 console = Console(force_terminal=None if os.environ.get("NO_COLOR") else True)
 
 _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
-_WORKSPACE_ROOT = _RL_ROOT.parent  # algorithm_test_bed/
 
 os.environ.setdefault("ATB_RL_ROOT", str(_RL_ROOT))
 
@@ -258,11 +258,11 @@ def train(cfg: DictConfig) -> None:
     ], equal=False, expand=False))
 
     # Environments.
-    vec_env = build_vec_env(e_cfg)
+    vec_env = build_vec_env(e_cfg, gamma=p_cfg.gamma)
     # One per-tick discount, two config files — fail fast if they desync.
     _assert_gamma_consistency(vec_env, p_cfg.gamma)
     vec_normalize = vec_env if isinstance(vec_env, VecNormalize) else None
-    eval_env = build_vec_env(e_cfg, eval_mode=True)
+    eval_env = build_vec_env(e_cfg, eval_mode=True, gamma=p_cfg.gamma)
     eval_normalize = eval_env if isinstance(eval_env, VecNormalize) else None
 
     # Share live running-stat references so the eval env always uses the same
@@ -287,11 +287,19 @@ def train(cfg: DictConfig) -> None:
             device=t_cfg.device,
             tensorboard_log=str(run_dir / "tensorboard"),
         )
+        # load() restores the checkpoint's hyperparameters/schedules — the yaml
+        # values in the table above do NOT apply. Report what actually runs.
+        hp = {k: getattr(model, k, None)
+              for k in ("n_steps", "batch_size", "n_epochs", "gamma", "gae_lambda", "target_kl")}
+        console.print(
+            "  [yellow]checkpoint overrides yaml ppo table:[/yellow] "
+            + " ".join(f"{k}={v}" for k, v in hp.items())
+        )
         if vec_normalize is not None and vn_path.exists():
             # Copy saved running stats into the existing VecNormalize rather than
             # creating a new wrapper around it (which would double-normalize obs).
             # The model's env reference to vec_normalize remains valid.
-            _loaded_vn = VecNormalize.load(str(vn_path), vec_normalize.venv)
+            _loaded_vn = VecNormalize.load(str(vn_path), cast(VecEnv, vec_normalize.venv))
             if _loaded_vn.norm_obs:
                 vec_normalize.obs_rms = _loaded_vn.obs_rms
             vec_normalize.ret_rms = _loaded_vn.ret_rms
@@ -340,18 +348,18 @@ def train(cfg: DictConfig) -> None:
             save_freq=t_cfg.checkpoint_freq,
             ckpt_dir=ckpt_dir,
             vec_normalize=vec_normalize,
-            onnx_export=True,
+            # ONNX export happens on eval-best only (make_eval_callback below):
+            # a synchronous deepcopy + onnxruntime validation per periodic
+            # checkpoint stalls the GPU-update-bound training loop for seconds.
+            onnx_export=False,
         ),
-        EpisodeStatsCallback(stats_path=run_dir / "stats.h5"),
+        stats_callback := EpisodeStatsCallback(stats_path=run_dir / "stats.h5"),
         # Logs chosen-gold-region distance + own-region skip rate to TB (policy/*).
         PolicyTelemetryCallback(),
         # Feeds per-step option lengths to the SMDP rollout buffer (γ^k discount).
         SmdpDiscountCallback(),
         RichLogCallback(console),
-        EntropyCoefScheduleCallback(
-            schedule=ent_schedule,
-            total_timesteps=t_cfg.total_timesteps,
-        ),
+        EntropyCoefScheduleCallback(schedule=ent_schedule),
         # make_eval_callback saves vec_normalize alongside every eval-best model
         # (SB3's stock EvalCallback only saves the zip, leaving no matching
         # _vecnorm.pkl) and selects the maskable vs standard eval base by algo so
@@ -395,6 +403,7 @@ def train(cfg: DictConfig) -> None:
         interrupted = True
         console.print("[yellow]Interrupted — saving checkpoint and exporting ONNX...[/yellow]")
     finally:
+        stats_callback.close()
         vec_env.close()
         eval_env.close()
 

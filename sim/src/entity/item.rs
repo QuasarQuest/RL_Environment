@@ -21,6 +21,16 @@ impl ItemKind {
     pub fn is_speed(self) -> bool {
         matches!(self, ItemKind::Speed)
     }
+
+    /// Stable FFI code used by `PyBatchEnv::get_items` — mirrored by the Python
+    /// consumers (rl/src/monitoring/trace_recorder.py).
+    pub fn code(self) -> u8 {
+        match self {
+            ItemKind::Gold       => 0,
+            ItemKind::Speed      => 1,
+            ItemKind::Multiplier => 2,
+        }
+    }
 }
 
 /// How many of a given item kind are allowed on the map simultaneously.

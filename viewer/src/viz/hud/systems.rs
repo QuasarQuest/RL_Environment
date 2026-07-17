@@ -3,7 +3,7 @@ use crate::sim_bridge::SimBridge;
 use crate::sim_config::{SimConfig, TickTimer};
 use crate::style::color::{GOLD_500, GOLD_800, GREEN_400, GREEN_500};
 use super::components::{
-    TickLabelMarker, TimeLabelMarker, TeamScoreMarker,
+    TickLabelMarker, TimeLabelMarker,
     SpeedDecreaseButton, SpeedIncreaseButton,
     CurrentSpeedLabel, PauseButtonMarker, PauseButtonText,
     PolicyModeLabel,
@@ -29,19 +29,14 @@ pub fn update_time_label(
     }
 }
 
-pub fn update_team_scores(
-    bridge:    Res<SimBridge>,
-    mut query: Query<(&mut Text, &TeamScoreMarker)>,
-) {
-    if !bridge.is_changed() { return; }
-    for (mut text, marker) in query.iter_mut() {
-        *text = Text::new(bridge.team_score(marker.0).to_string());
-    }
-}
-
 fn format_speed(tps: f32) -> String {
-    if tps >= 1000.0 { format!("{}k", (tps as u32) / 1000) }
-    else             { format!("{}x", tps as u32) }
+    // Integer division would render 2500 as "2k", indistinguishable from 2000.
+    if tps >= 1000.0 {
+        let k = tps / 1000.0;
+        if k.fract() == 0.0 { format!("{k:.0}k") } else { format!("{k:.1}k") }
+    } else {
+        format!("{}x", tps as u32)
+    }
 }
 
 pub fn handle_speed_buttons(
@@ -85,7 +80,7 @@ pub fn handle_policy_key(
     mut bridge: ResMut<SimBridge>,
 ) {
     if keys.just_pressed(KeyCode::KeyP) {
-        bridge.mode = bridge.mode.next();
+        bridge.cycle_mode();
         info!("Policy mode → {:?}", bridge.mode);
     }
 }

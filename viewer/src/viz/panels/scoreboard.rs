@@ -235,8 +235,23 @@ pub fn build_scoreboard_rows(
     }
 }
 
+/// Rebuild the scoreboard after a config load — the new config's agent/team
+/// composition may differ, and stale rows would silently keep rendering (their
+/// per-agent lookups just miss). Clearing the content container despawns rows,
+/// headers and dividers; build_scoreboard_rows refills it next frame.
+pub fn clear_scoreboard_rows(
+    mut ev:       MessageReader<crate::viz::events::ConfigLoaded>,
+    cont:         Query<Entity, With<TabScoreboardContent>>,
+    mut commands: Commands,
+) {
+    if ev.read().next().is_none() { return; }
+    for e in cont.iter() { commands.entity(e).despawn_related::<Children>(); }
+}
+
 pub fn refresh_scoreboard_stats(
-    bridge: Res<SimBridge>,
+    bridge:          Res<SimBridge>,
+    panel:           Query<&Node, With<TabScoreboard>>,
+    mut was_visible: Local<bool>,
     mut qs: ParamSet<(
         Query<(&mut Text, &mut TextColor, &ScoreboardRowSpeed)>,
         Query<(&mut Text, &mut TextColor, &ScoreboardRowMult)>,
@@ -245,7 +260,12 @@ pub fn refresh_scoreboard_stats(
         Query<(&mut Text, &ScoreboardTeamScore)>,
     )>,
 ) {
-    if !bridge.is_changed() { return; }
+    // Skip the text rebuild while hidden; refresh once on becoming visible so the
+    // numbers are current even if the sim is paused.
+    let visible = panel.iter().any(|n| n.display != Display::None);
+    let just_shown = visible && !*was_visible;
+    *was_visible = visible;
+    if !visible || (!bridge.is_changed() && !just_shown) { return; }
     let agents  = bridge.agents();
     let gold_c  = ThemeColor::AccentGold.resolve();
     let primary = ThemeColor::TextPrimary.resolve();
@@ -281,8 +301,10 @@ pub fn toggle_tab_scoreboard(
     keys:      Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut Node, With<TabScoreboard>>,
 ) {
-    let show = keys.pressed(KeyCode::Tab);
+    let want = if keys.pressed(KeyCode::Tab) { Display::Flex } else { Display::None };
     for mut node in query.iter_mut() {
-        node.display = if show { Display::Flex } else { Display::None };
+        // Write only on transition — an unconditional Node write dirties UI
+        // layout (taffy relayout) every frame.
+        if node.display != want { node.display = want; }
     }
 }

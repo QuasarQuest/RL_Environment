@@ -1,0 +1,49 @@
+{
+    "typeCheckingMode": "basic",
+    "pythonVersion": "3.12",
+    "pythonPlatform": "Linux",
+    "venvPath": "rl",
+    "venv": ".venv",
+    "include": [
+        "rl/src",
+        "rl/scripts"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "rl/src/atb_rl.egg-info"
+    ],
+    "extraPaths": [
+        "rl/src"
+    ],
+    "reportMissingTypeStubs": false,
+    "reportMissingModuleSource": false,
+    "executionEnvironments": [
+        {
+            "root": "rl/src/monitoring",
+            "extraPaths": ["rl/src"],
+            "reportIndexIssue": false,
+            "reportArgumentType": false,
+            "reportAttributeAccessIssue": false,
+            "reportGeneralTypeIssues": false,
+            "reportOperatorIssue": false,
+            "reportOptionalMemberAccess": false,
+            "reportCallIssue": false,
+            "reportReturnType": false
+        },
+        {
+            "root": "rl/scripts",
+            "extraPaths": ["rl/src"],
+            "reportIndexIssue": false,
+            "reportArgumentType": false,
+            "reportAttributeAccessIssue": false,
+            "reportGeneralTypeIssues": false,
+            "reportOperatorIssue": false,
+            "reportOptionalMemberAccess": false,
+            "reportCallIssue": false,
+            "reportReturnType": false
+        },
+        {
+            "root": "rl/src"
+        }
+    ]
+}

@@ -12,7 +12,7 @@ Usage
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import optuna
 import typer
@@ -27,7 +27,7 @@ from network.policy import ATB_POLICY_KWARGS
 from training.algos import get_algo
 from training.config import EnvConfig, PpoConfig, TuneConfig
 from training.schedules import linear_schedule
-
+from training.smdp import SmdpDiscountCallback, smdp_buffer_class
 
 console = Console()
 app = typer.Typer()
@@ -40,11 +40,13 @@ _RL_ROOT = Path(__file__).resolve().parent.parent.parent  # rl/
 # ---------------------------------------------------------------------------
 
 def _sample_ppo(trial: optuna.Trial, cfg: TuneConfig) -> dict[str, Any]:
+    # gamma is NOT searched: train.py hard-asserts ppo.gamma == the RON's
+    # option_gamma (one per-tick discount at two hierarchy levels), so a tuned
+    # gamma would be unusable without changing the world config.
     return {
         "learning_rate": trial.suggest_float("learning_rate", cfg.lr_min, cfg.lr_max, log=True),
         "clip_range": trial.suggest_float("clip_range", cfg.clip_range_min, cfg.clip_range_max),
         "ent_coef": trial.suggest_float("ent_coef", cfg.ent_coef_min, cfg.ent_coef_max),
-        "gamma": trial.suggest_float("gamma", cfg.gamma_min, cfg.gamma_max),
         "gae_lambda": trial.suggest_float("gae_lambda", cfg.gae_lambda_min, cfg.gae_lambda_max),
         "batch_size": trial.suggest_categorical("batch_size", cfg.batch_size_opts),
         "n_epochs": trial.suggest_categorical("n_epochs", cfg.n_epochs_opts),
@@ -87,6 +89,11 @@ class _PruneCallback(BaseCallback):
 def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device: str):
     algo_spec = get_algo(algo)
 
+    # Single source of truth for γ: the stage RON's reward.option_gamma — the same
+    # value train.py asserts ppo.gamma against.
+    import atb
+    option_gamma = float(atb.PyBatchEnv(1, env_cfg.config_path).reward_weights()[4])
+
     # maskable_ppo passes action masks into predict(), so it needs the maskable
     # evaluator; every other algo uses the stock one. This matches how the env is
     # masked at train time (see training/callbacks/eval.py).
@@ -102,7 +109,7 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
             n_steps=256,  # match configs/ppo/default.yaml so tuned HPs transfer
             batch_size=params["batch_size"],
             n_epochs=params["n_epochs"],
-            gamma=params["gamma"],
+            gamma=option_gamma,
             gae_lambda=params["gae_lambda"],
             learning_rate=params["learning_rate"],
             learning_rate_final=params["learning_rate"],
@@ -115,8 +122,8 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
             target_kl=0.02,
         )
 
-        vec_env = build_vec_env(env_cfg)
-        eval_env = build_vec_env(env_cfg, eval_mode=True)
+        vec_env = build_vec_env(env_cfg, gamma=option_gamma)
+        eval_env = build_vec_env(env_cfg, eval_mode=True, gamma=option_gamma)
 
         # Share normalisation stats so eval sees the same scale as training.
         if isinstance(vec_env, VecNormalize) and isinstance(eval_env, VecNormalize):
@@ -126,6 +133,7 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
         model = algo_spec.constructor(
             policy=algo_spec.policy,
             env=vec_env,
+            rollout_buffer_class=smdp_buffer_class(algo),
             n_steps=ppo_cfg.n_steps,
             batch_size=ppo_cfg.batch_size,
             n_epochs=ppo_cfg.n_epochs,
@@ -144,10 +152,13 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
         )
 
         try:
-            callbacks = [_PruneCallback(trial)] if tune_cfg.pruning else []
+            # SmdpDiscountCallback matches training: γ^k cross-option discounting.
+            callbacks: list[BaseCallback] = [SmdpDiscountCallback()]
+            if tune_cfg.pruning:
+                callbacks.append(_PruneCallback(trial))
             model.learn(tune_cfg.n_timesteps, callback=callbacks)
             mean_reward, _ = _evaluate(
-                model, eval_env, n_eval_episodes=10, deterministic=True
+                cast(Any, model), eval_env, n_eval_episodes=10, deterministic=True
             )
         except optuna.TrialPruned:
             raise
@@ -158,7 +169,7 @@ def _make_objective(tune_cfg: TuneConfig, env_cfg: EnvConfig, algo: str, device:
             vec_env.close()
             eval_env.close()
 
-        return float(mean_reward)
+        return float(cast(float, mean_reward))
 
     return objective
 

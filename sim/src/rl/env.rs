@@ -25,7 +25,6 @@
 // handful of thread-chunk boundaries — negligible vs the sim step).
 
 use rayon::prelude::*;
-use crate::entity::item::ItemKind;
 use crate::rl::action::ACTION_SIZE;
 use crate::rl::obs::OBS_TOTAL;
 use crate::engine::SimCore;
@@ -52,8 +51,12 @@ pub struct BatchEnv {
 }
 
 impl BatchEnv {
-    pub fn new(n_envs: usize, config_path: String) -> Self {
-        let envs     = (0..n_envs).map(|_| SimCore::new(&config_path)).collect();
+    /// `seed`: base RNG seed — env `i` gets `seed + i`, so a seeded batch is fully
+    /// reproducible while envs stay decorrelated. `None` → OS entropy per env.
+    pub fn new(n_envs: usize, config_path: String, seed: Option<u64>) -> Self {
+        let envs = (0..n_envs)
+            .map(|i| SimCore::new_with_seed(&config_path, seed.map(|s| s + i as u64)))
+            .collect();
         let obs_flat = vec![0.0f32; n_envs * OBS_TOTAL];
         let masks    = vec![false; n_envs * ACTION_SIZE];
         let rews     = vec![0.0f32; n_envs];
@@ -222,11 +225,7 @@ impl BatchEnv {
 
     pub fn get_items(&self, i: usize) -> Vec<(i32, i32, u8)> {
         self.envs[i].items.iter()
-            .map(|it| (it.pos.x, it.pos.y, match it.kind {
-                ItemKind::Gold       => 0,
-                ItemKind::Speed      => 1,
-                ItemKind::Multiplier => 4,
-            }))
+            .map(|it| (it.pos.x, it.pos.y, it.kind.code()))
             .collect()
     }
 

@@ -11,7 +11,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("L",            "Load config & policy"),
     ("D",            "Toggle policy debug"),
     ("P",            "Cycle policy  ONNX › RANDOM › BT › GOAP"),
-    ("V",            "Toggle A* path gizmo  (BT / GOAP)"),
+    ("V",            "Toggle A* path gizmo"),
     ("Space",        "Pause / Resume"),
     ("Up",           "Speed up"),
     ("Down",         "Speed down"),

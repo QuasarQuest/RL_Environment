@@ -1,7 +1,7 @@
 // Gizmo overlays: A* path polyline and the spawn-pocket border.
 //
 // Keys:
-//   V — toggle path gizmo (BT / GOAP modes only)
+//   V — toggle path gizmo (all policy modes except Random)
 
 use bevy::prelude::*;
 use atb::config::TILE_SIZE;

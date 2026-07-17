@@ -13,7 +13,6 @@ Adding a new algorithm
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
@@ -59,8 +58,8 @@ class PpoConfig:
 class EnvConfig:
     stage: int = MISSING
     n_envs: int = MISSING
-    seed: Optional[int] = None
-    max_episode_steps: Optional[int] = None
+    seed: int | None = None
+    max_episode_steps: int | None = None
     clip_obs: float = 10.0
     normalize_obs: bool = MISSING
     normalize_reward: bool = MISSING
@@ -79,7 +78,7 @@ class TrainConfig:
     eval_freq: int = MISSING
     eval_episodes: int = MISSING
     device: str = MISSING
-    resume: Optional[str] = None        # optional resume path
+    resume: str | None = None        # optional resume path
     # Regenerate this run's plots every N env steps during training (0 = only at
     # stage end). Non-blocking; see callbacks/plotting.py.
     plot_freq: int = 0
@@ -113,12 +112,13 @@ class TuneConfig:
     clip_range_max: float = 0.3
     ent_coef_min: float = 0.01
     ent_coef_max: float = 0.1
-    gamma_min: float = 0.97
-    gamma_max: float = 0.999
+    # gamma is not searched — it is pinned to the RON's option_gamma (see tune.py).
     gae_lambda_min: float = 0.9
     gae_lambda_max: float = 0.99
-    batch_size_opts: list[int] = field(default_factory=lambda: [256, 512, 1024])
-    n_epochs_opts: list[int] = field(default_factory=lambda: [5, 10, 15])
+    # Include the production values (configs/ppo/default.yaml: 2048 / 4) so the
+    # search space covers what training actually runs.
+    batch_size_opts: list[int] = field(default_factory=lambda: [512, 1024, 2048])
+    n_epochs_opts: list[int] = field(default_factory=lambda: [4, 8, 12])
 
 
 # ---------------------------------------------------------------------------

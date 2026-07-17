@@ -26,7 +26,6 @@ use crate::rl::obs::{
     MM_CH_GOLD, MM_CH_MULT, MM_CH_OBSTACLE, MM_CH_SPEED,
     MM_CHANNELS, MM_DIM, MM_SIZE, OBS_CROP_SIZE, OBS_DIM, OBS_TOTAL,
 };
-use crate::world::coords::GridPos;
 use crate::world::grid::Grid;
 use crate::world::tile::Tile;
 
@@ -36,10 +35,10 @@ const CLUSTER_COUNT_NORM: f32 = 25.0;
 pub fn build_obs_into(
     buf:            &mut [f32],
     agent:          &AgentState,
-    gold_positions: &[GridPos],
-    items:          &[ItemState],
+    items:          &[ItemState],   // all items incl. gold (gold = kind == Gold)
     grid:           &Grid,
     clusters:       &[Option<GoldCluster>; CLUSTER_K],
+    dist:           &[i32],   // BFS dist_field from agent.pos (caller-supplied, shared)
     time_remaining: f32,
 ) {
     debug_assert_eq!(buf.len(), OBS_TOTAL,
@@ -82,39 +81,29 @@ pub fn build_obs_into(
         }
     }
 
-    // ── Gold (crop) ────────────────────────────────────────────────────────────
-
-    for &gpos in gold_positions {
-        let cx = gpos.x - ax + centre;
-        let cy = gpos.y - ay + centre;
-        if in_crop(cx, cy) {
-            buf[pixel(CH_GOLD, cx, cy)] = 1.0;
-        }
-    }
-
-    // ── Flavour items (crop): speed / multiplier ─────────────────────────────
+    // ── Items (crop): gold / speed / multiplier ──────────────────────────────
 
     for it in items {
         let cx = it.pos.x - ax + centre;
         let cy = it.pos.y - ay + centre;
         if !in_crop(cx, cy) { continue; }
-        match it.kind {
-            ItemKind::Speed      => buf[pixel(CH_SPEED, cx, cy)] = 1.0,
-            ItemKind::Multiplier => buf[pixel(CH_MULT, cx, cy)] = 1.0,
-            ItemKind::Gold       => {} // already drawn from gold_positions
-        }
+        let ch = match it.kind {
+            ItemKind::Gold       => CH_GOLD,
+            ItemKind::Speed      => CH_SPEED,
+            ItemKind::Multiplier => CH_MULT,
+        };
+        buf[pixel(ch, cx, cy)] = 1.0;
     }
 
     // ── Minimap (17×17 cells, ~3×3 tiles/cell for 50×50 map) ─────────────────
 
-    build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], gold_positions, items, grid);
+    build_minimap(&mut buf[OBS_DIM..OBS_DIM + MM_DIM], items, grid);
 
     // ── Cluster features (CLUSTER_K × 4 floats after minimap) ─────────────────
     // [dx_norm, dy_norm, pathdist_norm, count_norm] per fixed region. The "nearest
     // gold" used for direction + distance is the PATH-nearest (BFS around walls),
     // so the policy's distance perception is correct around obstacles.
 
-    let dist = crate::engine::nav::dist_field(grid, agent.pos);
     let path_norm = (gw + gh) as f32; // longest plausible corridor distance
     let cluster_start = OBS_DIM + MM_DIM;
     for (k, maybe_cluster) in clusters.iter().enumerate().take(CLUSTER_K) {
@@ -124,9 +113,9 @@ pub fn build_obs_into(
             // same target resolve_nav_goal will drive to and the action mask permits.
             // Fall back to the Chebyshev-nearest for direction only if none is
             // reachable (region fully walled off → pathdist saturates at 1.0).
-            let (target, pathdist) = match c.nearest_reachable_gold(&dist, grid) {
+            let (target, pathdist) = match c.nearest_reachable_gold(dist, grid) {
                 Some(g) => {
-                    let d = crate::engine::nav::dist_at(&dist, grid, g).unwrap_or(0);
+                    let d = crate::engine::nav::dist_at(dist, grid, g).unwrap_or(0);
                     (Some(g), (d as f32 / path_norm).min(1.0))
                 }
                 None => (c.nearest_gold(agent.pos), 1.0), // all walled off
@@ -144,10 +133,9 @@ pub fn build_obs_into(
 // ── Minimap builder ───────────────────────────────────────────────────────────
 
 fn build_minimap(
-    mm:             &mut [f32],
-    gold_positions: &[GridPos],
-    items:          &[ItemState],
-    grid:           &Grid,
+    mm:    &mut [f32],
+    items: &[ItemState],
+    grid:  &Grid,
 ) {
     debug_assert_eq!(mm.len(), MM_CHANNELS * MM_SIZE * MM_SIZE);
 
@@ -173,18 +161,11 @@ fn build_minimap(
         }
     }
 
-    // Gold positions (pre-computed vec).
-    for &gpos in gold_positions {
-        let (mx, my) = to_mm(gpos.x, gpos.y);
-        mm[mm_pixel(MM_CH_GOLD, mx, my)] = 1.0;
-    }
-
-    // Flavour items.
     for it in items {
         let ch = match it.kind {
+            ItemKind::Gold       => MM_CH_GOLD,
             ItemKind::Speed      => MM_CH_SPEED,
             ItemKind::Multiplier => MM_CH_MULT,
-            ItemKind::Gold       => continue,
         };
         let (mx, my) = to_mm(it.pos.x, it.pos.y);
         mm[mm_pixel(ch, mx, my)] = 1.0;

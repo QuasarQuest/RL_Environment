@@ -35,6 +35,8 @@ import h5py
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -95,10 +97,10 @@ METRIC_HELP = {
     "train/value_loss":             "critic loss — MSE of value vs returns",
     "eval/mean_reward":             "deterministic eval reward (masked greedy policy)",
     "eval/mean_ep_length":          "deterministic eval episode length",
-    "policy/chosen_gold_dist":      "distance to the gold it chose — high = ranging far past nearer gold",
-    "policy/own_region_skip_rate":  "when local gold exists & it collects, how often it picks a DIFFERENT region",
-    "policy/own_region_has_gold_rate": "fraction of decisions where the agent's own region had collectible gold",
-    "policy/option_len":            "mean ticks per option — lower = shorter trips; near MAX_OPTION_TICKS = wandering",
+    "policy/chosen_gold_dist":      "distance to the chosen gold — high = ranging far past nearer gold",
+    "policy/own_region_skip_rate":  "how often it picks a DIFFERENT region while local gold exists",
+    "policy/own_region_has_gold_rate": "fraction of decisions where the own region had collectible gold",
+    "policy/option_len":            "mean ticks per option — near MAX_OPTION_TICKS = wandering",
 }
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -171,14 +173,20 @@ def load_tb_scalars(run_dir: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         print("  [note] tensorboard not installed — skipping training-metric plots")
         return {}
 
-    acc = EventAccumulator(str(events[-1]), size_guidance={"scalars": 0})
-    acc.Reload()
+    # Accumulate over EVERY event file (a resumed stage / TB restart writes a new
+    # one) — reading only the newest silently drops the earlier history.
+    raw: dict[str, list[tuple[int, float]]] = {}
+    for ev in events:
+        acc = EventAccumulator(str(ev), size_guidance={"scalars": 0})
+        acc.Reload()
+        for tag in acc.Tags().get("scalars", []):
+            raw.setdefault(tag, []).extend((e.step, e.value) for e in acc.Scalars(tag))
     out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for tag in acc.Tags().get("scalars", []):
-        s = acc.Scalars(tag)
+    for tag, pts in raw.items():
+        pts.sort()
         out[tag] = (
-            np.array([e.step for e in s], dtype=np.int64),
-            np.array([e.value for e in s], dtype=np.float64),
+            np.array([s for s, _ in pts], dtype=np.int64),
+            np.array([v for _, v in pts], dtype=np.float64),
         )
     return out
 
@@ -199,9 +207,14 @@ def discover_runs(
         dirs = [Path(d) for d in run_dirs]
     else:
         pattern = f"{prefix}_s*_*" if prefix else "*_s*_*"
+
+        def _ts(p: Path) -> int:  # non-numeric suffix (e.g. plot dirs) sorts first
+            tail = p.name.rsplit("_", 1)[-1]
+            return int(tail) if tail.isdigit() else -1
+
         dirs = sorted(
             [d for d in RUNS_DIR.glob(pattern) if d.is_dir()],
-            key=lambda p: (stage_from_name(p.name), int(p.name.rsplit("_", 1)[-1])),
+            key=lambda p: (stage_from_name(p.name), _ts(p)),
         )
 
     runs: list[RunInfo] = []
@@ -238,7 +251,7 @@ def _rolling(
     return x[idx], means, stds
 
 
-def _format_millions(ax: plt.Axes) -> None:
+def _format_millions(ax: Axes) -> None:
     ax.xaxis.set_major_formatter(
         mticker.FuncFormatter(lambda v, _: f"{v/1e6:.1f}M" if v >= 1e6 else f"{v/1e3:.0f}K")
     )
@@ -248,7 +261,7 @@ def _tag_filename(tag: str) -> str:
     return re.sub(r"[^0-9a-zA-Z]+", "_", tag).strip("_")
 
 
-def _save(fig: plt.Figure, path: Path, show: bool) -> None:
+def _save(fig: Figure, path: Path, show: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, bbox_inches="tight", facecolor=fig.get_facecolor())
     print(f"  saved  {path}")
@@ -467,14 +480,15 @@ def plot_combined_comparison(runs: list[RunInfo], out_dir: Path) -> None:
         ax.set_ylabel(ylabel)
         if ylim:
             ax.set_ylim(*ylim)
-        for b, v in zip(bars, values):
+        for b, v in zip(bars, values, strict=True):
             if not np.isnan(v):
                 ax.text(b.get_x() + b.get_width() / 2, b.get_height(), fmt(v),
                         ha="center", va="bottom", fontsize=8, color="#eee")
         fig.tight_layout()
         _save(fig, d / fname, show=False)
 
-    final_eval_mean = [r.evals.mean[-1] if r.evals is not None and len(r.evals.mean) else np.nan for r in runs]
+    final_eval_mean = [r.evals.mean[-1] if r.evals is not None and len(r.evals.mean) else np.nan
+                       for r in runs]
     final_eval_std = [r.evals.std[-1] if r.evals is not None and len(r.evals.std) else 0.0 for r in runs]
     bar(final_eval_mean, final_eval_std, "Final Eval Reward (mean ± std)", "Eval Reward",
         lambda v: f"{v:.1f}", "final_eval.png")

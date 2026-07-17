@@ -11,11 +11,11 @@ the previous plot job is still running (no pile-up). Output is appended to
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -35,7 +35,8 @@ class PeriodicPlotCallback(BaseCallback):
         self.run_dir = Path(run_dir)
         self.plot_script = Path(plot_script)
         self._last = 0
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
+        self._logfh = None
 
     # ── internal ────────────────────────────────────────────────────────────────
 
@@ -50,8 +51,8 @@ class PeriodicPlotCallback(BaseCallback):
 
         env = {**os.environ, "MPLBACKEND": "Agg"}  # headless render, no GUI needed
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        log = self.run_dir / "plot.log"
-        self._logfh = open(log, "a")
+        if self._logfh is None:  # one long-lived append handle for the whole run
+            self._logfh = open(self.run_dir / "plot.log", "a")  # noqa: SIM115
         self._proc = subprocess.Popen(
             [sys.executable, str(self.plot_script),
              "--dirs", str(self.run_dir), "--no-show"],
@@ -75,13 +76,12 @@ class PeriodicPlotCallback(BaseCallback):
             return
         # Wait for any in-flight job, then render a final, up-to-date set (blocking).
         if self._proc is not None and self._proc.poll() is None:
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 self._proc.wait(timeout=180)
-            except subprocess.TimeoutExpired:
-                pass
         self._spawn()
         if self._proc is not None:
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 self._proc.wait(timeout=300)
-            except subprocess.TimeoutExpired:
-                pass
+        if self._logfh is not None:
+            self._logfh.close()
+            self._logfh = None

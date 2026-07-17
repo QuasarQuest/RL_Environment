@@ -45,11 +45,15 @@ pub fn spawn_tiles(
     do_spawn_tiles(&mut commands, &bridge, &offset);
 }
 
+/// Repaint tile sprites from the grid — only when the map actually changed
+/// (restart/load). The grid is immutable mid-episode, so repainting all w×h
+/// sprites on every stepped frame was pure waste.
 pub fn sync_tile_colors(
     bridge:    Res<SimBridge>,
+    mut ev:    MessageReader<crate::viz::events::MapChanged>,
     mut query: Query<(&TileMarker, &mut Sprite)>,
 ) {
-    if !bridge.is_changed() { return; }
+    if ev.read().next().is_none() { return; }
     for (marker, mut sprite) in query.iter_mut() {
         if let Some(tile) = bridge.grid().get(marker.x as i32, marker.y as i32) {
             sprite.color = tile_color(tile);

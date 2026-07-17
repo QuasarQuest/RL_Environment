@@ -16,18 +16,14 @@ maskable_ppo  : PPO with per-step action masking (sb3-contrib). This is the
 
 Policy choice
 -------------
-Both algos use "MlpPolicy": the observation space is flat (10222,) and
+Both algos use "MlpPolicy": the observation space is flat (OBS_TOTAL = 8692,) and
 AtbCnnExtractor handles the CNN internally — SB3 routes the policy string through
 the custom features_extractor_class set in the policy_kwargs (see network/policy.py).
-
-Switching back to the legacy flat-vector pipeline:
-  - policy.py:   ATB_POLICY_KWARGS = ATB_MLP_POLICY_KWARGS
-  - atb_env.py / batch_vec_env.py: revert obs shape
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, Type, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import torch as th
 from stable_baselines3 import PPO
@@ -71,7 +67,7 @@ class AlgoSpec:
     """Static description of an RL algorithm."""
 
     name: str
-    cls: Type[BaseAlgorithm]
+    cls: type[BaseAlgorithm]
     policy: str
     supports_discrete: bool
     supports_continuous: bool

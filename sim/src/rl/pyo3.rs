@@ -60,9 +60,12 @@ impl PyBatchEnv {
 
 #[pymethods]
 impl PyBatchEnv {
+    /// `seed`: base RNG seed — env `i` is seeded with `seed + i` for reproducible
+    /// batches. Omit for OS entropy (non-reproducible).
     #[new]
-    pub fn new(n_envs: usize, config_path: String) -> Self {
-        Self { inner: BatchEnv::new(n_envs, config_path) }
+    #[pyo3(signature = (n_envs, config_path, seed=None))]
+    pub fn new(n_envs: usize, config_path: String, seed: Option<u64>) -> Self {
+        Self { inner: BatchEnv::new(n_envs, config_path, seed) }
     }
 
     pub fn n_envs(&self) -> usize { self.inner.n_envs() }

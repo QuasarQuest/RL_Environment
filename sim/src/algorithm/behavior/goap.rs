@@ -211,15 +211,12 @@ const LOW_HEALTH_THRESH: u8 = 1;
 const COST_NAVIGATE: u32 = 4;
 /// Instant single-tile actions (pickup, deposit, flee step).
 const COST_INSTANT: u32 = 1;
-/// Wait is always available but heavily penalised so the planner prefers any action.
-const COST_WAIT: u32 = 20;
 
 pub const ACT_NAVIGATE_TO_GOLD: &str = "navigate_to_gold";
 pub const ACT_COLLECT_GOLD:     &str = "collect_gold";
 pub const ACT_NAVIGATE_TO_BASE: &str = "navigate_to_base";
 pub const ACT_DROP_GOLD:        &str = "drop_gold";
 pub const ACT_FLEE:             &str = "flee";
-pub const ACT_WAIT:             &str = "wait";
 
 pub static ACTIONS: &[Action] = &[
     Action {
@@ -262,13 +259,7 @@ pub static ACTIONS: &[Action] = &[
         effect_value: 0,
         cost: COST_INSTANT,
     },
-    Action {
-        name:         ACT_WAIT,
-        pre_mask:     0,
-        pre_value:    0,
-        effect_mask:  0,
-        effect_value: 0,
-        cost: COST_WAIT,
-    },
+    // NOTE: no "wait" action — its effect is the identity, so the successor state
+    // is always already in the closed set and it can never appear in a plan.
 ];
 

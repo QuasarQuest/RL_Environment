@@ -13,15 +13,8 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.callbacks import EvalCallback
-
-try:
-    from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
-    _MASKABLE_AVAILABLE = True
-except ImportError:
-    MaskableEvalCallback = None  # type: ignore[assignment,misc]
-    _MASKABLE_AVAILABLE = False
-
 
 # At runtime the mixin is combined with a concrete EvalCallback subclass (see
 # EvalWithVecNorm / MaskableEvalWithVecNorm), inheriting best_mean_reward,
@@ -42,10 +35,15 @@ class _VecNormOnnxEvalMixin(_EvalBase):
     (mean=0, var=1) statistics. Mix this into the correct eval base for the algo.
     """
 
+    #: Consecutive export failures tolerated before aborting the run — a
+    #: permanently broken export must not fail silently for an entire run.
+    _MAX_EXPORT_FAILURES = 3
+
     def __init__(self, *args, vec_normalize=None, onnx_path=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._vec_normalize = vec_normalize
         self._onnx_path = Path(onnx_path) if onnx_path else None
+        self._export_failures = 0
 
     def _on_step(self) -> bool:
         prev_best = self.best_mean_reward
@@ -76,26 +74,28 @@ class _VecNormOnnxEvalMixin(_EvalBase):
                 self._onnx_path,
                 vecnorm_path=vn_path if vn_path and vn_path.exists() else None,
             )
+            self._export_failures = 0
         except Exception as exc:
-            print(f"  [ONNX export skipped: {exc}]")
+            self._export_failures += 1
+            if self._export_failures >= self._MAX_EXPORT_FAILURES:
+                raise RuntimeError(
+                    f"ONNX export failed {self._export_failures} consecutive times "
+                    f"— the run would end with no deployable policy."
+                ) from exc
+            print(f"  [ONNX export failed ({self._export_failures}/"
+                  f"{self._MAX_EXPORT_FAILURES}): {exc}]")
 
 
 class EvalWithVecNorm(_VecNormOnnxEvalMixin, EvalCallback):
     """Standard (non-masking) eval-best callback with VecNorm + ONNX co-save."""
 
 
-if _MASKABLE_AVAILABLE:
-
-    class MaskableEvalWithVecNorm(_VecNormOnnxEvalMixin, MaskableEvalCallback):
-        """Maskable eval-best callback — fetches action masks during evaluation."""
+class MaskableEvalWithVecNorm(_VecNormOnnxEvalMixin, MaskableEvalCallback):
+    """Maskable eval-best callback — fetches action masks during evaluation."""
 
 
 def make_eval_callback(algo: str, *args, **kwargs):
     """Return the eval-best callback matching the algorithm's masking support."""
     if algo == "maskable_ppo":
-        if not _MASKABLE_AVAILABLE:
-            raise RuntimeError(
-                "algo=maskable_ppo requires sb3-contrib (MaskableEvalCallback)."
-            )
         return MaskableEvalWithVecNorm(*args, **kwargs)
     return EvalWithVecNorm(*args, **kwargs)

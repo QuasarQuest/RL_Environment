@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use super::camera::{spawn_camera, fit_camera_to_grid, init_pan_state, camera_controls};
+use super::camera::{spawn_camera, fit_camera_to_grid, refit_camera_on_load, init_pan_state, camera_controls};
 use super::grid_offset::compute_grid_offset;
 use super::renderer::tile_renderer::{spawn_tiles, sync_tile_colors};
 use super::renderer::agent_renderer::{
@@ -13,13 +13,13 @@ use super::renderer::debug_gizmos::{
 };
 use super::hud::{
     spawn_hud,
-    update_tick_label, update_time_label, update_team_scores,
+    update_tick_label, update_time_label,
     handle_speed_buttons, handle_pause_button, sync_pause_visuals,
     handle_policy_key, sync_policy_mode_label,
 };
 use super::panels::scoreboard::{
     spawn_tab_scoreboard, toggle_tab_scoreboard,
-    build_scoreboard_rows, refresh_scoreboard_stats,
+    build_scoreboard_rows, clear_scoreboard_rows, refresh_scoreboard_stats,
 };
 use super::panels::debug_overlay::{spawn_debug_overlay, toggle_debug_overlay, update_debug_overlay};
 use super::panels::help_overlay::{spawn_help_overlay, toggle_help_overlay};
@@ -66,19 +66,27 @@ impl Plugin for VizPlugin {
                 spawn_load_menu,
             ))
             .configure_sets(Update, HudUpdate.after(SimSet))
+            .add_systems(Update, camera_controls)
+            // Everything that renders sim state runs after SimSet — otherwise the
+            // executor may schedule it before step_sim and the world view lags the
+            // HUD by one tick nondeterministically.
             .add_systems(Update, (
-                camera_controls,
                 sync_tile_colors,
                 sync_agent_transforms,
                 sync_item_transforms,
                 sync_spawn_pocket_overlay,
-            ))
+                refit_camera_on_load,
+            ).in_set(HudUpdate))
             .add_systems(Update, (
                 update_tooltip,
                 toggle_tab_scoreboard,
+                clear_scoreboard_rows,
                 build_scoreboard_rows,
                 refresh_scoreboard_stats,
-            ))
+                update_debug_overlay,
+                draw_path_gizmo,
+                draw_spawn_pocket_border,
+            ).in_set(HudUpdate))
             .add_systems(Update, (
                 handle_speed_buttons,
                 handle_pause_button,
@@ -88,10 +96,7 @@ impl Plugin for VizPlugin {
                 toggle_help_overlay,
                 toggle_legend_overlay,
                 toggle_debug_overlay,
-                update_debug_overlay,
                 toggle_path_viz,
-                draw_path_gizmo,
-                draw_spawn_pocket_border,
             ))
             .add_systems(Update, (
                 toggle_load_menu,
@@ -109,7 +114,6 @@ impl Plugin for VizPlugin {
             .add_systems(Update, (
                 update_tick_label,
                 update_time_label,
-                update_team_scores,
             ).in_set(HudUpdate));
     }
 }

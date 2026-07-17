@@ -30,14 +30,6 @@ impl OnnxPolicy {
         outputs[0].as_slice::<f32>().ok().map(|s| s.to_vec())
     }
 
-    /// Greedy action over all logits (no masking). Kept as a fallback API; the
-    /// viewer uses `act_masked` to match the policy's MaskablePPO training.
-    #[allow(dead_code)]
-    pub fn act(&self, obs: &[f32]) -> u32 {
-        let logits = match self.logits(obs) { Some(l) => l, None => return ACTION_WAIT };
-        argmax(logits.iter().copied().enumerate())
-    }
-
     /// Greedy action restricted to valid actions (`mask[i] == true`). Mirrors the
     /// MaskablePPO inference the policy was trained under — without it the argmax
     /// could pick a masked, provably-useless action. Falls back to Wait if no

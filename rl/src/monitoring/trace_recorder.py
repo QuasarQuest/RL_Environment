@@ -43,7 +43,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 # Disable HDF5's advisory lock (single writer + read-only monitors ⇒ safe), so trace
 # I/O never collides with a concurrent stats reader. Must precede the h5py import.
@@ -76,15 +76,18 @@ TICK_FIELDS: list[str] = [
 # Cluster-feature sub-layout: region k → obs offset k*4 + {dx, dy, pathdist, count}.
 _CF_DX, _CF_DY, _CF_PATHDIST, _CF_COUNT = 0, 1, 2, 3
 
+# Item FFI codes — ItemKind::code() in sim/src/entity/item.rs (0 gold, 1 speed, 2 mult).
+_ITEM_GOLD = 0
+
 
 # ── Path resolution ──────────────────────────────────────────────────────────
 
 def _resolve_paths(
-    run: Optional[Path],
-    model: Optional[Path],
-    vecnorm: Optional[Path],
-    out: Optional[Path],
-) -> tuple[Path, Optional[Path], Path]:
+    run: Path | None,
+    model: Path | None,
+    vecnorm: Path | None,
+    out: Path | None,
+) -> tuple[Path, Path | None, Path]:
     """Resolve (model_path, vecnorm_path|None, out_path) from --run or explicit flags.
 
     A run dir is laid out (see training/train.py): <run>/eval_best/best_model.zip
@@ -112,10 +115,19 @@ def _resolve_paths(
 # ── Inference helper ──────────────────────────────────────────────────────────
 
 def _policy_step(model, policy_obs: np.ndarray, mask: np.ndarray, deterministic: bool):
-    """Return (probs[A], value, action) for one observation under the masked policy."""
+    """Return (probs[A], value, action) for one observation under the policy.
+
+    Only maskable policies take an ``action_masks`` kwarg — plain
+    ActorCriticPolicy.get_distribution() would raise TypeError on it.
+    """
+    from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
     obs_t, _ = model.policy.obs_to_tensor(policy_obs)
+    mask_kw = (
+        {"action_masks": mask.reshape(1, -1)}
+        if isinstance(model.policy, MaskableActorCriticPolicy) else {}
+    )
     with th.no_grad():
-        dist = model.policy.get_distribution(obs_t, action_masks=mask.reshape(1, -1))
+        dist = model.policy.get_distribution(obs_t, **mask_kw)
         probs = dist.distribution.probs.detach().cpu().numpy()[0].astype(np.float32)
         value = float(model.policy.predict_values(obs_t).detach().cpu().numpy().reshape(-1)[0])
         if deterministic:
@@ -201,11 +213,11 @@ def _vstack(arrs: list[np.ndarray], ncol: int, dtype) -> np.ndarray:
 @app.callback(invoke_without_command=True)
 def record(
     ctx: typer.Context,
-    run: Optional[Path] = typer.Option(None, "--run", help="Run dir (derives model/vecnorm/out)."),
-    model: Optional[Path] = typer.Option(None, "--model", help="Explicit model .zip."),
-    vecnorm: Optional[Path] = typer.Option(None, "--vecnorm", help="Explicit VecNormalize .pkl."),
+    run: Path | None = typer.Option(None, "--run", help="Run dir (derives model/vecnorm/out)."),
+    model: Path | None = typer.Option(None, "--model", help="Explicit model .zip."),
+    vecnorm: Path | None = typer.Option(None, "--vecnorm", help="Explicit VecNormalize .pkl."),
     config: Path = typer.Option(Path(DEFAULT_CONFIG), "--config", help="World .ron config."),
-    out: Optional[Path] = typer.Option(None, "--out", help="Output .h5 (default <run>/trace.h5)."),
+    out: Path | None = typer.Option(None, "--out", help="Output .h5 (default <run>/trace.h5)."),
     episodes: int = typer.Option(5, "--episodes", help="Episodes to record."),
     algo: str = typer.Option("maskable_ppo", "--algo", help="ppo or maskable_ppo."),
     deterministic: bool = typer.Option(True, "--deterministic/--stochastic",
@@ -260,14 +272,13 @@ def record(
         obs = raw.reset()
         raw_obs = obs.copy()
         ep = _new_episode(raw, grid_w, grid_h)
-        dec_idx = 0
         completed = 0
 
         while completed < episodes:
             agents = raw.batch.get_agents(0)
             ax, ay, _team, gold_carried, score = agents[0]
             items = np.array(raw.batch.get_items(0), dtype=np.int16).reshape(-1, 3)
-            gold = items[items[:, 2] == 0][:, :2] if len(items) else np.empty((0, 2), np.int16)
+            gold = items[items[:, 2] == _ITEM_GOLD][:, :2] if len(items) else np.empty((0, 2), np.int16)
             tick = raw.batch.get_tick(0)
             mask = np.asarray(raw.batch.action_masks(), dtype=bool).reshape(ACTION_SIZE)
             cf = raw_obs[0, -CLUSTER_FEATURES:].astype(np.float32)
@@ -308,7 +319,6 @@ def record(
                 "cluster_count": cl[:, _CF_COUNT].copy(),
             }
             ep.add_decision(row, gold, items, trace)
-            dec_idx += 1
             raw_obs = obs.copy()
 
             if bool(dones[0]):
@@ -320,7 +330,6 @@ def record(
                 completed += 1
                 if completed < episodes:
                     ep = _new_episode(raw, grid_w, grid_h)
-                    dec_idx = 0
 
     log.info("Wrote %s", out_path)
 
@@ -507,7 +516,7 @@ def _render(tr: _Trace, i: int, axes) -> None:
         ax_grid.scatter(gold[:, 0], gold[:, 1], s=14, c="goldenrod",
                         edgecolors="k", linewidths=0.3, label="gold", zorder=3)
     items = tr.items_at(i)
-    pu = items[items[:, 2] != 0] if len(items) else items   # non-gold = power-ups
+    pu = items[items[:, 2] != _ITEM_GOLD] if len(items) else items   # non-gold = power-ups
     if len(pu):
         ax_grid.scatter(pu[:, 0], pu[:, 1], s=40, marker="*", c="magenta",
                         edgecolors="k", linewidths=0.3, label="item", zorder=3)
@@ -580,10 +589,10 @@ def _render(tr: _Trace, i: int, axes) -> None:
     total = float(tr.t_r["r_total"][sel].sum())
     ret = float(tr.scalar("option_return", i))
     oticks = int(tr.scalar("option_ticks", i))
-    vals = list(comps.values()) + [total]
+    vals = [*comps.values(), total]
     bar_colors = ["tab:red" if v < 0 else "tab:green" for v in vals]
     bar_colors[-1] = "black"
-    ax_rew.bar(list(comps) + ["TOTAL"], vals, color=bar_colors)
+    ax_rew.bar([*comps, "TOTAL"], vals, color=bar_colors)
     ax_rew.axhline(0, color="k", lw=0.6)
     for j, v in enumerate(vals):
         ax_rew.text(j, v, f"{v:.2f}", ha="center",
@@ -597,10 +606,10 @@ def _render(tr: _Trace, i: int, axes) -> None:
 def view(
     path: Path = typer.Argument(..., help="A trace.h5 produced by `atb-trace`."),
     episode: int = typer.Option(0, "--episode", "-e", help="Episode index to view."),
-    decision: Optional[int] = typer.Option(
+    decision: int | None = typer.Option(
         None, "--decision", "-d",
         help="Show only this decision (else start interactive at decision 0)."),
-    save: Optional[Path] = typer.Option(
+    save: Path | None = typer.Option(
         None, "--save",
         help="Headless: write one PNG per decision to this dir (no display)."),
 ) -> None:

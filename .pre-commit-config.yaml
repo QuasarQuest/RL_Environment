@@ -1,0 +1,30 @@
+# Pre-commit hooks — install once with: rl/.venv/bin/pre-commit install
+# All hooks run from the rl/.venv toolchain (local hooks), so hook and manual
+# checker.bash runs use identical tool versions. Rust hooks only fire when
+# staged files include Rust sources; Python hooks likewise.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: rl/.venv/bin/ruff check --fix
+        language: system
+        types: [python]
+      - id: pyright
+        name: pyright
+        entry: rl/.venv/bin/pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy (deny warnings)
+        entry: bash -c 'cargo clippy -p algorithm_test_bed --all-features -- -D warnings && cargo clippy -p viewer -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test
+        name: cargo test
+        entry: bash -c 'cargo test -p algorithm_test_bed --all-features --quiet'
+        language: system
+        types: [rust]
+        pass_filenames: false

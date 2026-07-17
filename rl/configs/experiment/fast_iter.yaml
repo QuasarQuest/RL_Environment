@@ -1,7 +1,7 @@
 # @package _global_
 # Fast iteration profile for environment and reward tuning.
 #
-# Target: ~2-3 min per run on XPS 9500 (GTX 1650 Ti).
+# Target: ~2-3 min per run (RTX 4070 Laptop dev machine).
 #
 # Eval is single-threaded (DummyVecEnv, 1 env) — Rayon only runs during
 # training rollouts. Keep eval_episodes low and eval_freq high to minimise

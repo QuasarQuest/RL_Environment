@@ -1,3 +1,7 @@
+// Bevy queries with multiple filters trip clippy's type_complexity lint by
+// design; aliasing every query type would hurt readability more than it helps.
+#![allow(clippy::type_complexity)]
+
 use bevy::prelude::*;
 
 mod policy;
@@ -37,7 +41,6 @@ fn main() {
                 ..default()
             })
         )
-        .configure_sets(Update, viz::SimSet)
         .add_plugins(sim_bridge::SimBridgePlugin)
         .add_plugins(viz::VizPlugin)
         .run();

@@ -26,19 +26,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
+import torch as th
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 
 if TYPE_CHECKING:
     from env.batch_vec_env import BatchVecEnv
 
-try:
-    from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
-    _MASKABLE = True
-except ImportError:
-    MaskableRolloutBuffer = None  # type: ignore[assignment,misc]
-    _MASKABLE = False
-
+from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
 
 # At runtime the mixin is combined with a concrete RolloutBuffer subclass (see
 # SmdpRolloutBuffer / SmdpMaskableRolloutBuffer), inheriting gamma, gae_lambda,
@@ -91,16 +86,14 @@ class SmdpRolloutBuffer(_SmdpGaeMixin, RolloutBuffer):
     """SMDP-discounted rollout buffer for plain PPO."""
 
 
-if _MASKABLE:
-
-    class SmdpMaskableRolloutBuffer(_SmdpGaeMixin, MaskableRolloutBuffer):
-        """SMDP-discounted rollout buffer for MaskablePPO."""
+class SmdpMaskableRolloutBuffer(_SmdpGaeMixin, MaskableRolloutBuffer):
+    """SMDP-discounted rollout buffer for MaskablePPO."""
 
 
 def smdp_buffer_class(algo: str):
     """Return the SMDP buffer class for `algo`, or None if unsupported."""
     if algo == "maskable_ppo":
-        return SmdpMaskableRolloutBuffer if _MASKABLE else None
+        return SmdpMaskableRolloutBuffer
     if algo == "ppo":
         return SmdpRolloutBuffer
     return None  # unsupported algo: plain γ
@@ -113,9 +106,15 @@ class SmdpDiscountCallback(BaseCallback):
     writing ``option_ticks[buffer.pos]`` lands in the slot add() is about to fill —
     aligning the discount with the transition's reward. No-ops if the buffer is not
     an SMDP buffer or the env lacks option_ticks (single-env).
+
+    It also corrects the timeout value bootstrap to γ^k. Every episode here ends as
+    a time-limit truncation, and AFTER this callback SB3 adds ``γ¹ · V(terminal_obs)``
+    to the boundary reward (on_policy_algorithm / ppo_mask collect_rollouts) — wrong
+    for a final option of length k. Pre-subtracting ``(γ − γ^k) · V(terminal_obs)``
+    here makes the net bootstrap ``γ^k · V(terminal_obs)``, matching the γ^k GAE.
     """
 
-    def _find_env(self) -> "BatchVecEnv | None":
+    def _find_env(self) -> BatchVecEnv | None:
         env = self.training_env
         seen = 0
         while env is not None and not hasattr(env, "option_ticks") and seen < 8:
@@ -132,7 +131,29 @@ class SmdpDiscountCallback(BaseCallback):
         env = self._find_env()
         if env is None:
             return True
+        ticks = env.option_ticks()
         pos = buf.pos
         if 0 <= pos < buf.buffer_size:
-            buf.option_ticks[pos] = env.option_ticks()
+            buf.option_ticks[pos] = ticks
+
+        # γ^k truncation bootstrap (see class docstring). Mutate rewards IN PLACE —
+        # SB3 passes the same array to rollout_buffer.add after its own γ¹ add.
+        dones = self.locals.get("dones")
+        infos = self.locals.get("infos")
+        rewards = self.locals.get("rewards")
+        if dones is None or infos is None or rewards is None:
+            return True
+        gamma = buf.gamma
+        for idx in np.flatnonzero(dones):
+            info = infos[idx]
+            terminal_obs = info.get("terminal_observation")
+            if terminal_obs is None or not info.get("TimeLimit.truncated", False):
+                continue
+            k = float(ticks[idx])
+            if k == 1.0:
+                continue
+            obs_t, _ = self.model.policy.obs_to_tensor(terminal_obs)
+            with th.no_grad():
+                v = self.model.policy.predict_values(obs_t).item()  # type: ignore[arg-type]
+            rewards[idx] -= (gamma - gamma**k) * v
         return True

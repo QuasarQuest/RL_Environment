@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -84,8 +84,8 @@ def export_to_onnx(
     import onnxruntime as ort
 
     policy.eval().cpu()
-    obs_shape = policy.observation_space.shape  # type: ignore[union-attr]
-    assert obs_shape is not None
+    # cast: nn.Module attribute access loses the SB3 policy type.
+    obs_shape: tuple[int, ...] = tuple(cast(Any, policy).observation_space.shape)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Resolve optional VecNormalize obs stats.
@@ -151,7 +151,7 @@ def export_onnx(
     # bake into the deployed policy.onnx that the viewer (tract) loads.
     opset: int = typer.Option(12, "--opset"),
     tolerance: float = typer.Option(1e-5, "--tolerance"),
-    vecnorm_path: Optional[Path] = typer.Option(None, "--vecnorm"),
+    vecnorm_path: Path | None = typer.Option(None, "--vecnorm"),
     algo: str = typer.Option("maskable_ppo", "--algo", help="ppo or maskable_ppo"),
 ) -> None:
     """Export a saved PPO / MaskablePPO policy to ONNX and validate."""

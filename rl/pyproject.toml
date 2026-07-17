@@ -16,10 +16,21 @@ dependencies = [
     "h5py>=3.11.0",
     "numpy>=1.26.0",
     "pandas>=2.2.0",
-    "plotext>=5.2.0",
     "rich>=13.7.0",
     "typer>=0.12.0",
-    "raylib>=5.0.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "python-dotenv>=1.0.0",
+    "matplotlib>=3.8.0",
+    "tensorboard>=2.16.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15",
+    "pyright>=1.1",
+    "pre-commit>=4.0",
 ]
 
 [project.scripts]
@@ -37,3 +48,30 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# ── Lint (ruff) — pyright is configured in /pyrightconfig.json; both run via
+# checker.bash and the pre-commit hook. ──────────────────────────────────────
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+extend-exclude = [".venv", "src/atb_rl.egg-info"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E402",   # module-import-not-at-top: HDF5_USE_FILE_LOCKING must precede h5py
+    "B008",   # function-call-in-default-argument: standard typer.Option/Argument pattern
+    "RUF001", # ambiguous unicode: γ, ×, — et al. are deliberate in strings
+    "RUF002", # ... in docstrings
+    "RUF003", # ... in comments
+]

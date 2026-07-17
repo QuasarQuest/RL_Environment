@@ -166,6 +166,14 @@ pub struct SimCore {
 
     pub obs_buf: Vec<f32>,
 
+    /// BFS distance field + gold regions computed by the most recent obs build,
+    /// valid while the agent stands at `obs_cache_pos` (any tick rebuilds the obs,
+    /// so external queries — action_mask, decision telemetry — always hit). Shares
+    /// one BFS across obs/mask/telemetry instead of recomputing it per consumer.
+    obs_dist:      Vec<i32>,
+    obs_clusters:  [Option<GoldCluster>; CLUSTER_K],
+    obs_cache_pos: Option<GridPos>,
+
     /// Offline trace capture (default off → zero overhead for training). When on,
     /// `step_option` records a `TickRecord` per tick into `trace` (cleared at each
     /// option boundary). Used only by the single-env trace recorder.
@@ -196,16 +204,7 @@ impl SimCore {
             initial_pos, snap.grid.width as i32, snap.grid.height as i32,
         ).into_iter().collect();
 
-        let mut obs_buf = vec![0.0f32; OBS_TOTAL];
-        let clusters    = find_clusters(
-            &gold_positions, snap.grid.width as i32, snap.grid.height as i32,
-        );
-        build_obs_into(
-            &mut obs_buf, &snap.agents[0],
-            &gold_positions, &snap.items, &snap.grid, &clusters, 1.0,
-        );
-
-        Self {
+        let mut this = Self {
             grid: snap.grid, agents: snap.agents, items: snap.items,
             tick: 0, match_ticks, world_cfg,
             prev_gold: 0, prev_score: 0, prev_pos: initial_pos,
@@ -218,10 +217,15 @@ impl SimCore {
             committed_cluster_goal: None,
             committed_item_goal: None,
             rng,
-            obs_buf,
+            obs_buf: vec![0.0f32; OBS_TOTAL],
+            obs_dist: Vec::new(),
+            obs_clusters: std::array::from_fn(|_| None),
+            obs_cache_pos: None,
             trace_enabled: false,
             trace:         Vec::new(),
-        }
+        };
+        this.build_observation();
+        this
     }
 
     pub fn reset(&mut self) {
@@ -264,12 +268,7 @@ impl SimCore {
 
         physics::tick_buffs(&mut self.agents);
 
-        // Gold regions for this tick — fixed 3×3 spatial grid (stable slots).
-        let clusters = find_clusters(
-            &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
-        );
-
-        let wall_hit = self.apply_rl_action(rl_action, &clusters);
+        let wall_hit = self.apply_rl_action(rl_action);
 
         pickup::pickup(&mut self.agents, &mut self.items);
         physics::auto_deposit(&mut self.agents, &self.grid);
@@ -288,15 +287,30 @@ impl SimCore {
         (rew, done)
     }
 
-    /// Single-tick step (viewer path).
+    /// Single-tick step (viewer path). Each call is its own decision — the nav
+    /// goals are resolved fresh. Use `step_committed` to continue an option.
     pub fn step(&mut self, action: u32) -> (f32, bool) {
-        // Each single-tick call is its own decision — resolve the nav goals fresh.
         self.committed_cluster_goal = None;
         self.committed_item_goal = None;
+        self.step_committed(action)
+    }
+
+    /// Single-tick step that HOLDS the committed nav goals — the viewer's path for
+    /// ticking INSIDE an already-committed option. Without it the commit-lock that
+    /// stops target oscillation (see `committed_cluster_goal`/`committed_item_goal`)
+    /// never applies outside `step_option`, and the target BFS re-runs every tick.
+    pub fn step_committed(&mut self, action: u32) -> (f32, bool) {
         let (rb, done) = self.tick_once(int_to_rl_action(action));
         self.build_observation();
         (rb.total(), done)
     }
+
+    /// True while the agent is still pursuing its nav goal (stepped, or resting
+    /// between movement-cadence steps); false once it has arrived, is wall-blocked
+    /// or has no valid target. The viewer mirrors `step_option`'s termination with
+    /// this — a position-unchanged heuristic would misfire on every cadence rest
+    /// tick (base movement is one tile every OTHER tick).
+    pub fn en_route(&self) -> bool { self.en_route }
 
     /// Temporally-extended ("option") step used by the RL training/eval path.
     ///
@@ -311,13 +325,13 @@ impl SimCore {
     /// captures the dominant near-vs-far signal.)
     pub fn step_option(&mut self, action: u32) -> (f32, bool) {
         let rl_action = int_to_rl_action(action);
-        // Capture decision telemetry at the option boundary (before stepping).
-        self.last_decision = self.decision_telem(rl_action);
-        if self.trace_enabled { self.trace.clear(); }
-        // New option → drop the previous option's committed goals so the first tick
-        // resolves a fresh path-nearest target for the region/item just chosen.
+        // New option → drop the previous option's committed goals, then capture
+        // decision telemetry, which COMMITS the resolved cluster goal (the exact
+        // target the controller will drive to) so the first tick needs no BFS.
         self.committed_cluster_goal = None;
         self.committed_item_goal = None;
+        self.last_decision = self.decision_telem_and_commit(rl_action);
+        if self.trace_enabled { self.trace.clear(); }
         let gamma = self.world_cfg.reward.option_gamma;
         let mut total_rew = 0.0f32;
         let mut discount = 1.0f32;
@@ -408,18 +422,30 @@ impl SimCore {
         // action "valid": the greedy eval policy commits to it, A* finds no path → Wait,
         // the agent never moves, the obs never changes, and argmax re-selects the same dead
         // action every decision (an absorbing stall — observed freezing the agent for 900+
-        // ticks). This is the same BFS decision_telem/resolve_nav_goal already run per
-        // option, so it adds no asymptotic cost.
-        let dist = nav::dist_field(&self.grid, agent.pos);
-        let reachable = |p: GridPos| nav::dist_at(&dist, &self.grid, p).is_some();
+        // ticks). The mask is always queried right after an obs build at the same agent
+        // position, so the obs cache normally supplies the field + clusters for free.
+        let computed;
+        let dist: &[i32] = if self.obs_cache_pos == Some(agent.pos) {
+            &self.obs_dist
+        } else {
+            computed = nav::dist_field(&self.grid, agent.pos);
+            &computed
+        };
+        let reachable = |p: GridPos| nav::dist_at(dist, &self.grid, p).is_some();
 
         if agent.gold_carried < AGENT_MAX_GOLD {
-            let clusters = find_clusters(
-                &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
-            );
+            let computed_clusters;
+            let clusters = if self.obs_cache_pos == Some(agent.pos) {
+                &self.obs_clusters
+            } else {
+                computed_clusters = find_clusters(
+                    &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
+                );
+                &computed_clusters
+            };
             for (k, slot) in mask.iter_mut().take(CLUSTER_K).enumerate() {
                 if let Some(c) = clusters[k].as_ref() {
-                    if c.nearest_reachable_gold(&dist, &self.grid).is_some() {
+                    if c.nearest_reachable_gold(dist, &self.grid).is_some() {
                         *slot = true;
                     }
                 }
@@ -447,16 +473,21 @@ impl SimCore {
         mask
     }
 
-    /// Rebuild the observation buffer from the current world state.
+    /// Rebuild the observation buffer from the current world state, refreshing the
+    /// shared dist-field/cluster cache (see the field docs).
     fn build_observation(&mut self) {
         let clusters = find_clusters(
             &self.gold_positions, self.grid.width as i32, self.grid.height as i32,
         );
+        let dist = nav::dist_field(&self.grid, self.agents[0].pos);
         let time_remaining = 1.0 - (self.tick as f32 / self.match_ticks.max(1) as f32);
         build_obs_into(
             &mut self.obs_buf, &self.agents[0],
-            &self.gold_positions, &self.items, &self.grid, &clusters, time_remaining,
+            &self.items, &self.grid, &clusters, &dist, time_remaining,
         );
+        self.obs_dist      = dist;
+        self.obs_clusters  = clusters;
+        self.obs_cache_pos = Some(self.agents[0].pos);
     }
 
     /// Resolve the RL action to a navigation goal and, subject to the movement
@@ -470,11 +501,7 @@ impl SimCore {
     /// and only steps a tile once it reaches `MOVE_ENERGY_STEP`. Base steps every other
     /// tick; a speed buff steps every tick — capped at one tile/tick so a speed move
     /// never teleports two tiles.
-    fn apply_rl_action(
-        &mut self,
-        rl_action: RlAction,
-        clusters:  &[Option<GoldCluster>; CLUSTER_K],
-    ) -> bool {
+    fn apply_rl_action(&mut self, rl_action: RlAction) -> bool {
         let nav_action = match rl_action {
             RlAction::Wait => { self.en_route = false; return false; }
             nav => nav,
@@ -490,7 +517,7 @@ impl SimCore {
         }
         self.agents[0].move_energy -= MOVE_ENERGY_STEP;
 
-        let Some(goal) = self.resolve_nav_goal(nav_action, clusters) else {
+        let Some(goal) = self.resolve_nav_goal(nav_action) else {
             self.en_route = false; // no valid target
             return false;
         };
@@ -515,13 +542,9 @@ impl SimCore {
     /// around walls) — the exact gold the obs reported and the mask permits — not the
     /// Chebyshev-nearest, which could be walled off and strand the controller on a
     /// `Wait` it can never escape. Resolved once per option and cached in
-    /// `committed_cluster_goal`, so the per-tick cost is a cheap membership check and
-    /// the BFS runs only on the option's first tick (or after the target is banked).
-    fn resolve_nav_goal(
-        &mut self,
-        action:   RlAction,
-        clusters: &[Option<GoldCluster>; CLUSTER_K],
-    ) -> Option<GridPos> {
+    /// `committed_cluster_goal` (normally pre-committed by `decision_telem_and_commit`
+    /// at the option boundary), so the per-tick cost is a cheap membership check.
+    fn resolve_nav_goal(&mut self, action: RlAction) -> Option<GridPos> {
         let pos = self.agents[0].pos;
         match action {
             RlAction::NavigateToCluster(k) => {
@@ -530,12 +553,21 @@ impl SimCore {
                         return Some(g);
                     }
                 }
+                // No valid committed goal (viewer fresh-decision path, or the
+                // committed gold was banked mid-option) — resolve from the current
+                // gold layout. Path-nearest reachable gold; Chebyshev fallback only
+                // if the whole region is walled off (the mask forbids that region
+                // under MaskablePPO, so it only matters for the unmasked path).
+                let clusters = self.clusters_at(pos);
                 let c = clusters.get(k as usize)?.as_ref()?;
-                let dist = nav::dist_field(&self.grid, pos);
-                // Path-nearest reachable gold; fall back to Chebyshev-nearest only if
-                // the whole region is walled off (the mask forbids that region under
-                // MaskablePPO, so this fallback only matters for the unmasked path).
-                let g = c.nearest_reachable_gold(&dist, &self.grid)
+                let computed;
+                let dist: &[i32] = if self.obs_cache_pos == Some(pos) {
+                    &self.obs_dist
+                } else {
+                    computed = nav::dist_field(&self.grid, pos);
+                    &computed
+                };
+                let g = c.nearest_reachable_gold(dist, &self.grid)
                     .or_else(|| c.nearest_gold(pos));
                 self.committed_cluster_goal = g;
                 g
@@ -548,15 +580,38 @@ impl SimCore {
         }
     }
 
-    /// Compute decision telemetry for a high-level action at the current state.
-    /// "Own region" is the fixed 3×3 region the agent currently stands in; the agent
-    /// "skips" local gold when that region holds collectible gold but it commits to a
-    /// different region instead. `chosen_dist` is the Chebyshev distance to the gold
-    /// it actually targets (−1 for non-gold actions).
-    fn decision_telem(&self, action: RlAction) -> DecisionTelem {
+    /// Gold regions for the current gold layout — the obs cache when valid at `pos`
+    /// (gold cannot change without a tick, and every tick rebuilds the obs).
+    fn clusters_at(&self, pos: GridPos) -> [Option<GoldCluster>; CLUSTER_K] {
+        if self.obs_cache_pos == Some(pos) {
+            self.obs_clusters.clone()
+        } else {
+            find_clusters(&self.gold_positions, self.grid.width as i32, self.grid.height as i32)
+        }
+    }
+
+    /// Compute decision telemetry for a high-level action at the current state, and
+    /// COMMIT the resolved cluster goal (`committed_cluster_goal`) — it is the exact
+    /// path-nearest reachable gold the controller will drive to, so resolving it here
+    /// saves the first-tick BFS. "Own region" is the fixed 3×3 region the agent
+    /// currently stands in; the agent "skips" local gold when that region holds
+    /// collectible gold but it commits to a different region instead. `chosen_dist`
+    /// is the true path distance to the gold it targets (−1 for non-gold actions).
+    fn decision_telem_and_commit(&mut self, action: RlAction) -> DecisionTelem {
         let pos = self.agents[0].pos;
         let (gw, gh) = (self.grid.width as i32, self.grid.height as i32);
-        let clusters = find_clusters(&self.gold_positions, gw, gh);
+        // At an option boundary the obs was just built at this position, so the
+        // cached field + clusters apply; compute fresh only on the cold path.
+        let cache_ok = self.obs_cache_pos == Some(pos);
+        let (computed_c, computed_d);
+        let clusters = if cache_ok { &self.obs_clusters } else {
+            computed_c = find_clusters(&self.gold_positions, gw, gh);
+            &computed_c
+        };
+        let field: &[i32] = if cache_ok { &self.obs_dist } else {
+            computed_d = nav::dist_field(&self.grid, pos);
+            &computed_d
+        };
         let own = region_of(pos, gw, gh);
         let own_has_gold =
             self.agents[0].gold_carried < AGENT_MAX_GOLD && clusters[own].is_some();
@@ -566,26 +621,27 @@ impl SimCore {
         // actions commit to gold; everything else is a non-gold goal. Uses the same
         // path-nearest reachable gold the controller will actually drive to, so the
         // reported `chosen_dist` matches the agent's real route.
-        let field = nav::dist_field(&self.grid, pos);
         let target: Option<(GridPos, Option<usize>)> = match action {
             RlAction::NavigateToCluster(k) => {
                 let kk = k as usize;
                 clusters.get(kk).and_then(|c| c.as_ref())
-                    .and_then(|c| c.nearest_reachable_gold(&field, &self.grid)
+                    .and_then(|c| c.nearest_reachable_gold(field, &self.grid)
                         .or_else(|| c.nearest_gold(pos)))
                     .map(|g| (g, Some(kk)))
             }
             _ => None,
         };
 
-        match target {
+        let telem = match target {
             Some((g, region)) => {
-                let chosen_dist = nav::dist_at(&field, &self.grid, g).unwrap_or(-1);
+                let chosen_dist = nav::dist_at(field, &self.grid, g).unwrap_or(-1);
                 let skipped_own = own_has_gold && matches!(region, Some(k) if k != own);
                 DecisionTelem { is_cluster: true, own_has_gold, skipped_own, chosen_dist }
             }
             None => DecisionTelem { is_cluster: false, own_has_gold, skipped_own: false, chosen_dist: -1 },
-        }
+        };
+        self.committed_cluster_goal = target.map(|(g, _)| g);
+        telem
     }
 
     /// Telemetry for the most recent high-level decision (set by `step_option`).
@@ -606,10 +662,16 @@ impl SimCore {
     fn nearest_reachable_item(
         &self, from: GridPos, pred: impl Fn(ItemKind) -> bool,
     ) -> Option<GridPos> {
-        let dist = nav::dist_field(&self.grid, from);
+        let computed;
+        let dist: &[i32] = if self.obs_cache_pos == Some(from) {
+            &self.obs_dist
+        } else {
+            computed = nav::dist_field(&self.grid, from);
+            &computed
+        };
         self.items.iter()
             .filter(|it| pred(it.kind))
-            .filter_map(|it| nav::dist_at(&dist, &self.grid, it.pos).map(|d| (d, it.pos)))
+            .filter_map(|it| nav::dist_at(dist, &self.grid, it.pos).map(|d| (d, it.pos)))
             .min_by_key(|&(d, _)| d)
             .map(|(_, p)| p)
     }

@@ -154,7 +154,8 @@ def run_stage(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stages", nargs="+", type=int, default=list(range(1, 4)),
                         metavar="N", help="Stages to run (default: 1 2 3)")
     parser.add_argument("--timesteps", type=int, default=None,

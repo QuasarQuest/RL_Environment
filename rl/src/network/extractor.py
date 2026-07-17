@@ -90,24 +90,6 @@ OBS_TOTAL = OBS_CROP_DIM + MM_DIM + CLUSTER_FEATURES  # 8692
 ACTION_SIZE = CLUSTER_K + 4  # 13
 
 
-# ── MLP extractor (legacy — flat 1-D observations) ───────────────────────────
-
-class AtbMlpExtractor(BaseFeaturesExtractor):
-    """LayerNorm-stabilised MLP. Kept for A/B comparison against the CNN."""
-
-    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 128):
-        super().__init__(observation_space, features_dim)
-        obs_dim = observation_space.shape[0]
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, 256), nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, features_dim), nn.ReLU(),
-        )
-
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.net(obs)
-
-
 # ── CNN + minimap + cluster extractor (slim v2) ───────────────────────────────
 
 class AtbCnnExtractor(BaseFeaturesExtractor):

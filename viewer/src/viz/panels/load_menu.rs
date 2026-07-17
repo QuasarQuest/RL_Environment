@@ -97,7 +97,6 @@ fn scan_policies() -> Vec<(String, String)> {
 pub fn spawn_load_menu(mut commands: Commands, state: Res<LoadMenuState>) {
     let bg     = ThemeColor::Background.resolve();
     let border = ThemeColor::Border.resolve();
-    let dim    = ThemeColor::TextDim.resolve();
 
     commands.spawn((
         UiRoot,
@@ -119,7 +118,14 @@ pub fn spawn_load_menu(mut commands: Commands, state: Res<LoadMenuState>) {
         BackgroundColor(bg),
         BorderColor::all(border),
         ZIndex(600),
-    )).with_children(|modal| {
+    )).with_children(|modal| build_menu_children(modal, &state));
+}
+
+/// Panel body — extracted so `toggle_load_menu` can rebuild it after a rescan.
+fn build_menu_children(modal: &mut ChildSpawnerCommands, state: &LoadMenuState) {
+    let border = ThemeColor::Border.resolve();
+    let dim    = ThemeColor::TextDim.resolve();
+    {
         modal.spawn((
             Text::new("Load Config & Policy"),
             TextFont { font_size: SIZE_LG, ..default() },
@@ -180,7 +186,7 @@ pub fn spawn_load_menu(mut commands: Commands, state: Res<LoadMenuState>) {
             footer_btn(footer, "Cancel",          ThemeColor::TextDim.resolve(),     LoadCancelBtn);
             footer_btn(footer, "Load & Restart",  ThemeColor::SuccessText.resolve(), LoadConfirmBtn);
         });
-    });
+    }
 }
 
 fn spawn_entry_btn<M: Component>(
@@ -240,11 +246,29 @@ fn footer_btn<M: Component>(
 // ── Systems ───────────────────────────────────────────────────────────────────
 
 pub fn toggle_load_menu(
-    keys:      Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<LoadMenuState>,
+    keys:         Res<ButtonInput<KeyCode>>,
+    mut state:    ResMut<LoadMenuState>,
+    mut commands: Commands,
+    panel_q:      Query<Entity, With<LoadMenuPanel>>,
 ) {
     if keys.just_pressed(KeyCode::KeyL) {
         state.visible = !state.visible;
+        if state.visible {
+            // Rescan on open so configs/runs exported while the viewer is running
+            // appear; rebuild the panel body only when the lists actually changed.
+            let configs  = scan_configs();
+            let policies = scan_policies();
+            if configs != state.configs || policies != state.policies {
+                state.configs  = configs;
+                state.policies = policies;
+                state.sel_config = state.sel_config.min(state.configs.len().saturating_sub(1));
+                state.sel_policy = state.sel_policy.min(state.policies.len().saturating_sub(1));
+                for e in panel_q.iter() {
+                    commands.entity(e).despawn_related::<Children>();
+                    commands.entity(e).with_children(|modal| build_menu_children(modal, &state));
+                }
+            }
+        }
     }
     if keys.just_pressed(KeyCode::Escape) && state.visible {
         state.visible = false;

@@ -1,15 +1,9 @@
 # configs/ppo/default.yaml
 # @package ppo
 #
-# PPO Hyperparameters — GTX 1650 Ti (4 GB VRAM), OBS_TOTAL=10222
-# Slim architecture v2: ~1.47M params total (was 13.9M, 9.1× reduction)
-#
-# VRAM budget (slim, 32 envs, n_steps=256):
-#   Rollout buffer : 32 × 256 steps × 10222 floats × 4 bytes ≈ 335 MB
-#   Policy + Adam  : ~10 MB   (was ~30 MB)
-#   Activations    : ~60 MB   (was ~250 MB)
-#   ─────────────────────────────────────────────────────────────────
-#   Total          : ~405 MB  ✓  (was ~1.2 GB)
+# PPO Hyperparameters — RTX 4070 Laptop (8 GB VRAM), OBS_TOTAL=8692.
+# Slim architecture v2 (~1.47M params). Training is GPU-update-bound: raising
+# n_envs does not raise FPS — tune n_epochs/batch_size instead.
 
 # ── Rollout ───────────────────────────────────────────────────────────────────
 n_steps: 256

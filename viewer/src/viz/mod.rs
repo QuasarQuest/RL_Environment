@@ -6,7 +6,6 @@ pub mod hud;
 pub mod panels;
 pub mod plugin;
 pub mod renderer;
-pub mod world;
 
 pub use plugin::VizPlugin;
 

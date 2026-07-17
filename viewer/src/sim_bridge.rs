@@ -3,17 +3,13 @@ use atb::engine::{SimCore, AgentState, ItemState, MAX_OPTION_TICKS};
 use atb::world::grid::Grid;
 use atb::entity::item::ItemKind;
 use atb::config::AGENT_MAX_GOLD;
-use atb::rl::action::{int_to_rl_action, ACTION_SIZE, ACTION_WAIT, CLUSTER_K};
+use atb::rl::action::{int_to_rl_action, ACTION_BASE, ACTION_SIZE, ACTION_WAIT};
 use atb::algorithm::behavior::goap;
 use crate::policy::OnnxPolicy;
 use crate::sim_config::{SimConfig, TickTimer};
-use crate::viz::events::RestartPending;
+use crate::viz::events::{ConfigLoaded, MapChanged, RestartPending};
 use crate::viz::grid_offset::GridOffset;
 use crate::viz::renderer::tile_renderer::{TileMarker, do_spawn_tiles};
-
-// Action indices — derived from CLUSTER_K so they track the RlAction ordering
-// in the sim (0..CLUSTER_K are region-nav slots; NavigateToBase then Wait follow).
-const ACTION_NAVIGATE_TO_BASE: u32 = CLUSTER_K as u32;       // 9
 
 pub const DEFAULT_CONFIG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/world/default.ron");
 const DEFAULT_ONNX_PATH:       &str = crate::ONNX_POLICY_PATH;
@@ -80,8 +76,9 @@ pub struct SimBridge {
     onnx_action:       Option<u32>,  // committed option action
     onnx_anchor_gold:  u8,           // gold_carried at option start (event detection)
     onnx_anchor_score: u32,          // score at option start
+    onnx_anchor_speed: u16,          // speed_buff at option start (buff-pickup event)
+    onnx_anchor_mult:  u8,           // mult_charge at option start
     onnx_option_ticks: u64,
-    onnx_moved:        bool,         // did the agent move on the previous tick
 }
 
 fn normalize_path(raw: &str) -> std::path::PathBuf {
@@ -108,8 +105,18 @@ impl SimBridge {
             onnx_action: None,
             onnx_anchor_gold: 0,
             onnx_anchor_score: 0,
+            onnx_anchor_speed: 0,
+            onnx_anchor_mult: 0,
             onnx_option_ticks: 0,
-            onnx_moved: false,
+        }
+    }
+
+    /// Cycle to the next policy mode, skipping ONNX when no policy is loaded
+    /// (selecting it would leave the agent emitting Wait forever).
+    pub fn cycle_mode(&mut self) {
+        self.mode = self.mode.next();
+        if self.mode == PolicyMode::Onnx && self.policy.is_none() {
+            self.mode = self.mode.next();
         }
     }
 
@@ -162,6 +169,8 @@ impl Plugin for SimBridgePlugin {
             .init_resource::<TickTimer>()
             .init_resource::<RestartPending>()
             .init_resource::<LoadRequest>()
+            .add_message::<MapChanged>()
+            .add_message::<ConfigLoaded>()
             .add_systems(Startup, setup_sim)
             .add_systems(Update, handle_load_request.before(crate::viz::SimSet))
             .add_systems(Update, step_sim.in_set(crate::viz::SimSet));
@@ -208,6 +217,7 @@ fn setup_sim(mut commands: Commands) {
     commands.insert_resource(bridge);
 }
 
+#[allow(clippy::too_many_arguments)] // Bevy system — params are injected resources/queries
 pub fn handle_load_request(
     mut req:      ResMut<LoadRequest>,
     mut commands: Commands,
@@ -216,6 +226,8 @@ pub fn handle_load_request(
     agent_q:      Query<Entity, With<AgentMarker>>,
     item_q:       Query<Entity, With<ItemMarker>>,
     tile_q:       Query<Entity, With<TileMarker>>,
+    mut map_ev:   MessageWriter<MapChanged>,
+    mut load_ev:  MessageWriter<ConfigLoaded>,
 ) {
     if !req.pending { return; }
     req.pending = false;
@@ -257,8 +269,11 @@ pub fn handle_load_request(
     do_spawn_tiles(&mut commands, &bridge, &offset);
 
     spawn_sim_entities(&mut commands, &bridge);
+    map_ev.write(MapChanged);
+    load_ev.write(ConfigLoaded);
 }
 
+#[allow(clippy::too_many_arguments)] // Bevy system — params are injected resources/queries
 pub fn step_sim(
     mut commands: Commands,
     mut bridge:  ResMut<SimBridge>,
@@ -266,6 +281,7 @@ pub fn step_sim(
     cfg:         Res<SimConfig>,
     time:        Res<Time>,
     mut restart: ResMut<RestartPending>,
+    mut map_ev:  MessageWriter<MapChanged>,
     item_q:      Query<Entity, With<ItemMarker>>,
 ) {
     if restart.0 {
@@ -280,6 +296,7 @@ pub fn step_sim(
         // the index-keyed marker pool so it matches, instead of carrying stale markers.
         for e in item_q.iter() { commands.entity(e).despawn(); }
         spawn_item_entities(&mut commands, &bridge);
+        map_ev.write(MapChanged); // reset() regenerated the map — repaint tiles
         restart.0 = false;
     }
 
@@ -288,6 +305,9 @@ pub fn step_sim(
     timer.0.tick(time.delta());
     let steps = timer.0.times_finished_this_tick();
     for _ in 0..steps {
+        // True while continuing an already-committed ONNX option — those ticks hold
+        // the sim's committed nav goals (step_committed) instead of re-resolving.
+        let mut continuing_option = false;
         let action = match bridge.mode {
             PolicyMode::Onnx => {
                 if bridge.sim.agents.is_empty() || bridge.policy.is_none() {
@@ -297,8 +317,9 @@ pub fn step_sim(
                     // action until the option ends (mirrors SimCore::step_option),
                     // so the option-trained policy is shown faithfully instead of
                     // re-querying — and thrashing — every tick.
-                    let agent_gold  = bridge.sim.agents[0].gold_carried;
-                    let agent_score = bridge.sim.agents[0].score;
+                    let agent = &bridge.sim.agents[0];
+                    let (agent_gold, agent_score) = (agent.gold_carried, agent.score);
+                    let (agent_speed, agent_mult) = (agent.speed_buff, agent.mult_charge);
                     let need_new = match bridge.onnx_action {
                         None => true,
                         Some(a) => {
@@ -306,18 +327,30 @@ pub fn step_sim(
                             || bridge.onnx_option_ticks >= MAX_OPTION_TICKS
                             || agent_gold  != bridge.onnx_anchor_gold  // pickup event
                             || agent_score != bridge.onnx_anchor_score // deposit event
-                            || !bridge.onnx_moved                      // arrived / blocked
+                            // Buff pickups end the option too (step_option: compare
+                            // with `>` — speed_buff counts down every tick, so only
+                            // an INCREASE marks a fresh pickup).
+                            || agent_speed > bridge.onnx_anchor_speed
+                            || agent_mult  > bridge.onnx_anchor_mult
+                            // Arrived / wall-blocked / no target. A cadence rest tick
+                            // keeps en_route true, so the base half-speed movement
+                            // does NOT end the option (the old position-unchanged
+                            // heuristic re-queried the policy every other tick).
+                            || !bridge.sim.en_route()
                         }
                     };
                     if need_new {
-                        let obs  = bridge.sim.obs_buf.to_vec();
                         let mask = bridge.sim.action_mask();
-                        let act  = bridge.policy.as_ref().unwrap().act_masked(&obs, &mask);
+                        let act  = bridge.policy.as_ref().unwrap()
+                            .act_masked(&bridge.sim.obs_buf, &mask);
                         bridge.onnx_action       = Some(act);
                         bridge.onnx_anchor_gold  = agent_gold;
                         bridge.onnx_anchor_score = agent_score;
+                        bridge.onnx_anchor_speed = agent_speed;
+                        bridge.onnx_anchor_mult  = agent_mult;
                         bridge.onnx_option_ticks = 0;
                     }
+                    continuing_option = !need_new;
                     bridge.onnx_action.unwrap_or(ACTION_WAIT)
                 }
             }
@@ -333,15 +366,15 @@ pub fn step_sim(
                     let agent = &bridge.sim.agents[0];
                     if agent.gold_carried >= AGENT_MAX_GOLD {
                         bridge.bt_target_cluster = None;
-                        if bridge.sim.tick % 50 == 0 {
+                        if bridge.sim.tick.is_multiple_of(50) {
                             debug!("[BT] tick={} full inventory → navigate_to_base", bridge.sim.tick);
                         }
-                        ACTION_NAVIGATE_TO_BASE
+                        ACTION_BASE
                     } else {
                         // Reselect when: (a) committed slot is gone, or (b) another cluster
                         // has gold that is meaningfully closer (hysteresis of 3 tiles prevents
                         // oscillation when clusters are equidistant).
-                        let slot_valid = bridge.bt_target_cluster.map_or(false, |k| {
+                        let slot_valid = bridge.bt_target_cluster.is_some_and(|k| {
                             use atb::engine::clusters::{chebyshev, find_clusters};
                             let golds: Vec<_> = bridge.sim.items.iter()
                                 .filter(|i| i.kind == ItemKind::Gold)
@@ -394,10 +427,11 @@ pub fn step_sim(
         };
         bridge.last_action = action;
         bridge.action_counts[action as usize] += 1;
-        // Track movement for the ONNX option-commitment logic (no-op for other modes).
-        let pos_before = bridge.sim.agents.first().map(|a| a.pos);
-        let (rew, done) = bridge.sim.step(action);
-        bridge.onnx_moved = bridge.sim.agents.first().map(|a| a.pos) != pos_before;
+        let (rew, done) = if continuing_option {
+            bridge.sim.step_committed(action)
+        } else {
+            bridge.sim.step(action)
+        };
         bridge.onnx_option_ticks += 1;
         bridge.episode_reward += rew;
         if done {
@@ -481,9 +515,9 @@ fn goap_action(sim: &atb::engine::SimCore) -> u32 {
         .ok()
         .and_then(|r| r.steps.into_iter().next());
 
-    match first_step.as_deref() {
+    match first_step {
         Some(goap::ACT_NAVIGATE_TO_GOLD) | Some(goap::ACT_COLLECT_GOLD) => bt_nearest_cluster(sim),
-        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) => ACTION_NAVIGATE_TO_BASE,
+        Some(goap::ACT_NAVIGATE_TO_BASE) | Some(goap::ACT_DROP_GOLD) => ACTION_BASE,
         _ => ACTION_WAIT,
     }
 }

@@ -9,11 +9,11 @@ VecNormalize and sets `reset_num_timesteps=False` on resume, so the step counter
 
 Step accounting
 ---------------
-SB3 trains until `num_timesteps` reaches `train.total_timesteps`, and resume keeps
-the saved count — so passing a total ≤ the model's current count would train nothing.
-This script therefore reads the run's furthest checkpoint (`checkpoints/step_<N>.zip`)
-and, by default, trains `--add` steps ON TOP of it. Use `--timesteps` to set an
-absolute target total instead.
+With `reset_num_timesteps=False` (the resume path), SB3 treats the value passed to
+`learn(total_timesteps=…)` as an ADDITIONAL budget: it adds the checkpoint's step
+count to it internally (`total_timesteps += num_timesteps`). So `--add` is passed
+straight through, and `--timesteps` (an absolute target) is converted to the
+remaining budget using the run's furthest checkpoint (`checkpoints/step_<N>.zip`).
 
 Usage
 -----
@@ -111,23 +111,25 @@ def main() -> None:
         run_dir, name, stage, _ts = find_latest_run(args.name)
 
     cur = current_steps(run_dir)
-    total = args.timesteps if args.timesteps is not None else cur + args.add
+    add = args.add if args.timesteps is None else args.timesteps - cur
     eval_best = run_dir / "eval_best"
 
     console.rule(f"[bold green]Resume — {run_dir.name}[/bold green]  [dim]stage {stage}[/dim]")
     console.print(f"  resume     {eval_best}")
     console.print(f"  current    ~{cur:,} steps (from latest checkpoint)")
-    console.print(f"  target     {total:,} total steps  "
-                  f"[dim]({'absolute --timesteps' if args.timesteps else f'+{args.add:,} via --add'})[/dim]")
-    if total <= cur:
-        console.print(f"  [bold yellow]⚠ target ({total:,}) ≤ current (~{cur:,}); "
-                      f"resume would train ~0 steps. Raise --add/--timesteps.[/bold yellow]")
+    console.print(f"  budget     {add:+,} steps → ~{cur + add:,} total  "
+                  f"[dim]({'absolute --timesteps' if args.timesteps else '--add'})[/dim]")
+    if add <= 0:
+        console.print(f"  [bold yellow]--timesteps ({args.timesteps:,}) ≤ current (~{cur:,}); "
+                      f"nothing to train.[/bold yellow]")
+        sys.exit(1)
 
+    # SB3 resume semantics: total_timesteps is the ADDITIONAL budget (see docstring).
     cmd = [
         "atb-train",
         f"env=stage{stage}",
         f"train.run_name={name}",
-        f"train.total_timesteps={total}",
+        f"train.total_timesteps={add}",
         f"+train.resume={eval_best}",
     ]
     console.print(f"  [dim]cmd[/dim]        {' '.join(cmd)}")

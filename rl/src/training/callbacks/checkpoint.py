@@ -4,7 +4,6 @@ from __future__ import annotations
 import copy
 from collections import deque
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
@@ -33,7 +32,7 @@ class CheckpointCallback(BaseCallback):
             self,
             save_freq: int,
             ckpt_dir: Path,
-            vec_normalize: Optional[VecNormalize] = None,
+            vec_normalize: VecNormalize | None = None,
             rolling_window: int = 100,
             verbose: int = 1,
             onnx_export: bool = False,

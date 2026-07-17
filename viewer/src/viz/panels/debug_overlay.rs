@@ -94,7 +94,9 @@ pub fn toggle_debug_overlay(
 }
 
 pub fn update_debug_overlay(
-    bridge:       Res<SimBridge>,
+    bridge:          Res<SimBridge>,
+    panel:           Query<&Node, With<DebugOverlay>>,
+    mut was_visible: Local<bool>,
     mut action_q: Query<
         (&mut Text, &mut TextColor),
         (With<DebugLastAction>, Without<DebugReward>, Without<DebugDist>),
@@ -102,7 +104,12 @@ pub fn update_debug_overlay(
     mut reward_q: Query<&mut Text, (With<DebugReward>, Without<DebugLastAction>, Without<DebugDist>)>,
     mut dist_q:   Query<&mut Text, (With<DebugDist>, Without<DebugLastAction>, Without<DebugReward>)>,
 ) {
-    if !bridge.is_changed() { return; }
+    // Skip the sort/format/text rebuild while hidden; refresh once on show so
+    // the numbers are current even when paused.
+    let visible = panel.iter().any(|n| n.display != Display::None);
+    let just_shown = visible && !*was_visible;
+    *was_visible = visible;
+    if !visible || (!bridge.is_changed() && !just_shown) { return; }
 
     let action     = int_to_rl_action(bridge.last_action);
     let action_col = action_color(action);
@@ -123,7 +130,7 @@ pub fn update_debug_overlay(
         .enumerate()
         .filter(|&(_, c)| c > 0)
         .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    ranked.sort_by_key(|&(_, c)| std::cmp::Reverse(c));
 
     let lines: String = ranked.iter()
         .take(5)

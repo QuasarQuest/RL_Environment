@@ -23,13 +23,14 @@ BatchVecEnv for the same reasoning on the training path.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from network.extractor import ACTION_SIZE, OBS_TOTAL as _OBS_TOTAL
+from network.extractor import ACTION_SIZE
+from network.extractor import OBS_TOTAL as _OBS_TOTAL
 
 
 def _find_project_root() -> Path:
@@ -55,12 +56,13 @@ _SCORE_FIELD = 4
 class AtbEnv(gym.Env):
     """Single-agent Gymnasium env backed by a 1-env PyBatchEnv."""
 
-    metadata = {"render_modes": []}
+    metadata: ClassVar[dict] = {"render_modes": []}
 
     def __init__(
             self,
             config_path: str = DEFAULT_CONFIG,
             stage: int = 1,
+            seed: int | None = None,
     ) -> None:
         super().__init__()
         config_path = str(Path(config_path).expanduser().resolve())
@@ -72,7 +74,8 @@ class AtbEnv(gym.Env):
         from env.batch_vec_env import _assert_rust_python_contract
         _assert_rust_python_contract(atb)
 
-        self._env = atb.PyBatchEnv(1, config_path)
+        self._config_path = config_path
+        self._env = atb.PyBatchEnv(1, config_path, seed)
         self._stage = stage
 
         self.observation_space = spaces.Box(
@@ -86,8 +89,13 @@ class AtbEnv(gym.Env):
 
     # ── Gymnasium interface ───────────────────────────────────────────────────
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
+        if seed is not None:
+            # The Rust env only takes a seed at construction — rebuild (cheap, 1 env)
+            # so reset(seed=…) actually reseeds the sim's RNG, not just gym's np_random.
+            import atb
+            self._env = atb.PyBatchEnv(1, self._config_path, seed)
         self._episode_reward = 0.0
         self._episode_length = 0
         self._score = 0.0

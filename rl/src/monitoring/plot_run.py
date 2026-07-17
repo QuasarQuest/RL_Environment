@@ -12,7 +12,6 @@ Save to PNG:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -22,6 +21,7 @@ try:
     import matplotlib.gridspec as gridspec
     import matplotlib.pyplot as plt
     import pandas as pd
+
     from monitoring.stats_reader import read_stats
 except ImportError as e:
     raise SystemExit(f"Missing dependency: {e}. Run: pip install matplotlib pandas h5py") from e
@@ -31,7 +31,7 @@ def _rolling(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window, min_periods=1).mean()
 
 
-def _plot_single(df: pd.DataFrame, name: str, window: int, out: Optional[Path]) -> None:
+def _plot_single(df: pd.DataFrame, name: str, window: int, out: Path | None) -> None:
     cols = ["episode_reward", "episode_length", "score"]
     titles = ["Episode Reward", "Episode Length", "Score"]
     present = [c for c in cols if c in df.columns]
@@ -84,7 +84,7 @@ def _plot_single(df: pd.DataFrame, name: str, window: int, out: Optional[Path]) 
     _finish(fig, out)
 
 
-def _plot_compare(paths: list[Path], window: int, metric: str, out: Optional[Path]) -> None:
+def _plot_compare(paths: list[Path], window: int, metric: str, out: Path | None) -> None:
     fig, ax = plt.subplots(figsize=(12, 5))
     cmap = plt.cm.tab10.colors  # type: ignore[attr-defined]
 
@@ -109,7 +109,7 @@ def _plot_compare(paths: list[Path], window: int, metric: str, out: Optional[Pat
     _finish(fig, out)
 
 
-def _finish(fig, out: Optional[Path]) -> None:
+def _finish(fig, out: Path | None) -> None:
     fig.tight_layout()
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ def plot(
     window: int = typer.Option(100, "--window", "-w", help="Rolling window size"),
     metric: str = typer.Option("episode_reward", "--metric", "-m", help="Metric for compare mode"),
     pattern: str = typer.Option("*.h5", "--pattern", help="Glob pattern for compare mode"),
-    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Save PNG instead of showing"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Save PNG instead of showing"),
 ) -> None:
     """Plot training stats — single run or multi-run comparison."""
     if compare or path.is_dir():

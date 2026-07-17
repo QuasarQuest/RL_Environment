@@ -17,7 +17,7 @@ pub fn init_pan_state(mut commands: Commands) {
 }
 
 pub fn spawn_camera(mut commands: Commands) {
-    commands.spawn((Camera2d::default(), MainCamera));
+    commands.spawn((Camera2d, MainCamera));
 }
 
 pub fn fit_camera_to_grid(
@@ -36,6 +36,19 @@ pub fn fit_camera_to_grid(
         ortho.scale = scale_x.max(scale_y).clamp(config::ZOOM_MIN, config::ZOOM_MAX);
     }
     cam.translation = Vec3::ZERO;
+}
+
+/// Refit after a config load — the new map's dimensions may not fit the old zoom.
+/// Restart keeps the user's zoom/pan (same dimensions), so only loads refit.
+pub fn refit_camera_on_load(
+    mut ev:  MessageReader<crate::viz::events::ConfigLoaded>,
+    bridge:  Res<SimBridge>,
+    windows: Query<&Window>,
+    cam:     Single<&mut Transform, With<MainCamera>>,
+    proj:    Single<&mut Projection, With<MainCamera>>,
+) {
+    if ev.read().next().is_none() { return; }
+    fit_camera_to_grid(bridge, windows, cam, proj);
 }
 
 pub fn camera_controls(

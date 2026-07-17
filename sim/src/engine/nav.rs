@@ -33,7 +33,7 @@ const DIRS: [(i32, i32, Dir); 8] = [
 ];
 
 fn is_walkable(grid: &Grid, x: i32, y: i32) -> bool {
-    grid.get(x, y).map_or(false, |t| t.is_walkable())
+    grid.get(x, y).is_some_and(|t| t.is_walkable())
 }
 
 // Diagonal moves require both adjacent cardinal tiles to be walkable so the agent
@@ -202,7 +202,7 @@ pub fn navigate_action(
     // the agent freezes mid-map, re-selecting the same nav goal forever (the
     // "valid A* path but agent never moves" bug).
     let off_path = cache.path.front()
-        .map_or(false, |&n| chebyshev(agent.pos, n) != 1);
+        .is_some_and(|&n| chebyshev(agent.pos, n) != 1);
     if cache.cached_goal != Some(target) || cache.path.is_empty() || off_path {
         cache.path        = astar(grid, agent.pos, target);
         cache.cached_goal = Some(target);

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 # HDF5 ≥1.10 takes an advisory flock() on open. With the trainer writing while a
 # read-only monitor (live_monitor / stats_reader / plot_run) polls the same file,

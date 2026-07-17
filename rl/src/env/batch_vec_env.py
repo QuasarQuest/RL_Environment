@@ -32,14 +32,15 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
-from network.extractor import ACTION_SIZE, OBS_TOTAL as _OBS_TOTAL
+from network.extractor import ACTION_SIZE
+from network.extractor import OBS_TOTAL as _OBS_TOTAL
 
 _OBS_DTYPE = np.float32
 _OBS_FLAT_SHAPE = (_OBS_TOTAL,)
@@ -83,12 +84,16 @@ class BatchVecEnv(VecEnv):
             n_envs: int,
             config_path: str,
             stage: int = 1,
+            seed: int | None = None,
     ) -> None:
         import atb
 
         _assert_rust_python_contract(atb)
 
-        self._batch: Any = atb.PyBatchEnv(n_envs, config_path)
+        # Rust seeds env i with seed + i (reproducible batch); None → OS entropy.
+        self._batch: Any = atb.PyBatchEnv(n_envs, config_path, seed)
+        self._config_path = config_path
+        self._seed = seed
         self._stage = stage
 
         # Flat 1D observation space — AtbCnnExtractor splits crop + minimap + cluster features.
@@ -102,7 +107,7 @@ class BatchVecEnv(VecEnv):
         self._ep_rewards = np.zeros(n_envs, dtype=np.float32)
         self._ep_lengths = np.zeros(n_envs, dtype=np.int32)
 
-        self._pending_actions: Optional[np.ndarray] = None
+        self._pending_actions: np.ndarray | None = None
 
         # ── Profiling state ──────────────────────────────────────────────────
         # _t_sim   : cumulative wall-time spent in Rust step_batch FFI call.
@@ -289,8 +294,15 @@ class BatchVecEnv(VecEnv):
         (n_envs,). Drives the SMDP γ^k cross-option discount (see SmdpRolloutBuffer)."""
         return np.asarray(self._batch.option_ticks(), dtype=np.float32)
 
-    def seed(self, seed: Optional[int] = None) -> list[Optional[int]]:
-        return [None] * self.num_envs
+    def seed(self, seed: int | None = None) -> list[int | None]:
+        if seed is not None and seed != self._seed:
+            # The Rust batch takes its seed at construction — rebuild to reseed.
+            import atb
+            self._batch = atb.PyBatchEnv(self.num_envs, self._config_path, seed)
+            self._seed = seed
+        if self._seed is None:
+            return [None] * self.num_envs
+        return [self._seed + i for i in range(self.num_envs)]
 
     def render(self, mode: str = "human") -> None:
         return None

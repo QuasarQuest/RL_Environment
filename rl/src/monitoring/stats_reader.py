@@ -14,9 +14,9 @@ Columns produced by `EpisodeStatsCallback`:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 # Read-only, but disable HDF5's advisory lock so a reader never holds a lock that
 # could block the trainer's concurrent append. Must precede the h5py import.

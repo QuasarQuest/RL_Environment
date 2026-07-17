@@ -23,7 +23,7 @@ pub fn tick_buffs(agents: &mut [AgentState]) {
 /// `Wait` and already-on-goal do not. Movement is one tile/tick (the move-energy
 /// cadence upstream decides whether to step), so a move can't overshoot a turn.
 pub fn apply_action(
-    agents:  &mut Vec<AgentState>,
+    agents:  &mut [AgentState],
     grid:    &Grid,
     idx:     usize,
     action:  Action,
@@ -43,7 +43,7 @@ pub fn apply_action(
 /// Auto-deposit — runs every tick for the agent standing on its base. Banks all
 /// carried gold; a held multiplier charge doubles this deposit's value and is then
 /// consumed (one charge per deposit).
-pub fn auto_deposit(agents: &mut Vec<AgentState>, grid: &Grid) {
+pub fn auto_deposit(agents: &mut [AgentState], grid: &Grid) {
     for a in agents {
         if a.gold_carried == 0 { continue; }
         if !matches!(grid.get(a.pos.x, a.pos.y), Some(Tile::Base(_))) { continue; }

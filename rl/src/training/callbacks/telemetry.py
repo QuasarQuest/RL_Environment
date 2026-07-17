@@ -46,7 +46,7 @@ class PolicyTelemetryCallback(BaseCallback):
         self._optlen_sum = 0.0
         self._optlen_n = 0
 
-    def _find_telemetry_env(self) -> "BatchVecEnv | None":
+    def _find_telemetry_env(self) -> BatchVecEnv | None:
         """Unwrap VecNormalize etc. to the env exposing decision_telemetry()."""
         env = self.training_env
         seen = 0

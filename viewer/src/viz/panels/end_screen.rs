@@ -82,8 +82,10 @@ pub fn show_end_screen(
 ) {
     if !bridge.is_changed() { return; }
     let game_over = bridge.game_over;
+    let want = if game_over { Display::Flex } else { Display::None };
     for mut node in query.iter_mut() {
-        node.display = if game_over { Display::Flex } else { Display::None };
+        // Write only on transition (unconditional writes relayout every frame).
+        if node.display != want { node.display = want; }
     }
     if game_over {
         // Find leading team.
@@ -105,9 +107,12 @@ pub fn handle_restart_button(
 }
 
 pub fn handle_quit_button(
-    btn_q: Query<&Interaction, (Changed<Interaction>, With<QuitButton>)>,
+    btn_q:    Query<&Interaction, (Changed<Interaction>, With<QuitButton>)>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for interaction in btn_q.iter() {
-        if *interaction == Interaction::Pressed { std::process::exit(0); }
+        // AppExit runs Bevy's shutdown (Drop impls, window teardown) —
+        // std::process::exit would skip all of it.
+        if *interaction == Interaction::Pressed { exit.write(AppExit::Success); }
     }
 }

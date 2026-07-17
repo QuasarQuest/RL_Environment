@@ -60,9 +60,11 @@ pub fn update_tooltip(
     let Ok((camera, cam_tf)) = cam_q.single() else { return };
     let Ok((mut panel_node, mut vis)) = panel.single_mut() else { return };
 
+    // Hide only on transition — an unconditional write every non-hover frame
+    // marks the Node changed and forces a UI relayout.
     let Some(cursor_px) = window.cursor_position() else {
-        panel_node.display = Display::None;
-        *vis = Visibility::Hidden;
+        if panel_node.display != Display::None { panel_node.display = Display::None; }
+        if *vis != Visibility::Hidden { *vis = Visibility::Hidden; }
         return;
     };
 
@@ -70,8 +72,8 @@ pub fn update_tooltip(
     let world_cursor = match camera.viewport_to_world_2d(cam_tf, cursor_px) {
         Ok(w)  => w,
         Err(_) => {
-            panel_node.display = Display::None;
-            *vis = Visibility::Hidden;
+            if panel_node.display != Display::None { panel_node.display = Display::None; }
+            if *vis != Visibility::Hidden { *vis = Visibility::Hidden; }
             return;
         }
     };
@@ -120,6 +122,6 @@ pub fn update_tooltip(
         }
     }
 
-    panel_node.display = Display::None;
-    *vis = Visibility::Hidden;
+    if panel_node.display != Display::None { panel_node.display = Display::None; }
+    if *vis != Visibility::Hidden { *vis = Visibility::Hidden; }
 }

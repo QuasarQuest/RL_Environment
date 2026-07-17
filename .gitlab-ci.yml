@@ -1,0 +1,93 @@
+# GitLab CI — mirrors ./checker.bash (the local/pre-commit gate) so CI and dev
+# runs are identical: ruff + pyright over rl/, clippy -D warnings + tests over
+# both crates, plus an end-to-end Rust↔Python contract / determinism / short
+# CPU-training smoke (rl/scripts/ci_smoke.py).
+#
+# Assumes docker-executor runners with network access. The heavy python job
+# downloads CPU-only torch on its first run; the pip/cargo caches make
+# subsequent pipelines fast.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+stages:
+  - lint
+  - test
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cache/cargo
+  RUSTUP_HOME: $CI_PROJECT_DIR/.cache/rustup
+  PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+  PYRIGHT_PYTHON_ENV_DIR: $CI_PROJECT_DIR/.cache/pyright
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+# Fast first gate — pure lint, no compiled deps.
+python:ruff:
+  stage: lint
+  image: python:3.12
+  interruptible: true
+  cache:
+    key: ruff
+    paths: [.cache/pip]
+  script:
+    - pip install "ruff>=0.15"
+    - ruff check rl/src rl/scripts
+
+# Clippy (deny warnings) + tests for both crates. The viewer (Bevy) needs the
+# usual Linux system libs at build time.
+rust:checks:
+  stage: test
+  image: rust:1.95
+  interruptible: true
+  cache:
+    key:
+      files: [Cargo.lock]
+      prefix: rust
+    paths: [.cache/cargo, target]
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+      pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+  script:
+    - cargo clippy -p algorithm_test_bed --all-features -- -D warnings
+    - cargo clippy -p viewer -- -D warnings
+    - cargo test -p algorithm_test_bed --all-features --quiet
+
+# Pyright over the full dependency stack + the end-to-end smoke. The atb
+# extension is built here (not in the rust job) so it compiles against THIS
+# image's CPython 3.12 — the extension ABI is interpreter-version-specific.
+python:typecheck-smoke:
+  stage: test
+  image: python:3.12
+  interruptible: true
+  cache:
+    key:
+      files: [rl/pyproject.toml, Cargo.lock]
+      prefix: py
+    paths: [.cache/pip, .cache/cargo, .cache/rustup, .cache/pyright]
+  before_script:
+    - curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.95.0
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    # Env at rl/.venv — the path pyrightconfig.json and checker.bash expect.
+    - python -m venv rl/.venv
+    - rl/.venv/bin/pip install --upgrade pip
+    # CPU-only torch first so the CUDA build is never pulled in CI.
+    - rl/.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+    - rl/.venv/bin/pip install -e ./rl[dev]
+    # Build + install the atb extension — same recipe as local dev
+    # (cargo build --features python, then copy into site-packages).
+    - cargo build -p algorithm_test_bed --release --lib --features python
+    - SITE=$(rl/.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+    - mkdir -p "$SITE/atb"
+    - cp target/release/libatb.so "$SITE/atb/atb.cpython-312-x86_64-linux-gnu.so"
+    - cp sim/atb.pyi "$SITE/atb/__init__.pyi"
+    - |
+      printf 'from .atb import *\n\n__doc__ = atb.__doc__\nif hasattr(atb, "__all__"):\n    __all__ = atb.__all__\n' > "$SITE/atb/__init__.py"
+    - touch "$SITE/atb/py.typed"
+  script:
+    - ./checker.bash python
+    - rl/.venv/bin/python rl/scripts/ci_smoke.py
