@@ -1,9 +1,13 @@
 # configs/ppo/default.yaml
 # @package ppo
 #
-# PPO Hyperparameters — RTX 4070 Laptop (8 GB VRAM), OBS_TOTAL=8692.
-# Slim architecture v2 (~1.47M params). Training is GPU-update-bound: raising
-# n_envs does not raise FPS — tune n_epochs/batch_size instead.
+# PPO Hyperparameters — RTX 5090 Laptop (24 GB VRAM), OBS_TOTAL=8692.
+# Slim architecture v2 (~1.47M params). On this GPU training is env-stepping-
+# bound, not GPU-update-bound: 8x batch_size/4x n_steps left FPS unchanged
+# (~8k), while raising n_envs 128->512 got ~+25% (sub-linear — rollout
+# collection doesn't scale cleanly with env count). Tune n_envs first; only
+# reach for batch_size/n_epochs once GPU util stops sitting idle between
+# update bursts (check with rl/scripts/profile_training.py).
 
 # ── Rollout ───────────────────────────────────────────────────────────────────
 n_steps: 256

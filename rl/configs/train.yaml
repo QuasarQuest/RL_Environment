@@ -28,9 +28,6 @@ train:
   plot_freq: 100_000
 
 hydra:
-  job:
-    env_set:
-      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True,max_split_size_mb:128,garbage_collection_threshold:0.7,roundup_power2_divisions:16"
   run:
     # Run dir IS the training output dir — Hydra's .hydra/ config snapshot
     # lands here alongside checkpoints/, tensorboard/, eval_best/, etc.
