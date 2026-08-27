@@ -41,7 +41,7 @@ python:ruff:
 # usual Linux system libs at build time.
 rust:checks:
   stage: test
-  image: rust:1.95
+  image: rust:1.98
   interruptible: true
   cache:
     key:
@@ -70,7 +70,7 @@ python:typecheck-smoke:
       prefix: py
     paths: [.cache/pip, .cache/cargo, .cache/rustup, .cache/pyright]
   before_script:
-    - curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.95.0
+    - curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.0
     - export PATH="$CARGO_HOME/bin:$PATH"
     # Env at rl/.venv — the path pyrightconfig.json and checker.bash expect.
     - python -m venv rl/.venv
