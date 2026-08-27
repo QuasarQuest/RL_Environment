@@ -16,6 +16,9 @@ class PyBatchEnv:
     # ── Reset ──────────────────────────────────────────────────────────────
     def reset_all(self) -> bytearray: ...
     def reset_env(self, i: int) -> bytearray: ...
+    # Returns a compact bytearray for just `indices`, in order (len(indices) *
+    # obs_total() * 4 bytes) — not the full n_envs buffer.
+    def reset_batch(self, indices: list[int]) -> bytearray: ...
 
     # ── Step ───────────────────────────────────────────────────────────────
     # Returns (obs_bytearray, rewards, dones); reshape obs to (n_envs, obs_total()).

@@ -111,6 +111,17 @@ impl BatchEnv {
         self.masks[mstart..mstart + ACTION_SIZE].copy_from_slice(&self.envs[i].action_mask());
     }
 
+    /// Reset multiple envs in one call. The reset itself is cheap (see reset_env) —
+    /// this exists to collapse what would otherwise be one PyO3/FFI call per done env
+    /// (measured ~120us/call, dominated by call overhead, not the reset) into one call
+    /// per step_wait. `indices` are assumed distinct (they come from `dones`, which
+    /// each env sets at most once per step).
+    pub fn reset_batch(&mut self, indices: &[usize]) {
+        for &i in indices {
+            self.reset_env(i);
+        }
+    }
+
     // ── Step ───────────────────────────────────────────────────────────────────
 
     /// Step all envs in parallel. Returns (&rews, &dones).

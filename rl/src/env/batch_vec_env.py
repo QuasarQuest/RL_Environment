@@ -193,7 +193,8 @@ class BatchVecEnv(VecEnv):
         self._ep_lengths += 1
 
         infos: list[dict[str, Any]] = [{} for _ in range(self.num_envs)]
-        for i in np.where(dones)[0]:
+        done_idx = np.where(dones)[0]
+        for i in done_idx:
             infos[i]["terminal_observation"] = obs[i].copy()
             # Every episode end is a match-timer truncation (see module docstring),
             # so flag it as such — SB3 bootstraps V(terminal_observation) only when
@@ -206,10 +207,15 @@ class BatchVecEnv(VecEnv):
             # Read true score from Rust before reset.
             infos[i]["score"] = self._rust_score(int(i))
 
-            new_ba = self._batch.reset_env(int(i))
-            obs[i] = np.frombuffer(new_ba, dtype=_OBS_DTYPE).reshape(_OBS_TOTAL)
             self._ep_rewards[i] = 0.0
             self._ep_lengths[i] = 0
+
+        # One FFI call for all done envs instead of one per env — reset_env's own
+        # work is cheap, the per-call overhead isn't (see BatchEnv::reset_batch).
+        if len(done_idx) > 0:
+            new_ba = self._batch.reset_batch(done_idx.tolist())
+            new_obs = np.frombuffer(new_ba, dtype=_OBS_DTYPE).reshape(len(done_idx), _OBS_TOTAL)
+            obs[done_idx] = new_obs
 
         # No defensive copy — see _ba_to_obs: obs is a view over this step's
         # freshly-allocated bytearray, and SB3 copies it into the rollout buffer.

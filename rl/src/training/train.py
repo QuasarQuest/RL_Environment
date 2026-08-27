@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import cast
 
 import hydra
+import torch
 import torch.nn as nn
 from dotenv import load_dotenv
 from hydra.core.hydra_config import HydraConfig
@@ -156,6 +157,11 @@ def _resolve_resume(model_path: str) -> tuple[str, Path]:
 
 
 load_dotenv()
+
+# Categorical.__init__ validates every action's support on construction by default —
+# measured at ~11% of a profiled training run (9,600 distribution constructions/rollout).
+# MaskablePPO already constrains via action_masks; skip the redundant check.
+torch.distributions.Distribution.set_default_validate_args(False)
 
 # force_terminal keeps Rich colour/styling when PyCharm runs this as a Python
 # config (stdout is not a TTY there, so auto-detection would strip ANSI).

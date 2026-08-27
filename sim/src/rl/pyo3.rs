@@ -86,6 +86,21 @@ impl PyBatchEnv {
         Self::slice_to_bytearray(py, &self.inner.obs_flat[start..start + OBS_TOTAL])
     }
 
+    /// Reset several envs in one FFI call — collapses what would otherwise be one
+    /// reset_env() call per done env per step_wait (measured as real overhead: 8,869
+    /// calls / ~1.07s in a 300k-timestep profile). Returns a compact bytearray of just
+    /// the given envs' post-reset obs, in `indices` order (len(indices) * OBS_TOTAL * 4
+    /// bytes) — caller scatters each chunk back into obs[indices[k]].
+    pub fn reset_batch<'py>(&mut self, py: Python<'py>, indices: Vec<usize>) -> Bound<'py, PyByteArray> {
+        self.inner.reset_batch(&indices);
+        let mut out = Vec::with_capacity(indices.len() * OBS_TOTAL);
+        for &i in &indices {
+            let start = i * OBS_TOTAL;
+            out.extend_from_slice(&self.inner.obs_flat[start..start + OBS_TOTAL]);
+        }
+        Self::slice_to_bytearray(py, &out)
+    }
+
     // ── Step ──────────────────────────────────────────────────────────────────
 
     /// Step all envs in parallel. Returns (obs_bytearray, rewards, dones).

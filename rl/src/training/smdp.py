@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
 from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
 
+from training.gpu_buffer import GpuMaskableSampleMixin, GpuPpoSampleMixin
+
 # At runtime the mixin is combined with a concrete RolloutBuffer subclass (see
 # SmdpRolloutBuffer / SmdpMaskableRolloutBuffer), inheriting gamma, gae_lambda,
 # buffer_size, n_envs, values, rewards, advantages, returns, … from it. Declaring
@@ -82,12 +84,14 @@ class _SmdpGaeMixin(_BufBase):
         self.returns = self.advantages + self.values
 
 
-class SmdpRolloutBuffer(_SmdpGaeMixin, RolloutBuffer):
-    """SMDP-discounted rollout buffer for plain PPO."""
+class SmdpRolloutBuffer(_SmdpGaeMixin, GpuPpoSampleMixin, RolloutBuffer):
+    """SMDP-discounted rollout buffer for plain PPO, with GPU-resident minibatch
+    sampling (see training.gpu_buffer)."""
 
 
-class SmdpMaskableRolloutBuffer(_SmdpGaeMixin, MaskableRolloutBuffer):
-    """SMDP-discounted rollout buffer for MaskablePPO."""
+class SmdpMaskableRolloutBuffer(_SmdpGaeMixin, GpuMaskableSampleMixin, MaskableRolloutBuffer):
+    """SMDP-discounted rollout buffer for MaskablePPO, with GPU-resident minibatch
+    sampling (see training.gpu_buffer)."""
 
 
 def smdp_buffer_class(algo: str):
